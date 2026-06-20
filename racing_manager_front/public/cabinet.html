@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Личный кабинет — Sport Trails Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 text-slate-900">
+
+<div class="flex h-screen">
+
+  <!-- Sidebar -->
+  <aside class="w-64 bg-slate-900 text-white flex flex-col">
+    <div class="p-5 text-xl font-bold border-b border-slate-700">
+      Trails Admin
+    </div>
+
+    <nav class="flex-1 p-4 space-y-2 overflow-y-auto">
+      <a href="#" class="block px-3 py-2 rounded hover:bg-slate-700">🏁 Календарь</a>
+      <a href="#" class="block px-3 py-2 rounded">📰 Новости</a>
+      <a href="#" class="block px-3 py-2 rounded">🗺️ Трассы</a>
+      <a href="#" class="block px-3 py-2 rounded bg-slate-700">👤 Личный кабинет</a>
+      <a href="#" class="block px-3 py-2 rounded hover:bg-slate-700">📊 Очки / Кубки</a>
+      <a href="#" class="block px-3 py-2 rounded hover:bg-slate-700">📥 Заявки</a>
+    </nav>
+
+    <div class="p-4 text-xs text-slate-400 border-t border-slate-700">
+      Profile Module v1
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="flex-1 flex flex-col">
+
+    <!-- Ads -->
+    <div class="h-16 bg-yellow-200 flex items-center justify-center text-sm font-medium border-b">
+      Google Ads / Sponsorship Area
+    </div>
+
+    <main class="flex-1 overflow-y-auto p-6 space-y-6">
+
+      <!-- Header -->
+      <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold">Личный кабинет</h1>
+        <button class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+          Редактировать профиль
+        </button>
+      </div>
+
+      <!-- Top profile block -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Avatar + basic info -->
+        <div class="bg-white rounded-xl shadow p-6 flex flex-col items-center text-center">
+          <div class="w-28 h-28 rounded-full bg-cover bg-center mb-4"
+               style="background-image:url('https://images.unsplash.com/photo-1502685104226-ee32379fefbe?auto=format&fit=crop&w=300&q=60');"></div>
+
+          <h2 class="text-xl font-bold">Иван Петров</h2>
+          <p class="text-sm text-slate-500">ivan.petrov@email.com</p>
+          <p class="text-xs text-slate-400 mt-1">TEAM: Alpine Wolves</p>
+
+          <div class="mt-4 flex gap-2">
+            <span class="text-xs bg-slate-200 px-2 py-1 rounded">RUN</span>
+            <span class="text-xs bg-slate-200 px-2 py-1 rounded">SKI</span>
+          </div>
+        </div>
+
+        <!-- Personal data -->
+        <div class="bg-white rounded-xl shadow p-6">
+          <h3 class="font-bold mb-4">Личные данные</h3>
+
+          <div class="space-y-2 text-sm">
+            <div><span class="text-slate-500">Город:</span> Vienna</div>
+            <div><span class="text-slate-500">Пол:</span> M</div>
+            <div><span class="text-slate-500">Год рождения:</span> 1995</div>
+          </div>
+
+          <h3 class="font-bold mt-6 mb-2">Антропометрия</h3>
+          <div class="space-y-2 text-sm">
+            <div><span class="text-slate-500">Рост:</span> 182 см</div>
+            <div><span class="text-slate-500">Вес:</span> 76 кг</div>
+          </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="bg-white rounded-xl shadow p-6">
+          <h3 class="font-bold mb-4">Статистика</h3>
+
+          <div class="grid grid-cols-2 gap-4 text-center">
+            <div class="bg-slate-50 p-3 rounded">
+              <div class="text-xl font-bold">12</div>
+              <div class="text-xs text-slate-500">Гонок</div>
+            </div>
+            <div class="bg-slate-50 p-3 rounded">
+              <div class="text-xl font-bold">5</div>
+              <div class="text-xs text-slate-500">Побед</div>
+            </div>
+            <div class="bg-slate-50 p-3 rounded">
+              <div class="text-xl font-bold">340</div>
+              <div class="text-xs text-slate-500">Очков</div>
+            </div>
+            <div class="bg-slate-50 p-3 rounded">
+              <div class="text-xl font-bold">3</div>
+              <div class="text-xs text-slate-500">Кубка</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Widgets row -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- My races -->
+        <div class="bg-white rounded-xl shadow p-6">
+          <h3 class="font-bold mb-4">Мои гонки</h3>
+
+          <div class="space-y-3 text-sm">
+            <div class="flex justify-between border-b pb-2">
+              <span>Winter Sprint Cup</span>
+              <span class="text-green-600">FINISHED</span>
+            </div>
+            <div class="flex justify-between border-b pb-2">
+              <span>Forest Marathon</span>
+              <span class="text-blue-600">REGISTERED</span>
+            </div>
+            <div class="flex justify-between">
+              <span>Alpine Challenge</span>
+              <span class="text-red-500">DNS</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Results -->
+        <div class="bg-white rounded-xl shadow p-6">
+          <h3 class="font-bold mb-4">Результаты</h3>
+
+          <table class="w-full text-sm">
+            <thead class="text-left text-slate-500 border-b">
+              <tr>
+                <th>Событие</th>
+                <th>Место</th>
+                <th>Время</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-b">
+                <td class="py-2">Winter Sprint</td>
+                <td>2</td>
+                <td>00:32:14</td>
+              </tr>
+              <tr class="border-b">
+                <td class="py-2">City Trail</td>
+                <td>5</td>
+                <td>01:12:44</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+
+      <!-- Cup points -->
+      <div class="bg-white rounded-xl shadow p-6">
+        <h3 class="font-bold mb-4">Кубки и очки</h3>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="bg-slate-50 p-4 rounded">
+            <div class="font-bold">Winter Cup 2026</div>
+            <div class="text-sm text-slate-500">180 очков</div>
+          </div>
+          <div class="bg-slate-50 p-4 rounded">
+            <div class="font-bold">Regional Cup</div>
+            <div class="text-sm text-slate-500">120 очков</div>
+          </div>
+          <div class="bg-slate-50 p-4 rounded">
+            <div class="font-bold">City League</div>
+            <div class="text-sm text-slate-500">40 очков</div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <footer class="h-12 bg-slate-900 text-slate-300 flex items-center justify-center text-xs">
+      © 2026 Sport Trails Platform
+    </footer>
+
+  </div>
+</div>
+
+</body>
+</html>
