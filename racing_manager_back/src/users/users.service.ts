@@ -1,0 +1,122 @@
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+
+export type AppUser = {
+  id: string;
+  authentikId: string;
+  userName: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+@Injectable()
+export class UsersService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async registerFromOidcProfile(profile: {
+    sub: string;
+    username?: string;
+    email?: string;
+    name?: string;
+  }): Promise<{ user: AppUser; isNew: boolean }> {
+    const existing = await this.prisma.user.findUnique({
+      where: { authentikId: profile.sub },
+    });
+
+    const firstName = this.extractFirstName(profile.name);
+    const lastName = this.extractLastName(profile.name);
+    const userName = this.resolveUserName(profile.username, profile.email);
+
+    const dbUser = existing
+      ? await this.prisma.user.update({
+          where: { authentikId: profile.sub },
+          data: {
+            userName,
+            email: profile.email,
+            firstName,
+            lastName,
+          },
+        })
+      : await this.prisma.user.create({
+          data: {
+            authentikId: profile.sub,
+            userName,
+            email: profile.email,
+            firstName,
+            lastName,
+          },
+        });
+
+    return {
+      user: this.toAppUser(dbUser),
+      isNew: !existing,
+    };
+  }
+
+  async upsertFromOidcProfile(profile: {
+    sub: string;
+    username?: string;
+    email?: string;
+    name?: string;
+  }): Promise<AppUser> {
+    const { user } = await this.registerFromOidcProfile(profile);
+    return user;
+  }
+
+  async findBySub(sub: string): Promise<AppUser | null> {
+    const dbUser = await this.prisma.user.findUnique({
+      where: { authentikId: sub },
+    });
+    return dbUser ? this.toAppUser(dbUser) : null;
+  }
+
+  private toAppUser(dbUser: {
+    id: string;
+    authentikId: string;
+    userName: string;
+    email: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }): AppUser {
+    return {
+      id: dbUser.id,
+      authentikId: dbUser.authentikId,
+      userName: dbUser.userName,
+      email: dbUser.email ?? undefined,
+      firstName: dbUser.firstName ?? undefined,
+      lastName: dbUser.lastName ?? undefined,
+      createdAt: dbUser.createdAt.toISOString(),
+      updatedAt: dbUser.updatedAt.toISOString(),
+    };
+  }
+
+  private extractFirstName(fullName?: string): string | undefined {
+    if (!fullName) return undefined;
+    const parts = fullName.trim().split(/\s+/).filter(Boolean);
+    return parts.length > 0 ? parts[0] : undefined;
+  }
+
+  private extractLastName(fullName?: string): string | undefined {
+    if (!fullName) return undefined;
+    const parts = fullName.trim().split(/\s+/).filter(Boolean);
+    if (parts.length <= 1) return undefined;
+    return parts.slice(1).join(' ');
+  }
+
+  private resolveUserName(usernameFromClaims?: string, email?: string): string {
+    const normalizedClaim = usernameFromClaims?.trim();
+    if (normalizedClaim) return normalizedClaim;
+
+    const emailLocalPart = email?.split('@')[0]?.trim();
+    if (emailLocalPart) return emailLocalPart;
+
+    throw new Error(
+      'OIDC profile does not include username (preferred_username) or email.',
+    );
+  }
+}
