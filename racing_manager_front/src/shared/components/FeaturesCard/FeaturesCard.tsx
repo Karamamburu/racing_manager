@@ -1,13 +1,14 @@
 import { Card, Descriptions } from 'antd';
-import type { TrackFeature } from '../../../shared/types/track';
+import type { FeatureItem } from '../../types/track';
 
-type TrackFeaturesProps = {
-  features: TrackFeature[];
+type FeaturesCardProps = {
+  features: FeatureItem[];
+  title?: string;
 };
 
-export function TrackFeatures({ features }: TrackFeaturesProps) {
+export function FeaturesCard({ features, title = 'Характеристики' }: FeaturesCardProps) {
   return (
-    <Card title="Характеристики трассы">
+    <Card title={title}>
       <Descriptions bordered size="small" column={{ xs: 1, md: 2 }}>
         {features.map((feature) => (
           <Descriptions.Item key={feature.key} label={feature.title}>

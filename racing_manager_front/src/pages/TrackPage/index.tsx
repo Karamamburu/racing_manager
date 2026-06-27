@@ -1,9 +1,9 @@
 import { Button, Result, Space } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getTrackResponseMockById } from '../../mocks/track';
-import { MetricStats, PromoSlider } from '../../shared/components';
+import { FeaturesCard, MetricStats, PromoSlider } from '../../shared/components';
 import { AppShell } from '../../shared/layout';
-import { TrackEventsTable, TrackFeatures } from './components';
+import { TrackEventsTable } from './components';
 
 export function TrackPage() {
   const navigate = useNavigate();
@@ -27,6 +27,8 @@ export function TrackPage() {
     );
   }
 
+  const trackId = id as string;
+
   return (
     <AppShell
       title={trackData.title}
@@ -40,8 +42,11 @@ export function TrackPage() {
       <Space direction="vertical" size={24} style={{ width: '100%' }}>
         <MetricStats stats={trackData.stats} />
         <PromoSlider slides={trackData.slides} />
-        <TrackFeatures features={trackData.features} />
-        <TrackEventsTable events={trackData.events} />
+        <FeaturesCard title="Характеристики трассы" features={trackData.features} />
+        <TrackEventsTable
+          events={trackData.events}
+          onEventClick={(event) => navigate(`/events/${trackId}_${event.key}`)}
+        />
       </Space>
     </AppShell>
   );

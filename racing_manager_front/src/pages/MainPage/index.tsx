@@ -24,18 +24,30 @@ import { PromoSlider } from '../../shared/components';
 import { AppShell } from '../../shared/layout';
 import type { MainEventRow, MainStat } from '../../shared/types/main';
 
-const eventColumns: ColumnsType<MainEventRow> = [
-  { title: 'Событие', dataIndex: 'event', key: 'event' },
-  { title: 'Дата', dataIndex: 'date', key: 'date' },
-  {
-    title: 'Статус',
-    dataIndex: 'status',
-    key: 'status',
-    render: (status: MainEventRow['status']) =>
-      status === 'DONE' ? <Tag color="green">DONE</Tag> : <Tag color="blue">PLANNED</Tag>,
-  },
-  { title: 'Трасса', dataIndex: 'track', key: 'track' },
-];
+function getEventColumns(onEventOpen: (eventId: string) => void): ColumnsType<MainEventRow> {
+  return [
+    {
+      title: 'Событие',
+      dataIndex: 'event',
+      key: 'event',
+      render: (event: string, record) => (
+        <Button type="link" onClick={() => onEventOpen(record.key)} style={{ paddingInline: 0 }}>
+          {event}
+        </Button>
+      ),
+    },
+    { title: 'Дата', dataIndex: 'date', key: 'date' },
+    { title: 'Зарегистрировано', dataIndex: 'registeredCount', key: 'registeredCount' },
+    {
+      title: 'Статус',
+      dataIndex: 'status',
+      key: 'status',
+      render: (status: MainEventRow['status']) =>
+        status === 'DONE' ? <Tag color="green">DONE</Tag> : <Tag color="blue">PLANNED</Tag>,
+    },
+    { title: 'Трасса', dataIndex: 'track', key: 'track' },
+  ];
+}
 
 const statPrefixes: Record<string, ReactNode> = {
   'upcoming-races': <ClockCircleTwoTone />,
@@ -115,7 +127,11 @@ export function MainPage() {
         </Row>
 
         <Card title="Последние события">
-          <Table columns={eventColumns} dataSource={data.events} pagination={false} />
+          <Table
+            columns={getEventColumns((eventId) => navigate(`/events/${eventId}`))}
+            dataSource={data.events}
+            pagination={false}
+          />
         </Card>
       </Space>
     </AppShell>

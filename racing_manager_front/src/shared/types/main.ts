@@ -6,6 +6,7 @@ export type MainEventRow = {
   date: string;
   status: MainEventStatus;
   track: string;
+  registeredCount: number;
 };
 
 export type MainSlide = {

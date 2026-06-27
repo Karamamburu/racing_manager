@@ -1,7 +1,7 @@
 import type { MainSlide } from './main';
 import type { TracksStat } from './tracks';
 
-export type TrackFeature = {
+export type FeatureItem = {
   key: string;
   title: string;
   value: string;
@@ -25,6 +25,6 @@ export type TrackPageResponse = {
   subtitle: string;
   stats: TracksStat[];
   slides: MainSlide[];
-  features: TrackFeature[];
+  features: FeatureItem[];
   events: TrackEventRow[];
 };

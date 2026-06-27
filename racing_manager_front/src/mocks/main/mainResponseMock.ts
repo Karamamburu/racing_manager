@@ -1,4 +1,5 @@
 import type { MainDashboardResponse } from '../../shared/types/main';
+import { getEventRacesOverviewMock } from '../event';
 import aleshkinoImage from '../assets/aleshkino.png';
 import lazutinkaImage from '../assets/lazutinka.png';
 import planernayaImage from '../assets/planernaya.png';
@@ -46,29 +47,16 @@ const mainResponseMock: MainDashboardResponse = {
       actionLabel: 'Посмотреть мой прогресс',
     },
   ],
-  events: [
-    {
-      key: '1',
-      event: 'Winter Sprint Cup',
-      date: '2026-01-20',
-      status: 'PLANNED',
-      track: 'Alpine Track',
-    },
-    {
-      key: '2',
-      event: 'Trail Marathon',
-      date: '2026-02-10',
-      status: 'DONE',
-      track: 'Forest Loop',
-    },
-    {
-      key: '3',
-      event: 'City League Open',
-      date: '2026-03-03',
-      status: 'PLANNED',
-      track: 'City Rings',
-    },
-  ],
+  events: getEventRacesOverviewMock()
+    .filter((event) => event.status !== 'CANCELLED')
+    .map((event) => ({
+      key: event.routeId,
+      event: event.name,
+      date: event.eventDate,
+      status: event.status === 'DONE' ? 'DONE' : 'PLANNED',
+      track: event.trackName,
+      registeredCount: event.registeredCount,
+    })),
 };
 
 export { mainResponseMock };
