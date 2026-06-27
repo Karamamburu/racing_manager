@@ -16,9 +16,9 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useNavigate } from 'react-router-dom';
-import { authService } from '../features/auth/authService';
-import { usePersonalQuery } from '../features/auth/usePersonalQuery';
-import { AppShell } from '../shared/ui/AppShell';
+import { authService } from '../../features/auth/authService';
+import { usePersonalQuery } from '../../features/auth/usePersonalQuery';
+import { AppShell } from '../../shared/layout';
 
 type RaceRow = {
   key: string;

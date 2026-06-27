@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Трассы - Sport Trails Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/antd@5/dist/reset.css" />
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/dayjs@1/dayjs.min.js"></script>
+  <script src="https://unpkg.com/antd@5/dist/antd.min.js"></script>
+  <script src="https://unpkg.com/@ant-design/icons@5/dist/index.umd.min.js"></script>
+  <style>
+    :root {
+      --page-bg: #f3f6ff;
+      --surface-bg: #ffffff;
+      --brand: #2563eb;
+      --brand-soft: #eff6ff;
+      --text-primary: #101828;
+      --text-secondary: #667085;
+      --shadow-soft: 0 14px 34px rgba(27, 39, 94, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at top left, #e9f0ff, var(--page-bg) 45%);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text-primary);
+    }
+
+    #root {
+      min-height: 100vh;
+    }
+
+    .tracks-layout.ant-layout {
+      min-height: 100vh;
+      background: transparent;
+    }
+
+    .tracks-sider.ant-layout-sider {
+      background: linear-gradient(180deg, #0f172a 0%, #172554 100%);
+      box-shadow: 10px 0 28px rgba(15, 23, 42, 0.2);
+    }
+
+    .brand-block {
+      margin: 16px;
+      padding: 18px 16px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.09);
+      color: #fff;
+    }
+
+    .brand-title {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      margin-bottom: 4px;
+    }
+
+    .brand-subtitle {
+      font-size: 12px;
+      opacity: 0.78;
+    }
+
+    .tracks-menu.ant-menu-dark {
+      background: transparent;
+      border-inline-end: none;
+      padding: 8px;
+    }
+
+    .tracks-menu .ant-menu-item {
+      border-radius: 10px;
+      margin-block: 6px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+    }
+
+    .tracks-menu .ant-menu-item-selected {
+      background: rgba(255, 255, 255, 0.16) !important;
+    }
+
+    .main-content {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .topbar-card.ant-card {
+      border: none;
+      border-radius: 18px;
+      box-shadow: var(--shadow-soft);
+      background:
+        radial-gradient(circle at left 20% top 20%, rgba(59, 130, 246, 0.12), transparent 45%),
+        var(--surface-bg);
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .metric-card.ant-card {
+      border: 1px solid #e4e7ec;
+      border-radius: 14px;
+      box-shadow: none;
+      background: #fff;
+    }
+
+    .surface-card.ant-card {
+      border: none;
+      border-radius: 18px;
+      box-shadow: var(--shadow-soft);
+    }
+
+    .track-cover {
+      width: 100%;
+      height: 158px;
+      object-fit: cover;
+      border-radius: 12px;
+      margin-bottom: 12px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    .footer-note {
+      text-align: center;
+      color: var(--text-secondary);
+      font-size: 12px;
+      padding-top: 4px;
+      padding-bottom: 12px;
+    }
+
+    @media (max-width: 1200px) {
+      .metrics-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 780px) {
+      .main-content {
+        padding: 16px;
+      }
+
+      .metrics-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+  const { Layout, Menu, Typography, Space, Button, Input, Select, Card, Tag, Row, Col, Table, Avatar, Progress, ConfigProvider, Badge, Divider } = antd;
+  const { SearchOutlined, PlusOutlined, FlagOutlined, NotificationOutlined, TeamOutlined, TrophyOutlined, CalendarOutlined, EnvironmentOutlined, RocketOutlined } = icons;
+  const { Header, Sider, Content } = Layout;
+  const { Title, Text } = Typography;
+
+  const trackCards = [
+    {
+      key: "a1",
+      name: "Alpine Loop",
+      city: "Инсбрук",
+      region: "Tyrol Region, Austria",
+      sports: ["SKI", "RUN"],
+      image: "https://images.unsplash.com/photo-1551524164-6cf2ac53ad5c?auto=format&fit=crop&w=1200&q=80",
+      status: "Открыта",
+      statusColor: "success",
+      distance: "8.7 км"
+    },
+    {
+      key: "a2",
+      name: "Forest Trail Arena",
+      city: "Зальцбург",
+      region: "Forest District",
+      sports: ["RUN"],
+      image: "https://images.unsplash.com/photo-1541625602330-2277a4c46182?auto=format&fit=crop&w=1200&q=80",
+      status: "Проверка покрытия",
+      statusColor: "warning",
+      distance: "12.1 км"
+    },
+    {
+      key: "a3",
+      name: "Speed Roller Track",
+      city: "Вена",
+      region: "Urban Circuit",
+      sports: ["ROLLER_SKI"],
+      image: "https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?auto=format&fit=crop&w=1200&q=80",
+      status: "Открыта",
+      statusColor: "success",
+      distance: "4.3 км"
+    }
+  ];
+
+  const tableData = [
+    { key: "1", track: "Nordic Sprint Lane", city: "Грац", discipline: "SKI", length: "2.2 км", update: "21 июн 2026", manager: "Olivia Brandt", load: 74 },
+    { key: "2", track: "River Run Segment", city: "Линц", discipline: "RUN", length: "9.4 км", update: "20 июн 2026", manager: "Leo Fischer", load: 56 },
+    { key: "3", track: "Summit Roller Route", city: "Кицбюэль", discipline: "ROLLER_SKI", length: "5.8 км", update: "18 июн 2026", manager: "Mia Hofer", load: 89 }
+  ];
+
+  const columns = [
+    {
+      title: "Трасса",
+      dataIndex: "track",
+      key: "track",
+      render: (value, record) => (
+        React.createElement(Space, { direction: "vertical", size: 0 },
+          React.createElement(Text, { strong: true }, value),
+          React.createElement(Text, { type: "secondary" }, record.city)
+        )
+      )
+    },
+    {
+      title: "Дисциплина",
+      dataIndex: "discipline",
+      key: "discipline",
+      render: (value) => React.createElement(Tag, { color: value === "RUN" ? "cyan" : value === "SKI" ? "blue" : "purple" }, value)
+    },
+    { title: "Длина", dataIndex: "length", key: "length" },
+    { title: "Обновлено", dataIndex: "update", key: "update" },
+    {
+      title: "Менеджер",
+      dataIndex: "manager",
+      key: "manager",
+      render: (value) => (
+        React.createElement(Space, { size: 10 },
+          React.createElement(Avatar, null, value.split(" ").map((part) => part[0]).join("")),
+          React.createElement(Text, null, value)
+        )
+      )
+    },
+    {
+      title: "Загрузка",
+      dataIndex: "load",
+      key: "load",
+      render: (value) => React.createElement(Progress, { percent: value, size: "small", strokeColor: value > 80 ? "#f97316" : "#1677ff" })
+    }
+  ];
+
+  function MetricCard(props) {
+    return React.createElement(
+      Card,
+      { className: "metric-card", size: "small" },
+      React.createElement(Space, { direction: "vertical", size: 6 },
+        React.createElement(Text, { type: "secondary" }, props.label),
+        React.createElement(Title, { level: 3, style: { margin: 0 } }, props.value),
+        React.createElement(Text, { style: { color: props.trendColor || "#16a34a", fontSize: "12px" } }, props.trend)
+      )
+    );
+  }
+
+  function TrackCard(props) {
+    return React.createElement(
+      Card,
+      { className: "surface-card", bodyStyle: { padding: "14px" } },
+      React.createElement("img", { src: props.image, alt: props.name, className: "track-cover" }),
+      React.createElement(Space, { direction: "vertical", size: 8, style: { width: "100%" } },
+        React.createElement(Space, { style: { width: "100%", justifyContent: "space-between" } },
+          React.createElement(Title, { level: 5, style: { margin: 0 } }, props.name),
+          React.createElement(Badge, { status: props.statusColor, text: props.status })
+        ),
+        React.createElement(Space, { size: 6 },
+          React.createElement(EnvironmentOutlined, null),
+          React.createElement(Text, { type: "secondary" }, props.city + " - " + props.region)
+        ),
+        React.createElement(Space, { wrap: true },
+          props.sports.map((sport) => React.createElement(Tag, { key: sport, color: sport === "RUN" ? "cyan" : sport === "SKI" ? "blue" : "purple" }, sport)),
+          React.createElement(Tag, { color: "geekblue-inverse" }, props.distance)
+        )
+      )
+    );
+  }
+
+  function App() {
+    return React.createElement(
+      ConfigProvider,
+      {
+        theme: {
+          token: {
+            colorPrimary: "#2563eb",
+            borderRadius: 12,
+            fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+          }
+        }
+      },
+      React.createElement(
+        Layout,
+        { className: "tracks-layout" },
+        React.createElement(
+          Sider,
+          { className: "tracks-sider", width: 252, breakpoint: "lg", collapsedWidth: 84 },
+          React.createElement("div", { className: "brand-block" },
+            React.createElement("div", { className: "brand-title" }, "Trails Admin"),
+            React.createElement("div", { className: "brand-subtitle" }, "Race manager dashboard")
+          ),
+          React.createElement(Menu, {
+            className: "tracks-menu",
+            mode: "inline",
+            theme: "dark",
+            selectedKeys: ["tracks"],
+            items: [
+              { key: "calendar", icon: React.createElement(CalendarOutlined), label: "Календарь" },
+              { key: "news", icon: React.createElement(NotificationOutlined), label: "Новости" },
+              { key: "tracks", icon: React.createElement(FlagOutlined), label: "Трассы" },
+              { key: "profile", icon: React.createElement(TeamOutlined), label: "Личный кабинет" },
+              { key: "cups", icon: React.createElement(TrophyOutlined), label: "Очки / Кубки" },
+              { key: "applications", icon: React.createElement(RocketOutlined), label: "Заявки" }
+            ]
+          })
+        ),
+        React.createElement(
+          Layout,
+          null,
+          React.createElement(
+            Header,
+            {
+              style: {
+                height: "74px",
+                background: "transparent",
+                padding: "20px 24px 0"
+              }
+            },
+            React.createElement(
+              Card,
+              { className: "topbar-card", bodyStyle: { padding: "14px 18px" } },
+              React.createElement(
+                Space,
+                { style: { width: "100%", justifyContent: "space-between" }, wrap: true },
+                React.createElement(
+                  Space,
+                  { direction: "vertical", size: 0 },
+                  React.createElement(Title, { level: 3, style: { margin: 0 } }, "Трассы"),
+                  React.createElement(Text, { type: "secondary" }, "Статичная демо-страница c Ant Design для будущей интеграции")
+                ),
+                React.createElement(
+                  Space,
+                  { wrap: true },
+                  React.createElement(Input, {
+                    style: { width: 280 },
+                    placeholder: "Поиск трасс...",
+                    prefix: React.createElement(SearchOutlined)
+                  }),
+                  React.createElement(
+                    Button,
+                    { type: "primary", icon: React.createElement(PlusOutlined), size: "large" },
+                    "Добавить трассу"
+                  )
+                )
+              )
+            )
+          ),
+          React.createElement(
+            Content,
+            { className: "main-content" },
+            React.createElement(
+              "div",
+              { className: "metrics-grid" },
+              React.createElement(MetricCard, { label: "Всего трасс", value: "42", trend: "+3 за неделю" }),
+              React.createElement(MetricCard, { label: "Активных сейчас", value: "31", trend: "74% от общего пула" }),
+              React.createElement(MetricCard, { label: "Запросов на модерацию", value: "7", trend: "2 срочных", trendColor: "#f97316" }),
+              React.createElement(MetricCard, { label: "Покрытие GPS", value: "96%", trend: "Стабильно высокое" })
+            ),
+            React.createElement(
+              Card,
+              { className: "surface-card", title: "Фильтры и обзор", extra: React.createElement(Tag, { color: "processing" }, "Статический режим") },
+              React.createElement(
+                Row,
+                { gutter: [12, 12] },
+                React.createElement(Col, { xs: 24, sm: 24, md: 10 },
+                  React.createElement(Input, { placeholder: "Название трассы или менеджер", prefix: React.createElement(SearchOutlined) })
+                ),
+                React.createElement(Col, { xs: 12, sm: 12, md: 7 },
+                  React.createElement(Select, {
+                    style: { width: "100%" },
+                    defaultValue: "all-city",
+                    options: [
+                      { value: "all-city", label: "Все города" },
+                      { value: "vienna", label: "Вена" },
+                      { value: "salzburg", label: "Зальцбург" },
+                      { value: "innsbruck", label: "Инсбрук" }
+                    ]
+                  })
+                ),
+                React.createElement(Col, { xs: 12, sm: 12, md: 7 },
+                  React.createElement(Select, {
+                    style: { width: "100%" },
+                    defaultValue: "all-sports",
+                    options: [
+                      { value: "all-sports", label: "Все виды спорта" },
+                      { value: "ski", label: "SKI" },
+                      { value: "run", label: "RUN" },
+                      { value: "roller", label: "ROLLER_SKI" }
+                    ]
+                  })
+                )
+              )
+            ),
+            React.createElement(
+              Row,
+              { gutter: [16, 16] },
+              trackCards.map((item) =>
+                React.createElement(
+                  Col,
+                  { key: item.key, xs: 24, md: 12, xl: 8 },
+                  React.createElement(TrackCard, item)
+                )
+              )
+            ),
+            React.createElement(
+              Card,
+              { className: "surface-card", title: "Трассы в работе" },
+              React.createElement("div", { className: "table-wrap" },
+                React.createElement(Table, {
+                  dataSource: tableData,
+                  columns: columns,
+                  pagination: false,
+                  size: "middle"
+                })
+              )
+            ),
+            React.createElement(Divider, { style: { margin: "6px 0" } }),
+            React.createElement("div", { className: "footer-note" }, "Sport Trails Platform - UI Mock - 2026")
+          )
+        )
+      )
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1 @@
+export { mainResponseMock } from './mainResponseMock';
