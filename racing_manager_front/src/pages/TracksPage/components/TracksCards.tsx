@@ -1,5 +1,6 @@
 import { EnvironmentOutlined } from '@ant-design/icons';
 import { Badge, Card, Col, Row, Space, Tag, Typography } from 'antd';
+import { useNavigate } from 'react-router-dom';
 import type { SportDiscipline, TrackCardItem } from '../../../shared/types/tracks';
 
 type TracksCardsProps = {
@@ -15,12 +16,15 @@ function getDisciplineColor(discipline: SportDiscipline) {
 }
 
 export function TracksCards({ tracks }: TracksCardsProps) {
+  const navigate = useNavigate();
+
   return (
     <Row gutter={[16, 16]}>
       {tracks.map((track) => (
         <Col key={track.key} xs={24} md={12} xl={8}>
           <Card
             hoverable
+            onClick={() => navigate(`/tracks/${track.key}`)}
             cover={
               <img
                 src={track.image}

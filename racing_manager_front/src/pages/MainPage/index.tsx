@@ -7,7 +7,6 @@ import {
   Alert,
   Button,
   Card,
-  Carousel,
   Col,
   Row,
   Skeleton,
@@ -21,8 +20,9 @@ import type { ColumnsType } from 'antd/es/table';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMainDashboardQuery } from '../../features/main/useMainDashboardQuery';
+import { PromoSlider } from '../../shared/components';
 import { AppShell } from '../../shared/layout';
-import type { MainEventRow, MainSlide, MainStat } from '../../shared/types/main';
+import type { MainEventRow, MainStat } from '../../shared/types/main';
 
 const eventColumns: ColumnsType<MainEventRow> = [
   { title: 'Событие', dataIndex: 'event', key: 'event' },
@@ -48,7 +48,7 @@ export function MainPage() {
 
   if (isLoading) {
     return (
-      <AppShell title="Панель управления" subtitle="Сводка по соревнованиям, трассам и активности участников">
+      <AppShell title="Главная страница" subtitle="Сводка по соревнованиям, трассам и активности участников">
         <Space direction="vertical" size={24} style={{ width: '100%' }}>
           <Card>
             <Skeleton active paragraph={{ rows: 4 }} />
@@ -63,7 +63,7 @@ export function MainPage() {
 
   if (isError || !data) {
     return (
-      <AppShell title="Панель управления" subtitle="Сводка по соревнованиям, трассам и активности участников">
+      <AppShell title="Главная страница" subtitle="Сводка по соревнованиям, трассам и активности участников">
         <Alert
           type="error"
           showIcon
@@ -81,7 +81,7 @@ export function MainPage() {
 
   return (
     <AppShell
-      title="Панель управления"
+      title="Главная страница"
       subtitle="Сводка по соревнованиям, трассам и активности участников"
       extra={
         <Button type="default" onClick={() => navigate('/cabinet')}>
@@ -90,25 +90,7 @@ export function MainPage() {
       }
     >
       <Space direction="vertical" size={24} style={{ width: '100%' }}>
-        <Carousel autoplay draggable>
-          {data.slides.map((slide: MainSlide) => (
-            <div key={slide.key}>
-              <div
-                className="hero-slide"
-                style={{
-                  backgroundImage: `linear-gradient(120deg, rgba(8, 21, 45, 0.85), rgba(24, 144, 255, 0.35)), url(${slide.image})`,
-                }}
-              >
-                <Typography.Title level={2} style={{ color: '#fff', marginBottom: 8 }}>
-                  {slide.title}
-                </Typography.Title>
-                <Typography.Paragraph style={{ color: 'rgba(255,255,255,0.85)', margin: 0 }}>
-                  {slide.subtitle}
-                </Typography.Paragraph>
-              </div>
-            </div>
-          ))}
-        </Carousel>
+        <PromoSlider slides={data.slides} />
 
         <Row gutter={[16, 16]}>
           {data.stats.map((stat: MainStat) => (
