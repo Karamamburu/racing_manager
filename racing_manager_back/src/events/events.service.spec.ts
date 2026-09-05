@@ -3,10 +3,13 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { EventsService } from './events.service';
 import { ALESHKINO_TRACK_ID } from '../tracks/aleshkino';
 import { parseCreateEventBody } from './parse-create-event';
+
+function decimal(value: string) {
+  return { toString: () => value };
+}
 
 describe('parseCreateEventBody', () => {
   it('requires name, sport and eventDate', () => {
@@ -39,7 +42,12 @@ describe('parseCreateEventBody', () => {
 describe('EventsService', () => {
   const prisma = {
     track: { findUnique: jest.fn() },
-    event: { create: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+    event: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
+    },
   };
   const rolesService = {
     assertAdminAccess: jest.fn(),
@@ -68,7 +76,11 @@ describe('EventsService', () => {
     rolesService.assertAdminAccess.mockRejectedValue(new ForbiddenException());
 
     await expect(
-      service.create('sub-1', { name: 'КТ', sport: 'SKI', eventDate: '2026-12-06' }),
+      service.create('sub-1', {
+        name: 'КТ',
+        sport: 'SKI',
+        eventDate: '2026-12-06',
+      }),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.event.create).not.toHaveBeenCalled();
   });
@@ -84,7 +96,7 @@ describe('EventsService', () => {
       eventType: 'TIME_TRIAL',
       sport: 'SKI',
       eventDate: new Date('2026-12-06T00:00:00.000Z'),
-      distanceKm: new Prisma.Decimal('10.5'),
+      distanceKm: decimal('10.5'),
       description: 'Контрольная тренировка',
       registrationOpen: null,
       registrationClose: null,
@@ -140,7 +152,7 @@ describe('EventsService', () => {
         id: 'event-1',
         name: 'КТ Алёшкино',
         eventDate: new Date('2026-12-06T00:00:00.000Z'),
-        distanceKm: new Prisma.Decimal('10.5'),
+        distanceKm: decimal('10.5'),
         status: 'PLANNED',
         track: { name: 'Алёшкино' },
         _count: { registrations: 2 },
@@ -169,7 +181,7 @@ describe('EventsService', () => {
       eventType: 'TIME_TRIAL',
       sport: 'SKI',
       eventDate: new Date('2026-12-06T00:00:00.000Z'),
-      distanceKm: new Prisma.Decimal('10.5'),
+      distanceKm: decimal('10.5'),
       description: 'Контрольная тренировка',
       registrationOpen: null,
       registrationClose: null,

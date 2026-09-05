@@ -1,8 +1,8 @@
 # Dependencies
 **/node_modules/
 
-# Build outputs
-**/dist/
+# Prisma generated client
+**/generated/prisma/
 **/build/
 **/coverage/
 **/.nyc_output/

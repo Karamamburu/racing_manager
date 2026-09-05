@@ -5,7 +5,6 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { RoleCode } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
 import { ALESHKINO_TRACK_ID } from '../tracks/aleshkino';
@@ -83,13 +82,126 @@ export type EventParticipant = {
   registeredAt: string;
 };
 
+type DecimalValue = { toString(): string } | null;
+
+type StoredEvent = {
+  id: string;
+  trackId: string;
+  name: string;
+  eventType: string;
+  sport: string;
+  eventDate: Date;
+  distanceKm: DecimalValue;
+  description: string | null;
+  registrationOpen: Date | null;
+  registrationClose: Date | null;
+  status: string;
+  createdById: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type CatalogEvent = {
+  id: string;
+  name: string;
+  eventDate: Date;
+  distanceKm: DecimalValue;
+  status: string;
+  track: { name: string };
+  _count: { registrations: number };
+};
+
+type PersonRow = {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  userName: string;
+};
+
+type ParticipantUserRow = {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  birthDate: Date | null;
+  gender: string | null;
+  city: string | null;
+  district: string | null;
+  team: string | null;
+};
+
+type EventWithDetails = StoredEvent & {
+  track: EventDetails['track'];
+  createdBy: PersonRow | null;
+  registrations: Array<{
+    id: string;
+    status: string;
+    note: string | null;
+    registeredAt: Date;
+    user: ParticipantUserRow;
+  }>;
+};
+
+type EventOwnerRow = {
+  id: string;
+  createdById: string | null;
+  status: string;
+};
+
+type EventWritePayload = {
+  name: string;
+  eventType: string;
+  sport: string;
+  eventDate: Date;
+  distanceKm: number | null;
+  description: string | null;
+  registrationOpen: Date | null;
+  registrationClose: Date | null;
+};
+
+type EventsStore = {
+  track: {
+    findUnique: (args: {
+      where: { id: string };
+    }) => Promise<{ id: string } | null>;
+  };
+  event: {
+    create: (args: {
+      data: EventWritePayload & { trackId: string; createdById: string };
+    }) => Promise<StoredEvent>;
+    findMany: (args: object) => Promise<CatalogEvent[]>;
+    findUnique: {
+      (args: {
+        where: { id: string };
+        include: object;
+      }): Promise<EventWithDetails | null>;
+      (args: {
+        where: { id: string };
+        select: { id: true; createdById: true; status: true };
+      }): Promise<EventOwnerRow | null>;
+    };
+    update: (args: { where: { id: string }; data: object }) => Promise<unknown>;
+  };
+};
+
+function toKm(value: DecimalValue): number | null {
+  return value === null ? null : Number(value.toString());
+}
+
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
 @Injectable()
 export class EventsService {
+  private readonly store: EventsStore;
+
   constructor(
-    private readonly prisma: PrismaService,
+    prisma: PrismaService,
     private readonly rolesService: RolesService,
     private readonly usersService: UsersService,
-  ) {}
+  ) {
+    this.store = prisma as unknown as EventsStore;
+  }
 
   async create(
     authentikId: string | undefined,
@@ -105,7 +217,7 @@ export class EventsService {
     }
 
     const parsed: ParsedCreateEvent = parseCreateEventBody(body);
-    const track = await this.prisma.track.findUnique({
+    const track = await this.store.track.findUnique({
       where: { id: ALESHKINO_TRACK_ID },
     });
     if (!track) {
@@ -114,17 +226,14 @@ export class EventsService {
       );
     }
 
-    const created = await this.prisma.event.create({
+    const created = await this.store.event.create({
       data: {
         trackId: ALESHKINO_TRACK_ID,
         name: parsed.name,
-        eventType: parsed.eventType,
-        sport: parsed.sport,
+        eventType: asString(parsed.eventType),
+        sport: asString(parsed.sport),
         eventDate: parsed.eventDate,
-        distanceKm:
-          parsed.distanceKm === null
-            ? null
-            : new Prisma.Decimal(parsed.distanceKm),
+        distanceKm: parsed.distanceKm,
         description: parsed.description,
         registrationOpen: parsed.registrationOpen,
         registrationClose: parsed.registrationClose,
@@ -136,7 +245,7 @@ export class EventsService {
   }
 
   async listRecent(): Promise<RecentEventRow[]> {
-    const rows = await this.prisma.event.findMany({
+    const rows = await this.store.event.findMany({
       where: { status: { not: 'CANCELLED' } },
       orderBy: [{ eventDate: 'asc' }, { createdAt: 'asc' }],
       include: {
@@ -155,8 +264,7 @@ export class EventsService {
       id: row.id,
       name: row.name,
       eventDate: row.eventDate.toISOString().slice(0, 10),
-      distanceKm:
-        row.distanceKm === null ? null : Number(row.distanceKm.toString()),
+      distanceKm: toKm(row.distanceKm),
       status: row.status,
       trackName: row.track.name,
       registeredCount: row._count.registrations,
@@ -164,7 +272,7 @@ export class EventsService {
   }
 
   async findById(id: string): Promise<EventDetails> {
-    const event = await this.prisma.event.findUnique({
+    const event = await this.store.event.findUnique({
       where: { id },
       include: {
         track: {
@@ -214,8 +322,7 @@ export class EventsService {
       eventType: event.eventType,
       sport: event.sport,
       eventDate: event.eventDate.toISOString().slice(0, 10),
-      distanceKm:
-        event.distanceKm === null ? null : Number(event.distanceKm.toString()),
+      distanceKm: toKm(event.distanceKm),
       description: event.description,
       registrationOpen: event.registrationOpen?.toISOString() ?? null,
       registrationClose: event.registrationClose?.toISOString() ?? null,
@@ -263,17 +370,14 @@ export class EventsService {
     await this.assertCanManageCreatedEvent(authentikId, eventId);
     const parsed: ParsedCreateEvent = parseCreateEventBody(body);
 
-    await this.prisma.event.update({
+    await this.store.event.update({
       where: { id: eventId },
       data: {
         name: parsed.name,
-        eventType: parsed.eventType,
-        sport: parsed.sport,
+        eventType: asString(parsed.eventType),
+        sport: asString(parsed.sport),
         eventDate: parsed.eventDate,
-        distanceKm:
-          parsed.distanceKm === null
-            ? null
-            : new Prisma.Decimal(parsed.distanceKm),
+        distanceKm: parsed.distanceKm,
         description: parsed.description,
         registrationOpen: parsed.registrationOpen,
         registrationClose: parsed.registrationClose,
@@ -289,7 +393,7 @@ export class EventsService {
   ): Promise<EventDetails> {
     await this.assertCanManageCreatedEvent(authentikId, eventId);
 
-    await this.prisma.event.update({
+    await this.store.event.update({
       where: { id: eventId },
       data: { status: 'CANCELLED' },
     });
@@ -312,7 +416,7 @@ export class EventsService {
       );
     }
 
-    const event = await this.prisma.event.findUnique({
+    const event = await this.store.event.findUnique({
       where: { id: eventId },
       select: { id: true, createdById: true, status: true },
     });
@@ -331,22 +435,7 @@ export class EventsService {
     }
   }
 
-  private toResponse(event: {
-    id: string;
-    trackId: string;
-    name: string;
-    eventType: string;
-    sport: string;
-    eventDate: Date;
-    distanceKm: Prisma.Decimal | null;
-    description: string | null;
-    registrationOpen: Date | null;
-    registrationClose: Date | null;
-    status: string;
-    createdById: string | null;
-    createdAt: Date;
-    updatedAt: Date;
-  }): EventResponse {
+  private toResponse(event: StoredEvent): EventResponse {
     return {
       id: event.id,
       trackId: event.trackId,
@@ -354,8 +443,7 @@ export class EventsService {
       eventType: event.eventType,
       sport: event.sport,
       eventDate: event.eventDate.toISOString().slice(0, 10),
-      distanceKm:
-        event.distanceKm === null ? null : Number(event.distanceKm.toString()),
+      distanceKm: toKm(event.distanceKm),
       description: event.description,
       registrationOpen: event.registrationOpen?.toISOString() ?? null,
       registrationClose: event.registrationClose?.toISOString() ?? null,
