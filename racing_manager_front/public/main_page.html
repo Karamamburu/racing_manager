@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sport Trails Admin Portal</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Custom scrollbar for sidebar */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-900">
+
+<div class="flex h-screen">
+
+  <!-- Sidebar -->
+  <aside class="w-64 bg-slate-900 text-white flex flex-col">
+    <div class="p-5 text-xl font-bold border-b border-slate-700">
+      Trails Admin
+    </div>
+
+    <nav class="flex-1 p-4 space-y-2 overflow-y-auto">
+      <a href="#" class="block px-3 py-2 rounded hover:bg-slate-700">🏁 Календарь</a>
+      <a href="#" class="block px-3 py-2 rounded hover:bg-slate-700">📰 Новости</a>
+      <a href="#" class="block px-3 py-2 rounded hover:bg-slate-700">🗺️ Трассы</a>
+      <a href="#" class="block px-3 py-2 rounded hover:bg-slate-700">👤 Личный кабинет</a>
+      <a href="#" class="block px-3 py-2 rounded hover:bg-slate-700">📊 Очки / Кубки</a>
+      <a href="#" class="block px-3 py-2 rounded hover:bg-slate-700">📥 Заявки</a>
+    </nav>
+
+    <div class="p-4 text-xs text-slate-400 border-t border-slate-700">
+      v1.0 Admin Portal
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <div class="flex-1 flex flex-col">
+
+    <!-- Top Ads -->
+    <div class="h-16 bg-yellow-200 flex items-center justify-center text-sm font-medium border-b">
+      Google Ads / Sponsorship Banner Area
+    </div>
+
+    <!-- Content -->
+    <main class="flex-1 overflow-y-auto p-6 space-y-6">
+
+      <!-- Banner Carousel -->
+      <div class="relative w-full h-64 bg-slate-300 rounded-xl overflow-hidden shadow">
+        <div id="carousel" class="w-full h-full flex transition-all duration-500">
+          <div class="w-full flex-shrink-0 bg-cover bg-center flex items-end p-6 text-white text-2xl font-bold"
+               style="background-image:url('https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&w=1200&q=60');">
+            Зимние соревнования 2026
+          </div>
+          <div class="w-full flex-shrink-0 bg-cover bg-center flex items-end p-6 text-white text-2xl font-bold"
+               style="background-image:url('https://images.unsplash.com/photo-1521412644187-c49fa049e84d?auto=format&fit=crop&w=1200&q=60');">
+            Новые трассы сезона
+          </div>
+          <div class="w-full flex-shrink-0 bg-cover bg-center flex items-end p-6 text-white text-2xl font-bold"
+               style="background-image:url('https://images.unsplash.com/photo-1502904550040-7534597429ae?auto=format&fit=crop&w=1200&q=60');">
+            Кубок региона
+          </div>
+        </div>
+
+        <button onclick="prevSlide()" class="absolute left-3 top-1/2 -translate-y-1/2 bg-black/50 text-white px-3 py-1 rounded">
+          ‹
+        </button>
+        <button onclick="nextSlide()" class="absolute right-3 top-1/2 -translate-y-1/2 bg-black/50 text-white px-3 py-1 rounded">
+          ›
+        </button>
+      </div>
+
+      <!-- Quick cards -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="bg-white p-5 rounded-xl shadow">
+          <h3 class="font-semibold text-lg">Ближайшие гонки</h3>
+          <p class="text-sm text-slate-500">Управление регистрациями и статусами</p>
+        </div>
+        <div class="bg-white p-5 rounded-xl shadow">
+          <h3 class="font-semibold text-lg">Активные трассы</h3>
+          <p class="text-sm text-slate-500">track_admins + tracks</p>
+        </div>
+        <div class="bg-white p-5 rounded-xl shadow">
+          <h3 class="font-semibold text-lg">Кубковые сезоны</h3>
+          <p class="text-sm text-slate-500">Очки, рейтинг, результаты</p>
+        </div>
+      </div>
+
+      <!-- Table placeholder -->
+      <div class="bg-white rounded-xl shadow p-5">
+        <h2 class="text-xl font-semibold mb-4">Последние события</h2>
+        <table class="w-full text-sm">
+          <thead class="text-left text-slate-500 border-b">
+            <tr>
+              <th class="py-2">Событие</th>
+              <th>Дата</th>
+              <th>Статус</th>
+              <th>Трасса</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="border-b">
+              <td class="py-2">Winter Sprint Cup</td>
+              <td>2026-01-20</td>
+              <td><span class="text-green-600">PLANNED</span></td>
+              <td>Alpine Track</td>
+            </tr>
+            <tr class="border-b">
+              <td class="py-2">Trail Marathon</td>
+              <td>2026-02-10</td>
+              <td><span class="text-blue-600">DONE</span></td>
+              <td>Forest Loop</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="h-12 bg-slate-900 text-slate-300 flex items-center justify-center text-xs">
+      © 2026 Sport Trails Platform. All rights reserved.
+    </footer>
+
+  </div>
+</div>
+
+<script>
+  let index = 0;
+  const carousel = document.getElementById('carousel');
+  const total = carousel.children.length;
+
+  function update() {
+    carousel.style.transform = `translateX(-${index * 100}%)`;
+  }
+
+  function nextSlide() {
+    index = (index + 1) % total;
+    update();
+  }
+
+  function prevSlide() {
+    index = (index - 1 + total) % total;
+    update();
+  }
+
+  setInterval(nextSlide, 5000);
+</script>
+
+</body>
+</html>

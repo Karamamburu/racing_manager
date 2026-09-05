@@ -1,0 +1,51 @@
+import axios, {
+  AxiosError,
+  AxiosInstance,
+  AxiosRequestConfig,
+  AxiosResponse,
+} from 'axios';
+
+export class ApiClient {
+  private readonly client: AxiosInstance;
+
+  constructor(baseURL: string) {
+    this.client = axios.create({
+      baseURL,
+      withCredentials: true,
+      timeout: 15_000,
+    });
+  }
+
+  public async get<TResponse>(
+    url: string,
+    config?: AxiosRequestConfig,
+  ): Promise<TResponse> {
+    const response = await this.client.get<TResponse>(url, config);
+    return response.data;
+  }
+
+  public async post<TResponse>(
+    url: string,
+    data?: unknown,
+    config?: AxiosRequestConfig,
+  ): Promise<TResponse> {
+    const response = await this.client.post<TResponse>(url, data, config);
+    return response.data;
+  }
+
+  public async request<TResponse>(
+    config: AxiosRequestConfig,
+  ): Promise<TResponse> {
+    const response: AxiosResponse<TResponse> = await this.client.request(config);
+    return response.data;
+  }
+
+  public isUnauthorized(error: unknown): boolean {
+    return (
+      error instanceof AxiosError &&
+      (error.response?.status === 401 || error.response?.status === 403)
+    );
+  }
+}
+
+export const apiClient = new ApiClient('/api');

@@ -18,13 +18,16 @@ export class AuthController {
     const appHost = process.env.APP_HOST ?? 'http://localhost:4000';
     const fullUrl = `${appHost}${req.url}`;
     const result = await this.authService.handleCallback(req, fullUrl);
+    const postLoginRedirectUrl =
+      process.env.POST_LOGIN_REDIRECT_URI ?? 'http://localhost:5173/cabinet';
+    const redirectUrl = new URL(postLoginRedirectUrl);
+    redirectUrl.searchParams.set('auth', 'success');
+    redirectUrl.searchParams.set(
+      'registrationStatus',
+      result.registrationStatus,
+    );
 
-    return res.json({
-      ok: true,
-      user: result.user,
-      registrationStatus: result.registrationStatus,
-      message: 'Login successful.',
-    });
+    return res.redirect(redirectUrl.toString());
   }
 
   @Get('logout')

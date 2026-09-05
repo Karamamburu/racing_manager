@@ -12,6 +12,7 @@ CREATE TYPE sport_type AS ENUM ('RUN', 'SKI', 'ROLLER_SKI', 'BIKE');
 CREATE TYPE event_type AS ENUM ('RACE', 'TIME_TRIAL');
 CREATE TYPE event_status AS ENUM ('PLANNED', 'DONE', 'CANCELLED');
 CREATE TYPE registration_status AS ENUM ('PENDING', 'CONFIRMED', 'CANCELLED');
+CREATE TYPE gender_type AS ENUM ('M', 'F');
 
 -- ========================================
 -- USERS
@@ -19,12 +20,52 @@ CREATE TYPE registration_status AS ENUM ('PENDING', 'CONFIRMED', 'CANCELLED');
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   authentik_id TEXT UNIQUE NOT NULL,
-  email TEXT UNIQUE,
+  email TEXT UNIQUE NOT NULL,
   first_name TEXT,
-  user_name TEXT,
+  user_name TEXT UNIQUE NOT NULL,
   last_name TEXT,
+  gender gender_type,
+  birth_date DATE,
+  city TEXT,
+  district TEXT,
+  team TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ========================================
+-- ROLES
+-- A user without user_roles rows is a regular participant.
+-- Assign / revoke roles with SQL only (no admin UI yet).
+-- The users row is created on first Authentik login — grant after that.
+--
+-- Grant:
+--   INSERT INTO user_roles (user_id, role_id)
+--   SELECT u.id, r.id
+--   FROM users u
+--   CROSS JOIN roles r
+--   WHERE u.email = 'you@example.com'
+--     AND r.code = 'ADMINISTRATOR'  -- or ORGANIZER
+--   ON CONFLICT DO NOTHING;
+--
+-- Revoke:
+--   DELETE FROM user_roles ur
+--   USING users u, roles r
+--   WHERE ur.user_id = u.id
+--     AND ur.role_id = r.id
+--     AND u.email = 'you@example.com'
+--     AND r.code = 'ADMINISTRATOR';
+-- ========================================
+CREATE TABLE roles (
+  id SERIAL PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL
+);
+
+CREATE TABLE user_roles (
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role_id INT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, role_id)
 );
 
 -- ========================================
@@ -84,6 +125,7 @@ CREATE TABLE registrations (
 -- INDEXES
 -- ========================================
 CREATE INDEX idx_users_authentik_id ON users(authentik_id);
+CREATE INDEX idx_user_roles_role_id ON user_roles(role_id);
 CREATE INDEX idx_events_track_id ON events(track_id);
 CREATE INDEX idx_events_date ON events(event_date);
 CREATE INDEX idx_events_sport ON events(sport);
@@ -91,3 +133,19 @@ CREATE INDEX idx_events_status ON events(status);
 CREATE INDEX idx_registrations_event_id ON registrations(event_id);
 CREATE INDEX idx_registrations_user_id ON registrations(user_id);
 CREATE INDEX idx_registrations_status ON registrations(status);
+
+-- ========================================
+-- SEED
+-- ========================================
+INSERT INTO roles (code, name) VALUES
+  ('ADMINISTRATOR', 'Administrator'),
+  ('ORGANIZER', 'Organizer');
+
+INSERT INTO tracks (id, name, location_city, description, is_active)
+VALUES (
+  '3d8f1a62-7c4e-4b91-9e2a-0b6c8d4e1f20',
+  'Алёшкино',
+  'Москва',
+  'Лыжная трасса Алёшкино. Контрольные тренировки и гонки сообщества.',
+  true
+);
