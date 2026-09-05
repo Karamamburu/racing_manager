@@ -30,6 +30,7 @@ pids/
 *.pid.lock
 .temp/
 .tmp/
+**/.vite/
 
 # OS files
 .DS_Store
