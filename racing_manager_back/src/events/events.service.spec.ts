@@ -39,7 +39,7 @@ describe('parseCreateEventBody', () => {
 describe('EventsService', () => {
   const prisma = {
     track: { findUnique: jest.fn() },
-    event: { create: jest.fn() },
+    event: { create: jest.fn(), findMany: jest.fn(), findUnique: jest.fn() },
   };
   const rolesService = { assertAdminAccess: jest.fn() };
   const usersService = { findBySub: jest.fn() };
@@ -53,6 +53,8 @@ describe('EventsService', () => {
   beforeEach(() => {
     prisma.track.findUnique.mockReset();
     prisma.event.create.mockReset();
+    prisma.event.findMany.mockReset();
+    prisma.event.findUnique.mockReset();
     rolesService.assertAdminAccess.mockReset();
     usersService.findBySub.mockReset();
   });
@@ -125,5 +127,100 @@ describe('EventsService', () => {
         eventDate: '2026-12-06',
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('lists recent events with registration counts', async () => {
+    prisma.event.findMany.mockResolvedValue([
+      {
+        id: 'event-1',
+        name: 'КТ Алёшкино',
+        eventDate: new Date('2026-12-06T00:00:00.000Z'),
+        status: 'PLANNED',
+        track: { name: 'Алёшкино' },
+        _count: { registrations: 2 },
+      },
+    ]);
+
+    await expect(service.listRecent()).resolves.toEqual([
+      {
+        id: 'event-1',
+        name: 'КТ Алёшкино',
+        eventDate: '2026-12-06',
+        status: 'PLANNED',
+        trackName: 'Алёшкино',
+        registeredCount: 2,
+      },
+    ]);
+    expect(prisma.event.findMany).toHaveBeenCalled();
+  });
+
+  it('returns event details with participants', async () => {
+    prisma.event.findUnique.mockResolvedValue({
+      id: 'event-1',
+      trackId: ALESHKINO_TRACK_ID,
+      name: 'КТ Алёшкино',
+      eventType: 'TIME_TRIAL',
+      sport: 'SKI',
+      eventDate: new Date('2026-12-06T00:00:00.000Z'),
+      distanceKm: new Prisma.Decimal('10.5'),
+      description: 'Контрольная тренировка',
+      registrationOpen: null,
+      registrationClose: null,
+      status: 'PLANNED',
+      createdById: 'user-1',
+      createdAt: new Date('2026-09-05T00:00:00.000Z'),
+      updatedAt: new Date('2026-09-05T00:00:00.000Z'),
+      track: {
+        id: ALESHKINO_TRACK_ID,
+        name: 'Алёшкино',
+        locationCity: 'Москва',
+        mapLink: null,
+      },
+      createdBy: {
+        id: 'user-1',
+        firstName: 'Иван',
+        lastName: 'Петров',
+        userName: 'ivan',
+      },
+      registrations: [
+        {
+          id: 'reg-1',
+          status: 'CONFIRMED',
+          note: null,
+          registeredAt: new Date('2026-09-01T10:00:00.000Z'),
+          user: {
+            id: 'user-2',
+            firstName: 'Анна',
+            lastName: 'Смирнова',
+            birthDate: new Date('1996-04-12T00:00:00.000Z'),
+            gender: 'F',
+            city: 'Москва',
+            district: 'САО',
+            team: 'СК Север',
+          },
+        },
+      ],
+    });
+
+    await expect(service.findById('event-1')).resolves.toMatchObject({
+      id: 'event-1',
+      name: 'КТ Алёшкино',
+      track: { name: 'Алёшкино' },
+      registrations: [
+        {
+          id: 'reg-1',
+          fullName: 'Анна Смирнова',
+          birthYear: 1996,
+          team: 'СК Север',
+        },
+      ],
+    });
+  });
+
+  it('throws when event is missing', async () => {
+    prisma.event.findUnique.mockResolvedValue(null);
+    await expect(service.findById('missing')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });
