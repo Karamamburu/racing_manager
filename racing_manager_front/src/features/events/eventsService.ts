@@ -22,6 +22,17 @@ export class EventsService {
     return apiClient.postResult<CreatedEventResponse>('/admin/events', payload);
   }
 
+  public async updateEvent(
+    id: string,
+    payload: CreateEventRequest,
+  ): Promise<{ status: number; data: EventDetails }> {
+    return apiClient.patchResult<EventDetails>(`/admin/events/${id}`, payload);
+  }
+
+  public async cancelEvent(id: string): Promise<{ status: number; data: EventDetails }> {
+    return apiClient.postResult<EventDetails>(`/admin/events/${id}/cancel`);
+  }
+
   public getStatus(error: unknown): number | undefined {
     if (error instanceof AxiosError) return error.response?.status;
     return undefined;
@@ -34,7 +45,7 @@ export class EventsService {
       if (typeof message === 'string' && message.trim()) return message;
       if (Array.isArray(message) && message.length) return message.join(' ');
     }
-    return 'Не удалось создать мероприятие';
+    return 'Не удалось выполнить запрос';
   }
 }
 

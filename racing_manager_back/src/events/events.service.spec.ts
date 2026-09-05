@@ -39,9 +39,12 @@ describe('parseCreateEventBody', () => {
 describe('EventsService', () => {
   const prisma = {
     track: { findUnique: jest.fn() },
-    event: { create: jest.fn(), findMany: jest.fn(), findUnique: jest.fn() },
+    event: { create: jest.fn(), findMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
   };
-  const rolesService = { assertAdminAccess: jest.fn() };
+  const rolesService = {
+    assertAdminAccess: jest.fn(),
+    assertHasAnyRole: jest.fn(),
+  };
   const usersService = { findBySub: jest.fn() };
 
   const service = new EventsService(
@@ -55,7 +58,9 @@ describe('EventsService', () => {
     prisma.event.create.mockReset();
     prisma.event.findMany.mockReset();
     prisma.event.findUnique.mockReset();
+    prisma.event.update.mockReset();
     rolesService.assertAdminAccess.mockReset();
+    rolesService.assertHasAnyRole.mockReset();
     usersService.findBySub.mockReset();
   });
 
@@ -222,5 +227,70 @@ describe('EventsService', () => {
     await expect(service.findById('missing')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('cancels an event created by the administrator', async () => {
+    rolesService.assertHasAnyRole.mockResolvedValue(undefined);
+    usersService.findBySub.mockResolvedValue({ id: 'user-1' });
+    prisma.event.findUnique
+      .mockResolvedValueOnce({
+        id: 'event-1',
+        createdById: 'user-1',
+        status: 'PLANNED',
+      })
+      .mockResolvedValueOnce({
+        id: 'event-1',
+        trackId: ALESHKINO_TRACK_ID,
+        name: 'КТ Алёшкино',
+        eventType: 'TIME_TRIAL',
+        sport: 'SKI',
+        eventDate: new Date('2026-12-06T00:00:00.000Z'),
+        distanceKm: null,
+        description: null,
+        registrationOpen: null,
+        registrationClose: null,
+        status: 'CANCELLED',
+        createdById: 'user-1',
+        createdAt: new Date('2026-09-05T00:00:00.000Z'),
+        updatedAt: new Date('2026-09-05T00:00:00.000Z'),
+        track: {
+          id: ALESHKINO_TRACK_ID,
+          name: 'Алёшкино',
+          locationCity: 'Москва',
+          mapLink: null,
+        },
+        createdBy: {
+          id: 'user-1',
+          firstName: 'Иван',
+          lastName: 'Петров',
+          userName: 'ivan',
+        },
+        registrations: [],
+      });
+    prisma.event.update.mockResolvedValue({});
+
+    await expect(service.cancel('sub-1', 'event-1')).resolves.toMatchObject({
+      id: 'event-1',
+      status: 'CANCELLED',
+    });
+    expect(prisma.event.update).toHaveBeenCalledWith({
+      where: { id: 'event-1' },
+      data: { status: 'CANCELLED' },
+    });
+  });
+
+  it('rejects cancel when the administrator is not the creator', async () => {
+    rolesService.assertHasAnyRole.mockResolvedValue(undefined);
+    usersService.findBySub.mockResolvedValue({ id: 'user-1' });
+    prisma.event.findUnique.mockResolvedValue({
+      id: 'event-1',
+      createdById: 'other-user',
+      status: 'PLANNED',
+    });
+
+    await expect(service.cancel('sub-1', 'event-1')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.event.update).not.toHaveBeenCalled();
   });
 });

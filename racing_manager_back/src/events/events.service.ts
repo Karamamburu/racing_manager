@@ -1,9 +1,12 @@
 import {
+  BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { RoleCode } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
 import { ALESHKINO_TRACK_ID } from '../tracks/aleshkino';
 import { UsersService } from '../users/users.service';
@@ -244,6 +247,82 @@ export class EventsService {
         registeredAt: registration.registeredAt.toISOString(),
       })),
     };
+  }
+
+  async update(
+    authentikId: string | undefined,
+    eventId: string,
+    body: unknown,
+  ): Promise<EventDetails> {
+    await this.assertCanManageCreatedEvent(authentikId, eventId);
+    const parsed = parseCreateEventBody(body);
+
+    await this.prisma.event.update({
+      where: { id: eventId },
+      data: {
+        name: parsed.name,
+        eventType: parsed.eventType,
+        sport: parsed.sport,
+        eventDate: parsed.eventDate,
+        distanceKm:
+          parsed.distanceKm === null
+            ? null
+            : new Prisma.Decimal(parsed.distanceKm),
+        description: parsed.description,
+        registrationOpen: parsed.registrationOpen,
+        registrationClose: parsed.registrationClose,
+      },
+    });
+
+    return this.findById(eventId);
+  }
+
+  async cancel(
+    authentikId: string | undefined,
+    eventId: string,
+  ): Promise<EventDetails> {
+    await this.assertCanManageCreatedEvent(authentikId, eventId);
+
+    await this.prisma.event.update({
+      where: { id: eventId },
+      data: { status: 'CANCELLED' },
+    });
+
+    return this.findById(eventId);
+  }
+
+  private async assertCanManageCreatedEvent(
+    authentikId: string | undefined,
+    eventId: string,
+  ) {
+    await this.rolesService.assertHasAnyRole(authentikId, [
+      RoleCode.ADMINISTRATOR,
+    ]);
+
+    const actor = await this.usersService.findBySub(authentikId as string);
+    if (!actor) {
+      throw new UnauthorizedException(
+        'Not authenticated. Start with GET /auth/login.',
+      );
+    }
+
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { id: true, createdById: true, status: true },
+    });
+    if (!event) {
+      throw new NotFoundException('Event not found.');
+    }
+    if (event.createdById !== actor.id) {
+      throw new ForbiddenException(
+        'Only the administrator who created this event can change it.',
+      );
+    }
+    if (event.status !== 'PLANNED') {
+      throw new BadRequestException(
+        'Only a planned event can be edited or cancelled.',
+      );
+    }
   }
 
   private toResponse(event: {

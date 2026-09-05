@@ -1,11 +1,21 @@
-import { Button, Card, Result, Skeleton, Space, Table, Tag, Typography } from 'antd';
+import { Button, Card, Modal, Result, Skeleton, Space, Table, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useEventDetailsQuery } from '../../features/events/useEventDetailsQuery';
+import { canManageCreatedEvent } from '../../features/auth/canCreateEvents';
+import { usePersonalQuery } from '../../features/auth/usePersonalQuery';
+import { eventsService } from '../../features/events/eventsService';
+import { recentEventsQueryKey } from '../../features/events/useRecentEventsQuery';
+import {
+  eventDetailsQueryKey,
+  useEventDetailsQuery,
+} from '../../features/events/useEventDetailsQuery';
 import { FeaturesCard } from '../../shared/components';
 import { AppShell } from '../../shared/layout';
 import type { EventParticipant } from '../../shared/types/event';
 import type { FeatureItem } from '../../shared/types/track';
+import { EditEventModal } from './components/EditEventModal';
 
 const eventTypeLabels: Record<string, string> = {
   RACE: 'Гонка',
@@ -98,8 +108,13 @@ const participantColumns: ColumnsType<EventParticipant> = [
 
 export function EventPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { id } = useParams<{ id: string }>();
   const eventQuery = useEventDetailsQuery(id);
+  const personalQuery = usePersonalQuery();
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   if (eventQuery.isLoading) {
     return (
@@ -129,6 +144,12 @@ export function EventPage() {
   }
 
   const event = eventQuery.data;
+  const canManage = canManageCreatedEvent({
+    roles: personalQuery.data?.roles,
+    profileId: personalQuery.data?.profile?.id,
+    createdById: event.createdBy?.id,
+    status: event.status,
+  });
   const status = statusLabels[event.status] ?? { text: event.status, color: 'default' };
   const features: FeatureItem[] = [
     { key: 'track', title: 'Трасса', value: event.track.name },
@@ -158,21 +179,58 @@ export function EventPage() {
     },
     { key: 'createdBy', title: 'Создал', value: event.createdBy?.name ?? '—' },
     { key: 'createdAt', title: 'Создано', value: formatDateTime(event.createdAt) },
-    {
-      key: 'participants',
-      title: 'Участников',
-      value: String(event.registrations.length),
-    },
+    { key: 'participants', title: 'Участников', value: String(event.registrations.length) },
   ];
+
+  const refreshEvent = () => {
+    if (!event.id) return;
+    void queryClient.invalidateQueries({ queryKey: eventDetailsQueryKey(event.id) });
+    void queryClient.invalidateQueries({ queryKey: recentEventsQueryKey });
+  };
+
+  const handleCancelEvent = () => {
+    setIsCancelConfirmOpen(true);
+  };
+
+  const submitCancelEvent = async () => {
+    setIsCancelling(true);
+    try {
+      await eventsService.cancelEvent(event.id);
+      message.success('Мероприятие отменено');
+      setIsCancelConfirmOpen(false);
+      refreshEvent();
+    } catch (error) {
+      const statusCode = eventsService.getStatus(error);
+      if (statusCode === 401) {
+        message.error('Неаутентифицирован. Войдите в систему ещё раз.');
+      } else if (statusCode === 403) {
+        message.error('Недостаточно прав. Отменить может только создатель-администратор.');
+      } else {
+        message.error(eventsService.getErrorMessage(error));
+      }
+    } finally {
+      setIsCancelling(false);
+    }
+  };
 
   return (
     <AppShell
       title={event.name}
       subtitle={`${event.track.name} · ${event.eventDate}`}
       extra={
-        <Button type="default" onClick={() => navigate('/')}>
-          На главную
-        </Button>
+        <Space wrap>
+          {canManage ? (
+            <>
+              <Button onClick={() => setIsEditOpen(true)}>Редактировать</Button>
+              <Button danger loading={isCancelling} onClick={handleCancelEvent}>
+                Отменить мероприятие
+              </Button>
+            </>
+          ) : null}
+          <Button type="default" onClick={() => navigate('/')}>
+            На главную
+          </Button>
+        </Space>
       }
     >
       <Space direction="vertical" size={24} style={{ width: '100%' }}>
@@ -212,6 +270,23 @@ export function EventPage() {
           />
         </Card>
       </Space>
+      <EditEventModal
+        open={isEditOpen}
+        event={event}
+        onClose={() => setIsEditOpen(false)}
+        onUpdated={refreshEvent}
+      />
+      <Modal
+        title="Отменить мероприятие?"
+        open={isCancelConfirmOpen}
+        onCancel={() => setIsCancelConfirmOpen(false)}
+        okText="Отменить мероприятие"
+        okButtonProps={{ danger: true, loading: isCancelling }}
+        cancelText="Назад"
+        onOk={submitCancelEvent}
+      >
+        Мероприятие получит статус «Отменено» и исчезнет из списка ближайших событий.
+      </Modal>
     </AppShell>
   );
 }
