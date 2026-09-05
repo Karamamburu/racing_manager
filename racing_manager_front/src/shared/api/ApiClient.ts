@@ -33,6 +33,24 @@ export class ApiClient {
     return response.data;
   }
 
+  public async postResult<TResponse>(
+    url: string,
+    data?: unknown,
+    config?: AxiosRequestConfig,
+  ): Promise<{ status: number; data: TResponse }> {
+    const response = await this.client.post<TResponse>(url, data, config);
+    return { status: response.status, data: response.data };
+  }
+
+  public async patchResult<TResponse>(
+    url: string,
+    data?: unknown,
+    config?: AxiosRequestConfig,
+  ): Promise<{ status: number; data: TResponse }> {
+    const response = await this.client.patch<TResponse>(url, data, config);
+    return { status: response.status, data: response.data };
+  }
+
   public async request<TResponse>(
     config: AxiosRequestConfig,
   ): Promise<TResponse> {

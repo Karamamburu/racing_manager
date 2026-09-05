@@ -10,6 +10,7 @@ export type PersonalResponse = {
   user: SessionUser;
   roles: string[];
   profile: {
+    id?: string | null;
     firstName: string | null;
     lastName: string | null;
     userName: string | null;

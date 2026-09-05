@@ -4,6 +4,7 @@ export type MainEventRow = {
   key: string;
   event: string;
   date: string;
+  distanceKm: number | null;
   status: MainEventStatus;
   track: string;
   registeredCount: number;

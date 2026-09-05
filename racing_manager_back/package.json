@@ -12,6 +12,7 @@
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "test": "jest",
     "prisma:generate": "prisma generate",
+    "postinstall": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:migrate:dev": "prisma migrate dev"
   },
