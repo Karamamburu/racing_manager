@@ -11,7 +11,10 @@ import { RolesService } from '../auth/roles.service';
 import { ALESHKINO_TRACK_ID } from '../tracks/aleshkino';
 import { UsersService } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { parseCreateEventBody } from './parse-create-event';
+import {
+  parseCreateEventBody,
+  type ParsedCreateEvent,
+} from './parse-create-event';
 
 export type EventResponse = {
   id: string;
@@ -34,6 +37,7 @@ export type RecentEventRow = {
   id: string;
   name: string;
   eventDate: string;
+  distanceKm: number | null;
   status: string;
   trackName: string;
   registeredCount: number;
@@ -100,7 +104,7 @@ export class EventsService {
       );
     }
 
-    const parsed = parseCreateEventBody(body);
+    const parsed: ParsedCreateEvent = parseCreateEventBody(body);
     const track = await this.prisma.track.findUnique({
       where: { id: ALESHKINO_TRACK_ID },
     });
@@ -151,6 +155,8 @@ export class EventsService {
       id: row.id,
       name: row.name,
       eventDate: row.eventDate.toISOString().slice(0, 10),
+      distanceKm:
+        row.distanceKm === null ? null : Number(row.distanceKm.toString()),
       status: row.status,
       trackName: row.track.name,
       registeredCount: row._count.registrations,
@@ -255,7 +261,7 @@ export class EventsService {
     body: unknown,
   ): Promise<EventDetails> {
     await this.assertCanManageCreatedEvent(authentikId, eventId);
-    const parsed = parseCreateEventBody(body);
+    const parsed: ParsedCreateEvent = parseCreateEventBody(body);
 
     await this.prisma.event.update({
       where: { id: eventId },

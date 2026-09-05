@@ -36,6 +36,7 @@ export type RecentEventRow = {
   id: string;
   name: string;
   eventDate: string;
+  distanceKm: number | null;
   status: 'PLANNED' | 'DONE' | 'CANCELLED';
   trackName: string;
   registeredCount: number;

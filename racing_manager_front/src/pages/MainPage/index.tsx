@@ -29,6 +29,7 @@ function toMainEventRow(event: RecentEventRow): MainEventRow {
     key: event.id,
     event: event.name,
     date: event.eventDate,
+    distanceKm: event.distanceKm,
     status: event.status === 'DONE' ? 'DONE' : 'PLANNED',
     track: event.trackName,
     registeredCount: event.registeredCount,
@@ -48,6 +49,12 @@ function getEventColumns(onEventOpen: (eventId: string) => void): ColumnsType<Ma
       ),
     },
     { title: 'Дата', dataIndex: 'date', key: 'date' },
+    {
+      title: 'Дистанция',
+      dataIndex: 'distanceKm',
+      key: 'distanceKm',
+      render: (distanceKm: number | null) => (distanceKm ? `${distanceKm} км` : '-'),
+    },
     { title: 'Зарегистрировано', dataIndex: 'registeredCount', key: 'registeredCount' },
     {
       title: 'Статус',
