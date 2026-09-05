@@ -2,59 +2,17 @@ import {
   Alert,
   Button,
   Card,
-  Col,
   Descriptions,
   Empty,
   Result,
-  Row,
   Skeleton,
   Space,
-  Statistic,
-  Table,
-  Tag,
   Typography,
 } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
 import { useNavigate } from 'react-router-dom';
 import { authService } from '../../features/auth/authService';
 import { usePersonalQuery } from '../../features/auth/usePersonalQuery';
 import { AppShell } from '../../shared/layout';
-
-type RaceRow = {
-  key: string;
-  event: string;
-  place: number;
-  time: string;
-  status: 'FINISHED' | 'REGISTERED' | 'DNS';
-};
-
-const raceColumns: ColumnsType<RaceRow> = [
-  { title: 'Событие', dataIndex: 'event', key: 'event' },
-  { title: 'Место', dataIndex: 'place', key: 'place' },
-  { title: 'Время', dataIndex: 'time', key: 'time' },
-  {
-    title: 'Статус',
-    dataIndex: 'status',
-    key: 'status',
-    render: (status: RaceRow['status']) => {
-      if (status === 'FINISHED') return <Tag color="green">FINISHED</Tag>;
-      if (status === 'REGISTERED') return <Tag color="blue">REGISTERED</Tag>;
-      return <Tag color="red">DNS</Tag>;
-    },
-  },
-];
-
-const races: RaceRow[] = [
-  { key: '1', event: 'Winter Sprint', place: 2, time: '00:32:14', status: 'FINISHED' },
-  { key: '2', event: 'City Trail', place: 5, time: '01:12:44', status: 'FINISHED' },
-  {
-    key: '3',
-    event: 'Forest Marathon',
-    place: 0,
-    time: '—',
-    status: 'REGISTERED',
-  },
-];
 
 export function CabinetPage() {
   const navigate = useNavigate();
@@ -107,7 +65,7 @@ export function CabinetPage() {
     );
   }
 
-  const { user, profile } = data;
+  const { user, profile, roles } = data;
   const fullName =
     user.name ??
     ([profile?.firstName, profile?.lastName].filter(Boolean).join(' ') ||
@@ -116,7 +74,7 @@ export function CabinetPage() {
   return (
     <AppShell
       title="Личный кабинет"
-      subtitle="Профиль спортсмена и краткая статистика"
+      subtitle="Персональные данные пользователя"
       extra={<Button onClick={() => navigate('/')}>На главную</Button>}
     >
       <Space direction="vertical" size={24} style={{ width: '100%' }}>
@@ -124,60 +82,31 @@ export function CabinetPage() {
           type="info"
           showIcon
           message="Сессия активна"
-          description="Профиль загружен из backend endpoint /personal на основе текущей серверной сессии."
+          description="Профиль загружен из endpoint /personal на основе текущей серверной сессии."
         />
 
-        <Row gutter={[16, 16]}>
-          <Col xs={24} lg={10}>
-            <Card title="Профиль">
-              <Typography.Title level={4} style={{ marginTop: 0 }}>
-                {fullName}
-              </Typography.Title>
-              <Typography.Paragraph type="secondary" style={{ marginBottom: 24 }}>
-                {user.email ?? profile?.email ?? 'Email не указан'}
-              </Typography.Paragraph>
+        <Card title="Профиль">
+          <Typography.Title level={4} style={{ marginTop: 0 }}>
+            {fullName}
+          </Typography.Title>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 24 }}>
+            {user.email ?? profile?.email ?? 'Email не указан'}
+          </Typography.Paragraph>
 
-              <Descriptions bordered column={1} size="small">
-                <Descriptions.Item label="Username">
-                  {user.username ?? profile?.userName ?? '—'}
-                </Descriptions.Item>
-                <Descriptions.Item label="Город">{profile?.city ?? '—'}</Descriptions.Item>
-                <Descriptions.Item label="Пол">{profile?.gender ?? '—'}</Descriptions.Item>
-                <Descriptions.Item label="Дата рождения">{profile?.birthDate ?? '—'}</Descriptions.Item>
-                <Descriptions.Item label="Рост">{profile?.lengthCm ? `${profile.lengthCm} см` : '—'}</Descriptions.Item>
-                <Descriptions.Item label="Вес">{profile?.weightKg ? `${profile.weightKg} кг` : '—'}</Descriptions.Item>
-              </Descriptions>
-            </Card>
-          </Col>
-
-          <Col xs={24} lg={14}>
-            <Row gutter={[16, 16]}>
-              <Col xs={12}>
-                <Card>
-                  <Statistic title="Гонок" value={12} />
-                </Card>
-              </Col>
-              <Col xs={12}>
-                <Card>
-                  <Statistic title="Побед" value={5} />
-                </Card>
-              </Col>
-              <Col xs={12}>
-                <Card>
-                  <Statistic title="Очков" value={340} />
-                </Card>
-              </Col>
-              <Col xs={12}>
-                <Card>
-                  <Statistic title="Кубков" value={3} />
-                </Card>
-              </Col>
-            </Row>
-          </Col>
-        </Row>
-
-        <Card title="История гонок">
-          <Table columns={raceColumns} dataSource={races} pagination={false} />
+          <Descriptions bordered column={1} size="small">
+            <Descriptions.Item label="Username">{user.username ?? profile?.userName ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Роли">
+              {roles?.length ? roles.join(', ') : 'участник'}
+            </Descriptions.Item>
+            <Descriptions.Item label="Имя">{profile?.firstName ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Фамилия">{profile?.lastName ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Email">{profile?.email ?? user.email ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Пол">{profile?.gender ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Дата рождения">{profile?.birthDate ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Город">{profile?.city ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Район">{profile?.district ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Команда">{profile?.team ?? '—'}</Descriptions.Item>
+          </Descriptions>
         </Card>
 
         {!profile && (

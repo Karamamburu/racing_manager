@@ -1,7 +1,10 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { usePersonalQuery } from './features/auth/usePersonalQuery';
 import { CabinetPage, EventPage, MainPage, TrackPage, TracksPage } from './pages';
 
 export default function App() {
+  usePersonalQuery();
+
   return (
     <Routes>
       <Route path="/" element={<MainPage />} />

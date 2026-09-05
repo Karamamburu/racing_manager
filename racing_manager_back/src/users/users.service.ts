@@ -8,6 +8,11 @@ export type AppUser = {
   email?: string;
   firstName?: string;
   lastName?: string;
+  gender?: 'M' | 'F';
+  birthDate?: string;
+  city?: string;
+  district?: string;
+  team?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -80,6 +85,11 @@ export class UsersService {
     email: string | null;
     firstName: string | null;
     lastName: string | null;
+    gender?: 'M' | 'F' | null;
+    birthDate?: Date | null;
+    city?: string | null;
+    district?: string | null;
+    team?: string | null;
     createdAt: Date;
     updatedAt: Date;
   }): AppUser {
@@ -90,6 +100,11 @@ export class UsersService {
       email: dbUser.email ?? undefined,
       firstName: dbUser.firstName ?? undefined,
       lastName: dbUser.lastName ?? undefined,
+      gender: dbUser.gender ?? undefined,
+      birthDate: dbUser.birthDate?.toISOString().slice(0, 10) ?? undefined,
+      city: dbUser.city ?? undefined,
+      district: dbUser.district ?? undefined,
+      team: dbUser.team ?? undefined,
       createdAt: dbUser.createdAt.toISOString(),
       updatedAt: dbUser.updatedAt.toISOString(),
     };
