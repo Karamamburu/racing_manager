@@ -5,14 +5,18 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ADMIN_ROLE_CODES } from '../auth/role-codes';
+import { RolesService } from '../auth/roles.service';
 import { UsersService } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   parseCreateRegistrationBody,
   type ParsedCreateRegistration,
 } from './parse-create-registration';
+import { parseUpdateRegistrationBody } from './parse-update-registration';
 import {
   ACTIVE_REGISTRATION_STATUSES,
+  isActiveRegistrationStatus,
   RegistrationStatusCode,
 } from './registration-status';
 
@@ -103,6 +107,7 @@ export class RegistrationsService {
   constructor(
     prisma: PrismaService,
     private readonly usersService: UsersService,
+    private readonly rolesService: RolesService,
   ) {
     this.store = prisma as unknown as RegistrationsStore;
   }
@@ -210,6 +215,47 @@ export class RegistrationsService {
       },
     });
     return this.toResponse(withdrawn);
+  }
+
+  async update(
+    authentikId: string | undefined,
+    eventId: string,
+    registrationId: string,
+    body: unknown,
+  ): Promise<RegistrationResponse> {
+    await this.rolesService.assertHasAnyRole(authentikId, ADMIN_ROLE_CODES);
+    const parsed = parseUpdateRegistrationBody(body);
+    await this.requirePlannedEvent(eventId);
+
+    const existing = await this.store.registration.findFirst({
+      where: { id: registrationId, eventId },
+    });
+    if (!existing) {
+      throw new NotFoundException('Registration not found.');
+    }
+    if (!isActiveRegistrationStatus(existing.status)) {
+      throw new BadRequestException(
+        'Only an active registration can be updated.',
+      );
+    }
+
+    try {
+      const updated = await this.store.registration.update({
+        where: { id: existing.id },
+        data: {
+          startNumber: parsed.startNumber,
+          status: RegistrationStatusCode.CONFIRMED,
+        },
+      });
+      return this.toResponse(updated);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ConflictException(
+          'Start number is already assigned on this event.',
+        );
+      }
+      throw error;
+    }
   }
 
   private async requirePlannedEvent(

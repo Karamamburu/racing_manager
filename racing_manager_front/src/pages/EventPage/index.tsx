@@ -3,7 +3,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import { canManageCreatedEvent } from '../../features/auth/canCreateEvents';
+import { canCreateEvents, canManageCreatedEvent } from '../../features/auth/canCreateEvents';
 import { usePersonalQuery } from '../../features/auth/usePersonalQuery';
 import { eventsService } from '../../features/events/eventsService';
 import { recentEventsQueryKey } from '../../features/events/useRecentEventsQuery';
@@ -23,6 +23,7 @@ import type { EventParticipant } from '../../shared/types/event';
 import type { FeatureItem } from '../../shared/types/track';
 import { EditEventModal } from './components/EditEventModal';
 import { RegisterEventModal } from './components/RegisterEventModal';
+import { StartNumberCell } from './components/StartNumberCell';
 
 const eventTypeLabels: Record<string, string> = {
   RACE: 'Гонка',
@@ -54,64 +55,77 @@ const genderLabels: Record<string, string> = {
   F: 'Женский',
 };
 
-const participantColumns: ColumnsType<EventParticipant> = [
-  {
-    title: 'Стартовый номер',
-    dataIndex: 'startNumber',
-    key: 'startNumber',
-    render: (value: number | null) => value ?? '—',
-  },
-  {
-    title: 'ФИО',
-    dataIndex: 'fullName',
-    key: 'fullName',
-  },
-  {
-    title: 'Год рождения',
-    dataIndex: 'birthYear',
-    key: 'birthYear',
-    render: (value: number | null) => value ?? '—',
-  },
-  {
-    title: 'Пол',
-    dataIndex: 'gender',
-    key: 'gender',
-    render: (value: string | null) => (value ? genderLabels[value] ?? value : '—'),
-  },
-  {
-    title: 'Город',
-    dataIndex: 'city',
-    key: 'city',
-    render: (value: string | null) => value ?? '—',
-  },
-  {
-    title: 'Район',
-    dataIndex: 'district',
-    key: 'district',
-    render: (value: string | null) => value ?? '—',
-  },
-  {
-    title: 'Команда',
-    dataIndex: 'team',
-    key: 'team',
-    render: (value: string | null) => value ?? '—',
-  },
-  {
-    title: 'Статус заявки',
-    dataIndex: 'status',
-    key: 'status',
-    render: (value: string) => {
-      const status = registrationStatusLabels[value];
-      return <Tag color={status?.color}>{status?.text ?? value}</Tag>;
+function getParticipantColumns(options: {
+  canAssignNumbers: boolean;
+  savingId: string | null;
+  onAssignNumber: (participant: EventParticipant, startNumber: number) => Promise<void>;
+}): ColumnsType<EventParticipant> {
+  return [
+    {
+      title: 'Стартовый номер',
+      dataIndex: 'startNumber',
+      key: 'startNumber',
+      render: (value: number | null, record) => (
+        <StartNumberCell
+          value={value}
+          canEdit={options.canAssignNumbers}
+          saving={options.savingId === record.id}
+          onSave={(startNumber) => options.onAssignNumber(record, startNumber)}
+        />
+      ),
     },
-  },
-  {
-    title: 'Подана',
-    dataIndex: 'registeredAt',
-    key: 'registeredAt',
-    render: (value: string) => formatDateTime(value),
-  },
-];
+    {
+      title: 'ФИО',
+      dataIndex: 'fullName',
+      key: 'fullName',
+    },
+    {
+      title: 'Год рождения',
+      dataIndex: 'birthYear',
+      key: 'birthYear',
+      render: (value: number | null) => value ?? '—',
+    },
+    {
+      title: 'Пол',
+      dataIndex: 'gender',
+      key: 'gender',
+      render: (value: string | null) => (value ? genderLabels[value] ?? value : '—'),
+    },
+    {
+      title: 'Город',
+      dataIndex: 'city',
+      key: 'city',
+      render: (value: string | null) => value ?? '—',
+    },
+    {
+      title: 'Район',
+      dataIndex: 'district',
+      key: 'district',
+      render: (value: string | null) => value ?? '—',
+    },
+    {
+      title: 'Команда',
+      dataIndex: 'team',
+      key: 'team',
+      render: (value: string | null) => value ?? '—',
+    },
+    {
+      title: 'Статус заявки',
+      dataIndex: 'status',
+      key: 'status',
+      render: (value: string) => {
+        const status = registrationStatusLabels[value];
+        return <Tag color={status?.color}>{status?.text ?? value}</Tag>;
+      },
+    },
+    {
+      title: 'Подана',
+      dataIndex: 'registeredAt',
+      key: 'registeredAt',
+      render: (value: string) => formatDateTime(value),
+    },
+  ];
+}
 
 export function EventPage() {
   const navigate = useNavigate();
@@ -125,6 +139,7 @@ export function EventPage() {
   const [isCancelRegistrationOpen, setIsCancelRegistrationOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isCancellingRegistration, setIsCancellingRegistration] = useState(false);
+  const [savingStartNumberId, setSavingStartNumberId] = useState<string | null>(null);
 
   if (eventQuery.isLoading) {
     return (
@@ -161,6 +176,8 @@ export function EventPage() {
     createdById: event.createdBy?.id,
     status: event.status,
   });
+  const canAssignNumbers =
+    canCreateEvents(personalQuery.data?.roles) && event.status === 'PLANNED';
   const myRegistration = event.registrations.find(
     (registration: EventParticipant) =>
       Boolean(registration.userId) && registration.userId === profile?.id,
@@ -205,6 +222,33 @@ export function EventPage() {
     void queryClient.invalidateQueries({ queryKey: eventDetailsQueryKey(event.id) });
     void queryClient.invalidateQueries({ queryKey: recentEventsQueryKey });
   };
+
+  const assignStartNumber = async (participant: EventParticipant, startNumber: number) => {
+    setSavingStartNumberId(participant.id);
+    try {
+      await registrationsService.update(event.id, participant.id, { startNumber });
+      message.success(`Номер ${startNumber} выдан, заявка подтверждена`);
+      refreshEvent();
+    } catch (error) {
+      const statusCode = registrationsService.getStatus(error);
+      if (statusCode === 403) {
+        message.error('Недостаточно прав. Выдавать номера может организатор или администратор.');
+      } else if (statusCode === 409) {
+        message.error('Этот стартовый номер уже занят.');
+      } else {
+        message.error(registrationsService.getErrorMessage(error));
+      }
+      throw error;
+    } finally {
+      setSavingStartNumberId(null);
+    }
+  };
+
+  const participantColumns = getParticipantColumns({
+    canAssignNumbers,
+    savingId: savingStartNumberId,
+    onAssignNumber: assignStartNumber,
+  });
 
   const handleCancelEvent = () => {
     setIsCancelConfirmOpen(true);

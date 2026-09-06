@@ -12,3 +12,7 @@ export const ACTIVE_REGISTRATION_STATUSES: RegistrationStatusCode[] = [
   RegistrationStatusCode.REGISTERED,
   RegistrationStatusCode.CONFIRMED,
 ];
+
+export function isActiveRegistrationStatus(status: string): boolean {
+  return (ACTIVE_REGISTRATION_STATUSES as string[]).includes(status);
+}

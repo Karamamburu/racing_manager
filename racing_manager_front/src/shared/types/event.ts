@@ -69,6 +69,10 @@ export type CreateRegistrationRequest = {
   team?: string;
 };
 
+export type UpdateRegistrationRequest = {
+  startNumber: number;
+};
+
 export type RegistrationResponse = {
   id: string;
   eventId: string;
