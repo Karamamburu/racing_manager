@@ -204,19 +204,18 @@ describe('EventsService', () => {
       registrations: [
         {
           id: 'reg-1',
+          userId: 'user-2',
+          firstName: 'Анна',
+          lastName: 'Смирнова',
+          gender: 'F',
+          birthYear: 1996,
+          city: 'Москва',
+          district: 'САО',
+          team: 'СК Север',
+          startNumber: null,
           status: 'CONFIRMED',
           note: null,
           registeredAt: new Date('2026-09-01T10:00:00.000Z'),
-          user: {
-            id: 'user-2',
-            firstName: 'Анна',
-            lastName: 'Смирнова',
-            birthDate: new Date('1996-04-12T00:00:00.000Z'),
-            gender: 'F',
-            city: 'Москва',
-            district: 'САО',
-            team: 'СК Север',
-          },
         },
       ],
     });
@@ -228,9 +227,11 @@ describe('EventsService', () => {
       registrations: [
         {
           id: 'reg-1',
+          userId: 'user-2',
           fullName: 'Анна Смирнова',
           birthYear: 1996,
           team: 'СК Север',
+          startNumber: null,
         },
       ],
     });

@@ -5,6 +5,7 @@ import { AuthModule } from './auth/auth.module';
 import { EventsModule } from './events/events.module';
 import { PersonalModule } from './personal/personal.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { RegistrationsModule } from './registrations/registrations.module';
 import { UsersModule } from './users/users.module';
 import { MainModule } from './main/main.module';
 
@@ -17,6 +18,7 @@ import { MainModule } from './main/main.module';
     PersonalModule,
     AdminModule,
     EventsModule,
+    RegistrationsModule,
     MainModule,
   ],
 })

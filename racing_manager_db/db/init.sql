@@ -109,16 +109,27 @@ CREATE TABLE events (
 
 -- ========================================
 -- REGISTRATIONS
+-- Guest registrations have user_id = NULL and store participant fields here.
+-- Logged-in users are linked via user_id; participant fields are a snapshot
+-- of the form submitted at registration time.
+-- start_number is assigned later by a race administrator.
 -- ========================================
 CREATE TABLE registrations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  first_name TEXT NOT NULL,
+  last_name TEXT NOT NULL,
+  gender gender_type NOT NULL,
+  birth_year INT NOT NULL CHECK (birth_year >= 1900 AND birth_year <= 2100),
+  city TEXT,
+  district TEXT,
+  team TEXT,
+  start_number INT CHECK (start_number > 0),
   status registration_status NOT NULL DEFAULT 'PENDING',
   note TEXT,
   registered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (event_id, user_id)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- ========================================
@@ -133,6 +144,12 @@ CREATE INDEX idx_events_status ON events(status);
 CREATE INDEX idx_registrations_event_id ON registrations(event_id);
 CREATE INDEX idx_registrations_user_id ON registrations(user_id);
 CREATE INDEX idx_registrations_status ON registrations(status);
+CREATE UNIQUE INDEX idx_registrations_event_user_active
+  ON registrations (event_id, user_id)
+  WHERE user_id IS NOT NULL AND status <> 'CANCELLED';
+CREATE UNIQUE INDEX idx_registrations_event_start_number
+  ON registrations (event_id, start_number)
+  WHERE start_number IS NOT NULL;
 
 -- ========================================
 -- SEED

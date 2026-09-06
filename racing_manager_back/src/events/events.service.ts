@@ -70,13 +70,14 @@ export type EventDetails = {
 
 export type EventParticipant = {
   id: string;
-  userId: string;
+  userId: string | null;
   fullName: string;
   birthYear: number | null;
   gender: string | null;
   city: string | null;
   district: string | null;
   team: string | null;
+  startNumber: number | null;
   status: string;
   note: string | null;
   registeredAt: string;
@@ -118,26 +119,23 @@ type PersonRow = {
   userName: string;
 };
 
-type ParticipantUserRow = {
-  id: string;
-  firstName: string | null;
-  lastName: string | null;
-  birthDate: Date | null;
-  gender: string | null;
-  city: string | null;
-  district: string | null;
-  team: string | null;
-};
-
 type EventWithDetails = StoredEvent & {
   track: EventDetails['track'];
   createdBy: PersonRow | null;
   registrations: Array<{
     id: string;
+    userId: string | null;
+    firstName: string;
+    lastName: string;
+    gender: string;
+    birthYear: number;
+    city: string | null;
+    district: string | null;
+    team: string | null;
+    startNumber: number | null;
     status: string;
     note: string | null;
     registeredAt: Date;
-    user: ParticipantUserRow;
   }>;
 };
 
@@ -294,19 +292,20 @@ export class EventsService {
         registrations: {
           where: { status: { not: 'CANCELLED' } },
           orderBy: { registeredAt: 'asc' },
-          include: {
-            user: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                birthDate: true,
-                gender: true,
-                city: true,
-                district: true,
-                team: true,
-              },
-            },
+          select: {
+            id: true,
+            userId: true,
+            firstName: true,
+            lastName: true,
+            gender: true,
+            birthYear: true,
+            city: true,
+            district: true,
+            team: true,
+            startNumber: true,
+            status: true,
+            note: true,
+            registeredAt: true,
           },
         },
       },
@@ -342,19 +341,18 @@ export class EventsService {
         : null,
       registrations: event.registrations.map((registration) => ({
         id: registration.id,
-        userId: registration.user.id,
+        userId: registration.userId,
         fullName: this.formatPersonName(
-          registration.user.firstName,
-          registration.user.lastName,
+          registration.firstName,
+          registration.lastName,
           'Участник',
         ),
-        birthYear: registration.user.birthDate
-          ? registration.user.birthDate.getUTCFullYear()
-          : null,
-        gender: registration.user.gender,
-        city: registration.user.city,
-        district: registration.user.district,
-        team: registration.user.team,
+        birthYear: registration.birthYear,
+        gender: registration.gender,
+        city: registration.city,
+        district: registration.district,
+        team: registration.team,
+        startNumber: registration.startNumber,
         status: registration.status,
         note: registration.note,
         registeredAt: registration.registeredAt.toISOString(),

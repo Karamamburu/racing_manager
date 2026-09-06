@@ -1,4 +1,4 @@
-import { Button, Card, Modal, Result, Skeleton, Space, Table, Tag, Typography, message } from 'antd';
+import { Button, Card, Modal, Result, Skeleton, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -11,11 +11,17 @@ import {
   eventDetailsQueryKey,
   useEventDetailsQuery,
 } from '../../features/events/useEventDetailsQuery';
+import {
+  isEventRegistrationOpen,
+  registrationClosedReason,
+} from '../../features/registrations/registrationWindow';
+import { registrationsService } from '../../features/registrations/registrationsService';
 import { FeaturesCard } from '../../shared/components';
 import { AppShell } from '../../shared/layout';
 import type { EventParticipant } from '../../shared/types/event';
 import type { FeatureItem } from '../../shared/types/track';
 import { EditEventModal } from './components/EditEventModal';
+import { RegisterEventModal } from './components/RegisterEventModal';
 
 const eventTypeLabels: Record<string, string> = {
   RACE: 'Гонка',
@@ -54,6 +60,12 @@ function formatDateTime(value: string | null): string {
 }
 
 const participantColumns: ColumnsType<EventParticipant> = [
+  {
+    title: 'Стартовый номер',
+    dataIndex: 'startNumber',
+    key: 'startNumber',
+    render: (value: number | null) => value ?? '—',
+  },
   {
     title: 'ФИО',
     dataIndex: 'fullName',
@@ -113,8 +125,11 @@ export function EventPage() {
   const eventQuery = useEventDetailsQuery(id);
   const personalQuery = usePersonalQuery();
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
+  const [isCancelRegistrationOpen, setIsCancelRegistrationOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isCancellingRegistration, setIsCancellingRegistration] = useState(false);
 
   if (eventQuery.isLoading) {
     return (
@@ -144,12 +159,20 @@ export function EventPage() {
   }
 
   const event = eventQuery.data;
+  const profile = personalQuery.data?.profile;
   const canManage = canManageCreatedEvent({
     roles: personalQuery.data?.roles,
-    profileId: personalQuery.data?.profile?.id,
+    profileId: profile?.id,
     createdById: event.createdBy?.id,
     status: event.status,
   });
+  const myRegistration = event.registrations.find(
+    (registration: EventParticipant) =>
+      Boolean(registration.userId) && registration.userId === profile?.id,
+  );
+  const registrationOpen = isEventRegistrationOpen(event);
+  const closedReason = registrationClosedReason(event);
+  const showRegister = event.status === 'PLANNED' && !myRegistration;
   const status = statusLabels[event.status] ?? { text: event.status, color: 'default' };
   const features: FeatureItem[] = [
     { key: 'track', title: 'Трасса', value: event.track.name },
@@ -192,6 +215,27 @@ export function EventPage() {
     setIsCancelConfirmOpen(true);
   };
 
+  const submitCancelRegistration = async () => {
+    setIsCancellingRegistration(true);
+    try {
+      await registrationsService.cancelOwn(event.id);
+      message.success('Регистрация отменена');
+      setIsCancelRegistrationOpen(false);
+      refreshEvent();
+    } catch (error) {
+      const statusCode = registrationsService.getStatus(error);
+      if (statusCode === 401) {
+        message.error('Неаутентифицирован. Войдите в систему ещё раз.');
+      } else if (statusCode === 404) {
+        message.error('Активная регистрация не найдена.');
+      } else {
+        message.error(registrationsService.getErrorMessage(error));
+      }
+    } finally {
+      setIsCancellingRegistration(false);
+    }
+  };
+
   const submitCancelEvent = async () => {
     setIsCancelling(true);
     try {
@@ -219,6 +263,28 @@ export function EventPage() {
       subtitle={`${event.track.name} · ${event.eventDate}`}
       extra={
         <Space wrap>
+          {showRegister ? (
+            <Tooltip title={!registrationOpen ? closedReason : undefined}>
+              <span>
+                <Button
+                  type="primary"
+                  disabled={!registrationOpen}
+                  onClick={() => setIsRegisterOpen(true)}
+                >
+                  Зарегистрироваться
+                </Button>
+              </span>
+            </Tooltip>
+          ) : null}
+          {myRegistration ? (
+            <Button
+              danger
+              loading={isCancellingRegistration}
+              onClick={() => setIsCancelRegistrationOpen(true)}
+            >
+              Отменить регистрацию
+            </Button>
+          ) : null}
           {canManage ? (
             <>
               <Button onClick={() => setIsEditOpen(true)}>Редактировать</Button>
@@ -240,6 +306,7 @@ export function EventPage() {
               {event.name}
             </Typography.Title>
             <Tag color={status.color}>{status.text}</Tag>
+            {myRegistration ? <Tag color="green">Вы зарегистрированы</Tag> : null}
           </Space>
         </Card>
 
@@ -276,6 +343,24 @@ export function EventPage() {
         onClose={() => setIsEditOpen(false)}
         onUpdated={refreshEvent}
       />
+      <RegisterEventModal
+        open={isRegisterOpen}
+        eventId={event.id}
+        profile={profile}
+        onClose={() => setIsRegisterOpen(false)}
+        onRegistered={refreshEvent}
+      />
+      <Modal
+        title="Отменить регистрацию?"
+        open={isCancelRegistrationOpen}
+        onCancel={() => setIsCancelRegistrationOpen(false)}
+        okText="Отменить регистрацию"
+        okButtonProps={{ danger: true, loading: isCancellingRegistration }}
+        cancelText="Назад"
+        onOk={submitCancelRegistration}
+      >
+        Заявка будет снята, и вы исчезнете из списка участников.
+      </Modal>
       <Modal
         title="Отменить мероприятие?"
         open={isCancelConfirmOpen}
