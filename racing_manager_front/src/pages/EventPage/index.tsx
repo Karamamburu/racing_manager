@@ -17,6 +17,7 @@ import {
 } from '../../features/registrations/registrationWindow';
 import { registrationsService } from '../../features/registrations/registrationsService';
 import { FeaturesCard } from '../../shared/components';
+import { formatDateTime } from '../../shared/formatDateTime';
 import { AppShell } from '../../shared/layout';
 import type { EventParticipant } from '../../shared/types/event';
 import type { FeatureItem } from '../../shared/types/track';
@@ -42,22 +43,16 @@ const statusLabels: Record<string, { text: string; color: string }> = {
 };
 
 const registrationStatusLabels: Record<string, { text: string; color: string }> = {
-  PENDING: { text: 'Ожидает', color: 'gold' },
+  REGISTERED: { text: 'Зарегистрирована', color: 'blue' },
   CONFIRMED: { text: 'Подтверждена', color: 'green' },
-  CANCELLED: { text: 'Отменена', color: 'default' },
+  CANCELLED: { text: 'Отменена', color: 'red' },
+  WITHDRAWN: { text: 'Отозвана', color: 'default' },
 };
 
 const genderLabels: Record<string, string> = {
   M: 'Мужской',
   F: 'Женский',
 };
-
-function formatDateTime(value: string | null): string {
-  if (!value) return '—';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString('ru-RU');
-}
 
 const participantColumns: ColumnsType<EventParticipant> = [
   {
@@ -170,7 +165,7 @@ export function EventPage() {
     (registration: EventParticipant) =>
       Boolean(registration.userId) && registration.userId === profile?.id,
   );
-  const registrationOpen = isEventRegistrationOpen(event);
+  const canRegister = isEventRegistrationOpen(event);
   const closedReason = registrationClosedReason(event);
   const showRegister = event.status === 'PLANNED' && !myRegistration;
   const status = statusLabels[event.status] ?? { text: event.status, color: 'default' };
@@ -183,7 +178,7 @@ export function EventPage() {
       value: eventTypeLabels[event.eventType] ?? event.eventType,
     },
     { key: 'sport', title: 'Вид спорта', value: sportLabels[event.sport] ?? event.sport },
-    { key: 'eventDate', title: 'Дата проведения', value: event.eventDate },
+    { key: 'eventDate', title: 'Дата проведения', value: formatDateTime(event.eventDate) },
     {
       key: 'distanceKm',
       title: 'Дистанция, км',
@@ -192,12 +187,12 @@ export function EventPage() {
     { key: 'status', title: 'Статус', value: status.text },
     {
       key: 'registrationOpen',
-      title: 'Открытие регистрации',
+      title: 'Начало выдачи номеров',
       value: formatDateTime(event.registrationOpen),
     },
     {
       key: 'registrationClose',
-      title: 'Закрытие регистрации',
+      title: 'Окончание выдачи номеров',
       value: formatDateTime(event.registrationClose),
     },
     { key: 'createdBy', title: 'Создал', value: event.createdBy?.name ?? '—' },
@@ -219,7 +214,7 @@ export function EventPage() {
     setIsCancellingRegistration(true);
     try {
       await registrationsService.cancelOwn(event.id);
-      message.success('Регистрация отменена');
+      message.success('Заявка отозвана');
       setIsCancelRegistrationOpen(false);
       refreshEvent();
     } catch (error) {
@@ -260,15 +255,15 @@ export function EventPage() {
   return (
     <AppShell
       title={event.name}
-      subtitle={`${event.track.name} · ${event.eventDate}`}
+      subtitle={`${event.track.name} · ${formatDateTime(event.eventDate)}`}
       extra={
         <Space wrap>
           {showRegister ? (
-            <Tooltip title={!registrationOpen ? closedReason : undefined}>
+            <Tooltip title={!canRegister ? closedReason : undefined}>
               <span>
                 <Button
                   type="primary"
-                  disabled={!registrationOpen}
+                  disabled={!canRegister}
                   onClick={() => setIsRegisterOpen(true)}
                 >
                   Зарегистрироваться
@@ -282,7 +277,7 @@ export function EventPage() {
               loading={isCancellingRegistration}
               onClick={() => setIsCancelRegistrationOpen(true)}
             >
-              Отменить регистрацию
+              Отозвать заявку
             </Button>
           ) : null}
           {canManage ? (
@@ -351,15 +346,15 @@ export function EventPage() {
         onRegistered={refreshEvent}
       />
       <Modal
-        title="Отменить регистрацию?"
+        title="Отозвать заявку?"
         open={isCancelRegistrationOpen}
         onCancel={() => setIsCancelRegistrationOpen(false)}
-        okText="Отменить регистрацию"
+        okText="Отозвать заявку"
         okButtonProps={{ danger: true, loading: isCancellingRegistration }}
         cancelText="Назад"
         onOk={submitCancelRegistration}
       >
-        Заявка будет снята, и вы исчезнете из списка участников.
+        Заявка получит статус «Отозвана» и исчезнет из списка участников.
       </Modal>
       <Modal
         title="Отменить мероприятие?"
@@ -370,7 +365,8 @@ export function EventPage() {
         cancelText="Назад"
         onOk={submitCancelEvent}
       >
-        Мероприятие получит статус «Отменено» и исчезнет из списка ближайших событий.
+        Мероприятие получит статус «Отменено», активные заявки — «Отменена»,
+        и событие исчезнет из списка ближайших.
       </Modal>
     </AppShell>
   );

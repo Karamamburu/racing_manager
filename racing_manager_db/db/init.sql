@@ -11,7 +11,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TYPE sport_type AS ENUM ('RUN', 'SKI', 'ROLLER_SKI', 'BIKE');
 CREATE TYPE event_type AS ENUM ('RACE', 'TIME_TRIAL');
 CREATE TYPE event_status AS ENUM ('PLANNED', 'DONE', 'CANCELLED');
-CREATE TYPE registration_status AS ENUM ('PENDING', 'CONFIRMED', 'CANCELLED');
+CREATE TYPE registration_status AS ENUM ('REGISTERED', 'CONFIRMED', 'CANCELLED', 'WITHDRAWN');
 CREATE TYPE gender_type AS ENUM ('M', 'F');
 
 -- ========================================
@@ -91,7 +91,7 @@ CREATE TABLE events (
   name TEXT NOT NULL,
   event_type event_type NOT NULL DEFAULT 'RACE',
   sport sport_type NOT NULL,
-  event_date DATE NOT NULL,
+  event_date TIMESTAMPTZ NOT NULL,
   distance_km NUMERIC(6, 2) CHECK (distance_km > 0),
   description TEXT,
   registration_open TIMESTAMPTZ,
@@ -126,7 +126,7 @@ CREATE TABLE registrations (
   district TEXT,
   team TEXT,
   start_number INT CHECK (start_number > 0),
-  status registration_status NOT NULL DEFAULT 'PENDING',
+  status registration_status NOT NULL DEFAULT 'REGISTERED',
   note TEXT,
   registered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -146,7 +146,7 @@ CREATE INDEX idx_registrations_user_id ON registrations(user_id);
 CREATE INDEX idx_registrations_status ON registrations(status);
 CREATE UNIQUE INDEX idx_registrations_event_user_active
   ON registrations (event_id, user_id)
-  WHERE user_id IS NOT NULL AND status <> 'CANCELLED';
+  WHERE user_id IS NOT NULL AND status IN ('REGISTERED', 'CONFIRMED');
 CREATE UNIQUE INDEX idx_registrations_event_start_number
   ON registrations (event_id, start_number)
   WHERE start_number IS NOT NULL;

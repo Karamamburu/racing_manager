@@ -20,7 +20,7 @@ function storedRegistration(overrides: Record<string, unknown> = {}) {
     district: 'САО',
     team: 'СК Север',
     startNumber: null,
-    status: 'CONFIRMED',
+    status: 'REGISTERED',
     note: null,
     registeredAt: new Date('2026-09-06T10:00:00.000Z'),
     updatedAt: new Date('2026-09-06T10:00:00.000Z'),
@@ -118,7 +118,7 @@ describe('RegistrationsService', () => {
       eventId: 'event-1',
       userId: null,
       firstName: 'Анна',
-      status: 'CONFIRMED',
+      status: 'REGISTERED',
     });
 
     expect(usersService.findBySub).not.toHaveBeenCalled();
@@ -133,7 +133,7 @@ describe('RegistrationsService', () => {
         city: 'Москва',
         district: 'САО',
         team: 'СК Север',
-        status: 'CONFIRMED',
+        status: 'REGISTERED',
       },
     });
   });
@@ -154,7 +154,7 @@ describe('RegistrationsService', () => {
     ).resolves.toMatchObject({ userId: 'user-1' });
 
     expect(prisma.registration.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ userId: 'user-1', status: 'CONFIRMED' }),
+      data: expect.objectContaining({ userId: 'user-1', status: 'REGISTERED' }),
     });
   });
 
@@ -174,12 +174,12 @@ describe('RegistrationsService', () => {
     expect(prisma.registration.create).not.toHaveBeenCalled();
   });
 
-  it('restores a cancelled registration for the same user', async () => {
+  it('restores a withdrawn registration for the same user', async () => {
     prisma.event.findUnique.mockResolvedValue(plannedEvent);
     usersService.findBySub.mockResolvedValue({ id: 'user-1' });
     prisma.registration.findFirst
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(storedRegistration({ status: 'CANCELLED' }));
+      .mockResolvedValueOnce(storedRegistration({ status: 'WITHDRAWN' }));
     prisma.registration.update.mockResolvedValue(storedRegistration());
 
     await expect(
@@ -190,14 +190,14 @@ describe('RegistrationsService', () => {
         birthYear: 1996,
         city: 'Москва',
       }),
-    ).resolves.toMatchObject({ status: 'CONFIRMED' });
+    ).resolves.toMatchObject({ status: 'REGISTERED' });
 
     expect(prisma.registration.create).not.toHaveBeenCalled();
     expect(prisma.registration.update).toHaveBeenCalledWith({
       where: { id: 'reg-1' },
       data: expect.objectContaining({
         firstName: 'Анна',
-        status: 'CONFIRMED',
+        status: 'REGISTERED',
         startNumber: null,
       }),
     });
@@ -232,20 +232,60 @@ describe('RegistrationsService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('cancels the current user registration', async () => {
+  it('allows registration before number distribution starts', async () => {
+    prisma.event.findUnique.mockResolvedValue({
+      ...plannedEvent,
+      registrationOpen: new Date('2099-01-01T00:00:00.000Z'),
+      registrationClose: new Date('2099-01-02T00:00:00.000Z'),
+    });
+    prisma.registration.create.mockResolvedValue(
+      storedRegistration({ userId: null }),
+    );
+
+    await expect(
+      service.create(undefined, 'event-1', {
+        firstName: 'Анна',
+        lastName: 'Смирнова',
+        gender: 'F',
+        birthYear: 1996,
+      }),
+    ).resolves.toMatchObject({ id: 'reg-1' });
+  });
+
+  it('rejects registration after number distribution ends', async () => {
+    prisma.event.findUnique.mockResolvedValue({
+      ...plannedEvent,
+      registrationClose: new Date('2020-01-01T00:00:00.000Z'),
+    });
+
+    await expect(
+      service.create(undefined, 'event-1', {
+        firstName: 'Анна',
+        lastName: 'Смирнова',
+        gender: 'F',
+        birthYear: 1996,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.registration.create).not.toHaveBeenCalled();
+  });
+
+  it('withdraws the current user registration', async () => {
     prisma.event.findUnique.mockResolvedValue(plannedEvent);
     usersService.findBySub.mockResolvedValue({ id: 'user-1' });
     prisma.registration.findFirst.mockResolvedValue(storedRegistration());
     prisma.registration.update.mockResolvedValue(
-      storedRegistration({ status: 'CANCELLED' }),
+      storedRegistration({ status: 'WITHDRAWN' }),
     );
 
     await expect(service.cancelOwn('sub-1', 'event-1')).resolves.toMatchObject({
-      status: 'CANCELLED',
+      status: 'WITHDRAWN',
     });
     expect(prisma.registration.update).toHaveBeenCalledWith({
       where: { id: 'reg-1' },
-      data: { status: 'CANCELLED' },
+      data: {
+        status: 'WITHDRAWN',
+        startNumber: null,
+      },
     });
   });
 

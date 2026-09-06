@@ -10,6 +10,7 @@ import { RolesService } from '../auth/roles.service';
 import { ALESHKINO_TRACK_ID } from '../tracks/aleshkino';
 import { UsersService } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ACTIVE_REGISTRATION_STATUSES, RegistrationStatusCode } from '../registrations/registration-status';
 import {
   parseCreateEventBody,
   type ParsedCreateEvent,
@@ -179,6 +180,9 @@ type EventsStore = {
     };
     update: (args: { where: { id: string }; data: object }) => Promise<unknown>;
   };
+  registration: {
+    updateMany: (args: { where: object; data: object }) => Promise<unknown>;
+  };
 };
 
 function toKm(value: DecimalValue): number | null {
@@ -251,7 +255,7 @@ export class EventsService {
         _count: {
           select: {
             registrations: {
-              where: { status: { not: 'CANCELLED' } },
+              where: { status: { in: [...ACTIVE_REGISTRATION_STATUSES] } },
             },
           },
         },
@@ -261,7 +265,7 @@ export class EventsService {
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
-      eventDate: row.eventDate.toISOString().slice(0, 10),
+      eventDate: row.eventDate.toISOString(),
       distanceKm: toKm(row.distanceKm),
       status: row.status,
       trackName: row.track.name,
@@ -290,7 +294,7 @@ export class EventsService {
           },
         },
         registrations: {
-          where: { status: { not: 'CANCELLED' } },
+          where: { status: { in: [...ACTIVE_REGISTRATION_STATUSES] } },
           orderBy: { registeredAt: 'asc' },
           select: {
             id: true,
@@ -320,7 +324,7 @@ export class EventsService {
       name: event.name,
       eventType: event.eventType,
       sport: event.sport,
-      eventDate: event.eventDate.toISOString().slice(0, 10),
+      eventDate: event.eventDate.toISOString(),
       distanceKm: toKm(event.distanceKm),
       description: event.description,
       registrationOpen: event.registrationOpen?.toISOString() ?? null,
@@ -395,6 +399,16 @@ export class EventsService {
       where: { id: eventId },
       data: { status: 'CANCELLED' },
     });
+    await this.store.registration.updateMany({
+      where: {
+        eventId,
+        status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
+      },
+      data: {
+        status: RegistrationStatusCode.CANCELLED,
+        startNumber: null,
+      },
+    });
 
     return this.findById(eventId);
   }
@@ -440,7 +454,7 @@ export class EventsService {
       name: event.name,
       eventType: event.eventType,
       sport: event.sport,
-      eventDate: event.eventDate.toISOString().slice(0, 10),
+      eventDate: event.eventDate.toISOString(),
       distanceKm: toKm(event.distanceKm),
       description: event.description,
       registrationOpen: event.registrationOpen?.toISOString() ?? null,

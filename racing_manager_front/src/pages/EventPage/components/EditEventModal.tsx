@@ -4,6 +4,7 @@ import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
 import { authService } from '../../../features/auth/authService';
 import { eventsService } from '../../../features/events/eventsService';
+import { dateTimePickerProps } from '../../../shared/formatDateTime';
 import type {
   CreateEventRequest,
   EventDetails,
@@ -54,7 +55,7 @@ function toPayload(values: EditEventFormValues): CreateEventRequest {
     name: values.name.trim(),
     eventType: values.eventType,
     sport: values.sport,
-    eventDate: values.eventDate.format('YYYY-MM-DD'),
+    eventDate: values.eventDate.toDate().toISOString(),
   };
   if (values.distanceKm) payload.distanceKm = values.distanceKm;
   if (values.description?.trim()) payload.description = values.description.trim();
@@ -203,7 +204,7 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
             label="Дата проведения"
             rules={[{ required: true, message: 'Укажите дату' }]}
           >
-            <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
+            <DatePicker {...dateTimePickerProps} />
           </Form.Item>
 
           <Form.Item name="distanceKm" label="Дистанция, км">
@@ -214,13 +215,13 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
             <Input.TextArea rows={3} />
           </Form.Item>
 
-          <Form.Item name="registrationOpen" label="Открытие регистрации">
-            <DatePicker showTime style={{ width: '100%' }} />
+          <Form.Item name="registrationOpen" label="Начало выдачи номеров">
+            <DatePicker {...dateTimePickerProps} />
           </Form.Item>
 
           <Form.Item
             name="registrationClose"
-            label="Закрытие регистрации"
+            label="Окончание выдачи номеров"
             dependencies={['registrationOpen']}
             rules={[
               ({ getFieldValue }) => ({
@@ -228,7 +229,7 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
                   const openAt = getFieldValue('registrationOpen') as Dayjs | null | undefined;
                   if (openAt && value && value.isBefore(openAt)) {
                     return Promise.reject(
-                      new Error('Закрытие регистрации не может быть раньше открытия'),
+                      new Error('Окончание выдачи номеров не может быть раньше начала'),
                     );
                   }
                   return Promise.resolve();
@@ -236,7 +237,7 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
               }),
             ]}
           >
-            <DatePicker showTime style={{ width: '100%' }} />
+            <DatePicker {...dateTimePickerProps} />
           </Form.Item>
         </Form>
       </Modal>

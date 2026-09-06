@@ -16,6 +16,15 @@ describe('parseCreateEventBody', () => {
     expect(() => parseCreateEventBody({})).toThrow(BadRequestException);
   });
 
+  it('accepts ISO datetime for eventDate', () => {
+    const parsed = parseCreateEventBody({
+      name: 'КТ Алёшкино',
+      sport: 'SKI',
+      eventDate: '2026-12-06T10:00:00.000Z',
+    });
+    expect(parsed.eventDate.toISOString()).toBe('2026-12-06T10:00:00.000Z');
+  });
+
   it('defaults eventType to RACE', () => {
     const parsed = parseCreateEventBody({
       name: 'КТ Алёшкино',
@@ -48,6 +57,9 @@ describe('EventsService', () => {
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+    registration: {
+      updateMany: jest.fn(),
+    },
   };
   const rolesService = {
     assertAdminAccess: jest.fn(),
@@ -67,6 +79,7 @@ describe('EventsService', () => {
     prisma.event.findMany.mockReset();
     prisma.event.findUnique.mockReset();
     prisma.event.update.mockReset();
+    prisma.registration.updateMany.mockReset();
     rolesService.assertAdminAccess.mockReset();
     rolesService.assertHasAnyRole.mockReset();
     usersService.findBySub.mockReset();
@@ -120,7 +133,7 @@ describe('EventsService', () => {
       trackId: ALESHKINO_TRACK_ID,
       eventType: 'TIME_TRIAL',
       sport: 'SKI',
-      eventDate: '2026-12-06',
+      eventDate: '2026-12-06T00:00:00.000Z',
       distanceKm: 10.5,
       status: 'PLANNED',
       createdBy: 'user-1',
@@ -163,7 +176,7 @@ describe('EventsService', () => {
       {
         id: 'event-1',
         name: 'КТ Алёшкино',
-        eventDate: '2026-12-06',
+        eventDate: '2026-12-06T00:00:00.000Z',
         distanceKm: 10.5,
         status: 'PLANNED',
         trackName: 'Алёшкино',
@@ -213,7 +226,7 @@ describe('EventsService', () => {
           district: 'САО',
           team: 'СК Север',
           startNumber: null,
-          status: 'CONFIRMED',
+          status: 'REGISTERED',
           note: null,
           registeredAt: new Date('2026-09-01T10:00:00.000Z'),
         },
@@ -283,6 +296,7 @@ describe('EventsService', () => {
         registrations: [],
       });
     prisma.event.update.mockResolvedValue({});
+    prisma.registration.updateMany.mockResolvedValue({ count: 2 });
 
     await expect(service.cancel('sub-1', 'event-1')).resolves.toMatchObject({
       id: 'event-1',
@@ -291,6 +305,16 @@ describe('EventsService', () => {
     expect(prisma.event.update).toHaveBeenCalledWith({
       where: { id: 'event-1' },
       data: { status: 'CANCELLED' },
+    });
+    expect(prisma.registration.updateMany).toHaveBeenCalledWith({
+      where: {
+        eventId: 'event-1',
+        status: { in: ['REGISTERED', 'CONFIRMED'] },
+      },
+      data: {
+        status: 'CANCELLED',
+        startNumber: null,
+      },
     });
   });
 

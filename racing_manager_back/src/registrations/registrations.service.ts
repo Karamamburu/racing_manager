@@ -11,6 +11,10 @@ import {
   parseCreateRegistrationBody,
   type ParsedCreateRegistration,
 } from './parse-create-registration';
+import {
+  ACTIVE_REGISTRATION_STATUSES,
+  RegistrationStatusCode,
+} from './registration-status';
 
 export type RegistrationResponse = {
   id: string;
@@ -121,27 +125,27 @@ export class RegistrationsService {
         where: {
           eventId,
           userId: actor.id,
-          status: { not: 'CANCELLED' },
+          status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
         },
       });
       if (existing) {
         throw new ConflictException('Already registered for this event.');
       }
 
-      const cancelled = await this.store.registration.findFirst({
+      const withdrawn = await this.store.registration.findFirst({
         where: {
           eventId,
           userId: actor.id,
-          status: 'CANCELLED',
+          status: RegistrationStatusCode.WITHDRAWN,
         },
         orderBy: { registeredAt: 'desc' },
       });
-      if (cancelled) {
+      if (withdrawn) {
         const restored = await this.store.registration.update({
-          where: { id: cancelled.id },
+          where: { id: withdrawn.id },
           data: {
             ...parsed,
-            status: 'CONFIRMED',
+            status: RegistrationStatusCode.REGISTERED,
             startNumber: null,
             registeredAt: new Date(),
           },
@@ -156,7 +160,7 @@ export class RegistrationsService {
           eventId,
           userId: actor?.id ?? null,
           ...parsed,
-          status: 'CONFIRMED',
+          status: RegistrationStatusCode.REGISTERED,
         },
       });
       return this.toResponse(created);
@@ -191,18 +195,21 @@ export class RegistrationsService {
       where: {
         eventId,
         userId: actor.id,
-        status: { not: 'CANCELLED' },
+        status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
       },
     });
     if (!existing) {
       throw new NotFoundException('Registration not found.');
     }
 
-    const cancelled = await this.store.registration.update({
+    const withdrawn = await this.store.registration.update({
       where: { id: existing.id },
-      data: { status: 'CANCELLED' },
+      data: {
+        status: RegistrationStatusCode.WITHDRAWN,
+        startNumber: null,
+      },
     });
-    return this.toResponse(cancelled);
+    return this.toResponse(withdrawn);
   }
 
   private async requirePlannedEvent(
@@ -230,9 +237,6 @@ export class RegistrationsService {
 
   private assertRegistrationWindow(event: EventRegistrationWindow) {
     const now = Date.now();
-    if (event.registrationOpen && now < event.registrationOpen.getTime()) {
-      throw new BadRequestException('Registration is not open yet.');
-    }
     if (event.registrationClose && now > event.registrationClose.getTime()) {
       throw new BadRequestException('Registration is closed.');
     }

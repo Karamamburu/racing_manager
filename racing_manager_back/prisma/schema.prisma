@@ -40,9 +40,10 @@ enum EventStatus {
 }
 
 enum RegistrationStatus {
-  PENDING
+  REGISTERED
   CONFIRMED
   CANCELLED
+  WITHDRAWN
 
   @@map("registration_status")
 }
@@ -109,7 +110,7 @@ model Event {
   name               String
   eventType          EventKind   @default(RACE) @map("event_type")
   sport              SportType
-  eventDate          DateTime    @map("event_date") @db.Date
+  eventDate          DateTime    @map("event_date") @db.Timestamptz(6)
   distanceKm         Decimal?    @map("distance_km") @db.Decimal(6, 2)
   description        String?
   registrationOpen   DateTime?   @map("registration_open") @db.Timestamptz(6)
@@ -142,7 +143,7 @@ model Registration {
   district     String?
   team         String?
   startNumber  Int?               @map("start_number")
-  status       RegistrationStatus @default(PENDING)
+  status       RegistrationStatus @default(REGISTERED)
   note         String?
   registeredAt DateTime           @default(now()) @map("registered_at") @db.Timestamptz(6)
   updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
