@@ -9,11 +9,11 @@ import type {
 export class RegistrationsService {
   public async create(
     eventId: string,
-    payload: CreateRegistrationRequest,
+    payload?: CreateRegistrationRequest,
   ): Promise<{ status: number; data: RegistrationResponse }> {
     return apiClient.postResult<RegistrationResponse>(
       `/events/${eventId}/registrations`,
-      payload,
+      payload ?? {},
     );
   }
 

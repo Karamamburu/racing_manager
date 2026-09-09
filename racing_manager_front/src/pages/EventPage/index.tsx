@@ -385,6 +385,7 @@ export function EventPage() {
       <RegisterEventModal
         open={isRegisterOpen}
         eventId={event.id}
+        isAuthenticated={Boolean(personalQuery.data?.authenticated)}
         profile={profile}
         onClose={() => setIsRegisterOpen(false)}
         onRegistered={refreshEvent}

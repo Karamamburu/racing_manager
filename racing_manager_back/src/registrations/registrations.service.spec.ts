@@ -5,7 +5,10 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { parseCreateRegistrationBody } from './parse-create-registration';
+import {
+  parseCreateRegistrationBody,
+  registrationFieldsFromProfile,
+} from './parse-create-registration';
 import { parseUpdateRegistrationBody } from './parse-update-registration';
 import { RegistrationsService } from './registrations.service';
 
@@ -35,6 +38,17 @@ const plannedEvent = {
   status: 'PLANNED',
   registrationOpen: null,
   registrationClose: null,
+};
+
+const actorUser = {
+  id: 'user-1',
+  firstName: 'Анна',
+  lastName: 'Смирнова',
+  gender: 'F' as const,
+  birthDate: '1996-03-12',
+  city: 'Москва',
+  district: 'САО',
+  team: 'СК Север',
 };
 
 describe('parseCreateRegistrationBody', () => {
@@ -71,6 +85,29 @@ describe('parseCreateRegistrationBody', () => {
         lastName: 'Смирнова',
         gender: 'X',
         birthYear: 1996,
+      }),
+    ).toThrow(BadRequestException);
+  });
+});
+
+describe('registrationFieldsFromProfile', () => {
+  it('maps a complete profile onto registration fields', () => {
+    expect(registrationFieldsFromProfile(actorUser)).toEqual({
+      firstName: 'Анна',
+      lastName: 'Смирнова',
+      gender: 'F',
+      birthYear: 1996,
+      city: 'Москва',
+      district: 'САО',
+      team: 'СК Север',
+    });
+  });
+
+  it('rejects a profile without required fields', () => {
+    expect(() =>
+      registrationFieldsFromProfile({
+        firstName: 'Анна',
+        lastName: 'Смирнова',
       }),
     ).toThrow(BadRequestException);
   });
@@ -155,65 +192,102 @@ describe('RegistrationsService', () => {
     });
   });
 
-  it('links a logged-in user to the registration', async () => {
+  it('links a logged-in user from the session profile, ignoring the request body', async () => {
     prisma.event.findUnique.mockResolvedValue(plannedEvent);
-    usersService.findBySub.mockResolvedValue({ id: 'user-1' });
+    usersService.findBySub.mockResolvedValue(actorUser);
     prisma.registration.findFirst.mockResolvedValue(null);
     prisma.registration.create.mockResolvedValue(storedRegistration());
 
     await expect(
       service.create('sub-1', 'event-1', {
-        firstName: 'Анна',
-        lastName: 'Смирнова',
-        gender: 'F',
-        birthYear: 1996,
+        firstName: 'Поддельное',
+        lastName: 'Имя',
+        gender: 'M',
+        birthYear: 2000,
+        city: 'Чужой город',
       }),
     ).resolves.toMatchObject({ userId: 'user-1' });
 
     expect(prisma.registration.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ userId: 'user-1', status: 'REGISTERED' }),
-    });
-  });
-
-  it('rejects a second active registration for the same user', async () => {
-    prisma.event.findUnique.mockResolvedValue(plannedEvent);
-    usersService.findBySub.mockResolvedValue({ id: 'user-1' });
-    prisma.registration.findFirst.mockResolvedValue(storedRegistration());
-
-    await expect(
-      service.create('sub-1', 'event-1', {
-        firstName: 'Анна',
-        lastName: 'Смирнова',
-        gender: 'F',
-        birthYear: 1996,
-      }),
-    ).rejects.toBeInstanceOf(ConflictException);
-    expect(prisma.registration.create).not.toHaveBeenCalled();
-  });
-
-  it('restores a withdrawn registration for the same user', async () => {
-    prisma.event.findUnique.mockResolvedValue(plannedEvent);
-    usersService.findBySub.mockResolvedValue({ id: 'user-1' });
-    prisma.registration.findFirst
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(storedRegistration({ status: 'WITHDRAWN' }));
-    prisma.registration.update.mockResolvedValue(storedRegistration());
-
-    await expect(
-      service.create('sub-1', 'event-1', {
+      data: {
+        eventId: 'event-1',
+        userId: 'user-1',
         firstName: 'Анна',
         lastName: 'Смирнова',
         gender: 'F',
         birthYear: 1996,
         city: 'Москва',
-      }),
-    ).resolves.toMatchObject({ status: 'REGISTERED' });
+        district: 'САО',
+        team: 'СК Север',
+        status: 'REGISTERED',
+      },
+    });
+  });
+
+  it('registers a logged-in user from the profile when the body is empty', async () => {
+    prisma.event.findUnique.mockResolvedValue(plannedEvent);
+    usersService.findBySub.mockResolvedValue(actorUser);
+    prisma.registration.findFirst.mockResolvedValue(null);
+    prisma.registration.create.mockResolvedValue(storedRegistration());
+
+    await expect(service.create('sub-1', 'event-1', {})).resolves.toMatchObject({
+      userId: 'user-1',
+      firstName: 'Анна',
+    });
+  });
+
+  it('rejects a logged-in user with an incomplete profile', async () => {
+    usersService.findBySub.mockResolvedValue({
+      id: 'user-1',
+      firstName: 'Анна',
+    });
+
+    await expect(service.create('sub-1', 'event-1', {})).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.registration.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a session without a stored user', async () => {
+    usersService.findBySub.mockResolvedValue(null);
+
+    await expect(service.create('sub-1', 'event-1', {})).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+  });
+
+  it('rejects a second active registration for the same user', async () => {
+    prisma.event.findUnique.mockResolvedValue(plannedEvent);
+    usersService.findBySub.mockResolvedValue(actorUser);
+    prisma.registration.findFirst.mockResolvedValue(storedRegistration());
+
+    await expect(service.create('sub-1', 'event-1', {})).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(prisma.registration.create).not.toHaveBeenCalled();
+  });
+
+  it('restores a withdrawn registration for the same user', async () => {
+    prisma.event.findUnique.mockResolvedValue(plannedEvent);
+    usersService.findBySub.mockResolvedValue(actorUser);
+    prisma.registration.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(storedRegistration({ status: 'WITHDRAWN' }));
+    prisma.registration.update.mockResolvedValue(storedRegistration());
+
+    await expect(service.create('sub-1', 'event-1', {})).resolves.toMatchObject({
+      status: 'REGISTERED',
+    });
 
     expect(prisma.registration.create).not.toHaveBeenCalled();
     expect(prisma.registration.update).toHaveBeenCalledWith({
       where: { id: 'reg-1' },
       data: expect.objectContaining({
         firstName: 'Анна',
+        lastName: 'Смирнова',
+        gender: 'F',
+        birthYear: 1996,
+        city: 'Москва',
         status: 'REGISTERED',
         startNumber: null,
       }),
@@ -288,7 +362,7 @@ describe('RegistrationsService', () => {
 
   it('withdraws the current user registration', async () => {
     prisma.event.findUnique.mockResolvedValue(plannedEvent);
-    usersService.findBySub.mockResolvedValue({ id: 'user-1' });
+    usersService.findBySub.mockResolvedValue(actorUser);
     prisma.registration.findFirst.mockResolvedValue(storedRegistration());
     prisma.registration.update.mockResolvedValue(
       storedRegistration({ status: 'WITHDRAWN' }),
