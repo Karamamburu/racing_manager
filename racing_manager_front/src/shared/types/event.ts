@@ -44,16 +44,51 @@ export type RecentEventRow = {
 
 export type EventParticipant = {
   id: string;
-  userId: string;
+  userId: string | null;
   fullName: string;
   birthYear: number | null;
   gender: string | null;
   city: string | null;
   district: string | null;
   team: string | null;
+  startNumber: number | null;
   status: string;
   note: string | null;
   registeredAt: string;
+};
+
+export type GenderCode = 'M' | 'F';
+
+export type CreateRegistrationRequest = {
+  firstName: string;
+  lastName: string;
+  gender: GenderCode;
+  birthYear: number;
+  city?: string;
+  district?: string;
+  team?: string;
+};
+
+export type UpdateRegistrationRequest = {
+  startNumber: number;
+};
+
+export type RegistrationResponse = {
+  id: string;
+  eventId: string;
+  userId: string | null;
+  firstName: string;
+  lastName: string;
+  gender: string;
+  birthYear: number;
+  city: string | null;
+  district: string | null;
+  team: string | null;
+  startNumber: number | null;
+  status: string;
+  note: string | null;
+  registeredAt: string;
+  updatedAt: string;
 };
 
 export type EventDetails = {

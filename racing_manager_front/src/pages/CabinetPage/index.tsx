@@ -9,14 +9,24 @@ import {
   Space,
   Typography,
 } from 'antd';
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { authService } from '../../features/auth/authService';
 import { usePersonalQuery } from '../../features/auth/usePersonalQuery';
 import { AppShell } from '../../shared/layout';
+import { EditProfileModal } from './components';
+
+const genderLabels: Record<string, string> = {
+  M: 'Мужской',
+  F: 'Женский',
+};
 
 export function CabinetPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const personalQuery = usePersonalQuery();
+  const [editOpen, setEditOpen] = useState(false);
 
   if (personalQuery.isLoading) {
     return (
@@ -75,7 +85,14 @@ export function CabinetPage() {
     <AppShell
       title="Личный кабинет"
       subtitle="Персональные данные пользователя"
-      extra={<Button onClick={() => navigate('/')}>На главную</Button>}
+      extra={
+        <Space>
+          <Button type="primary" onClick={() => setEditOpen(true)}>
+            Редактировать профиль
+          </Button>
+          <Button onClick={() => navigate('/')}>На главную</Button>
+        </Space>
+      }
     >
       <Space direction="vertical" size={24} style={{ width: '100%' }}>
         <Alert
@@ -101,7 +118,9 @@ export function CabinetPage() {
             <Descriptions.Item label="Имя">{profile?.firstName ?? '—'}</Descriptions.Item>
             <Descriptions.Item label="Фамилия">{profile?.lastName ?? '—'}</Descriptions.Item>
             <Descriptions.Item label="Email">{profile?.email ?? user.email ?? '—'}</Descriptions.Item>
-            <Descriptions.Item label="Пол">{profile?.gender ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="Пол">
+              {profile?.gender ? (genderLabels[profile.gender] ?? profile.gender) : '—'}
+            </Descriptions.Item>
             <Descriptions.Item label="Дата рождения">{profile?.birthDate ?? '—'}</Descriptions.Item>
             <Descriptions.Item label="Город">{profile?.city ?? '—'}</Descriptions.Item>
             <Descriptions.Item label="Район">{profile?.district ?? '—'}</Descriptions.Item>
@@ -115,6 +134,17 @@ export function CabinetPage() {
           </Card>
         )}
       </Space>
+
+      <EditProfileModal
+        open={editOpen}
+        profile={profile}
+        username={user.username ?? profile?.userName}
+        email={user.email ?? profile?.email}
+        onClose={() => setEditOpen(false)}
+        onUpdated={() => {
+          void queryClient.invalidateQueries({ queryKey: ['personal'] });
+        }}
+      />
     </AppShell>
   );
 }

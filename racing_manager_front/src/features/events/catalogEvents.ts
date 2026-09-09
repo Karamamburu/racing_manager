@@ -1,3 +1,4 @@
+import { toLocalIsoDate } from '../../shared/formatDateTime';
 import type { RecentEventRow } from '../../shared/types/event';
 
 export function todayIsoDate(now = new Date()): string {
@@ -8,7 +9,7 @@ export function todayIsoDate(now = new Date()): string {
 }
 
 export function isPastEvent(event: RecentEventRow, today = todayIsoDate()): boolean {
-  return event.status === 'DONE' || event.eventDate < today;
+  return event.status === 'DONE' || toLocalIsoDate(event.eventDate) < today;
 }
 
 export function visibleCatalogEvents(

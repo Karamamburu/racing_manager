@@ -19,6 +19,7 @@ import {
 } from '../../features/events/useRecentEventsQuery';
 import { useMainDashboardQuery } from '../../features/main/useMainDashboardQuery';
 import { PromoSlider } from '../../shared/components';
+import { formatDateTime } from '../../shared/formatDateTime';
 import { AppShell } from '../../shared/layout';
 import type { RecentEventRow } from '../../shared/types/event';
 import type { MainEventRow, MainStat } from '../../shared/types/main';
@@ -28,7 +29,7 @@ function toMainEventRow(event: RecentEventRow): MainEventRow {
   return {
     key: event.id,
     event: event.name,
-    date: event.eventDate,
+    date: formatDateTime(event.eventDate),
     distanceKm: event.distanceKm,
     status: event.status === 'DONE' ? 'DONE' : 'PLANNED',
     track: event.trackName,

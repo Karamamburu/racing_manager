@@ -88,7 +88,9 @@ export function parseCreateEventBody(body: unknown): ParsedCreateEvent {
 
   const eventDateRaw = readString(raw.eventDate, 'eventDate', true);
   if (!eventDateRaw) throw new BadRequestException('eventDate is required.');
-  const eventDate = parseDateOnly(eventDateRaw, 'eventDate');
+  const eventDate = DATE_ONLY.test(eventDateRaw)
+    ? parseDateOnly(eventDateRaw, 'eventDate')
+    : parseDateTime(eventDateRaw, 'eventDate');
 
   let distanceKm: number | null = null;
   if (

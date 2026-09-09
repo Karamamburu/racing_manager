@@ -1,5 +1,6 @@
 import { Card, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { formatDateTime } from '../../../shared/formatDateTime';
 import type { TrackEventRow } from '../../../shared/types/track';
 
 type TrackEventsTableProps = {
@@ -21,7 +22,12 @@ function getEventsColumns(onEventClick?: (event: TrackEventRow) => void): Column
         ),
     },
     { title: 'Тип', dataIndex: 'type', key: 'type' },
-    { title: 'Дата', dataIndex: 'date', key: 'date' },
+    {
+      title: 'Дата',
+      dataIndex: 'date',
+      key: 'date',
+      render: (date: string) => formatDateTime(date),
+    },
     { title: 'Участники', dataIndex: 'participants', key: 'participants' },
     {
       title: 'Статус',

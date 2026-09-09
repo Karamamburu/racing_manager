@@ -5,20 +5,32 @@ export type SessionUser = {
   name: string | null;
 };
 
+export type PersonalProfile = {
+  id?: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  userName: string | null;
+  email: string | null;
+  gender: string | null;
+  city: string | null;
+  district: string | null;
+  team: string | null;
+  birthDate: string | null;
+};
+
 export type PersonalResponse = {
   authenticated: boolean;
   user: SessionUser;
   roles: string[];
-  profile: {
-    id?: string | null;
-    firstName: string | null;
-    lastName: string | null;
-    userName: string | null;
-    email: string | null;
-    gender: string | null;
-    city: string | null;
-    district: string | null;
-    team: string | null;
-    birthDate: string | null;
-  } | null;
+  profile: PersonalProfile | null;
+};
+
+export type UpdatePersonalRequest = {
+  firstName: string;
+  lastName: string;
+  gender?: 'M' | 'F' | null;
+  birthDate?: string | null;
+  city?: string | null;
+  district?: string | null;
+  team?: string | null;
 };

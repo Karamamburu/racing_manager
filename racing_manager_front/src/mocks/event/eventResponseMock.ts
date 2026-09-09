@@ -175,8 +175,8 @@ function getEventResponseMockById(routeId: string): EventPageResponse | undefine
       { key: 'event_date', title: 'Дата проведения', value: event.eventDate },
       { key: 'distance_km', title: 'Дистанция, км', value: event.distanceKm },
       { key: 'description', title: 'Краткое описание', value: event.description },
-      { key: 'registration_open', title: 'Открытие регистрации', value: event.registrationOpen },
-      { key: 'registration_close', title: 'Закрытие регистрации', value: event.registrationClose },
+      { key: 'registration_open', title: 'Начало выдачи номеров', value: event.registrationOpen },
+      { key: 'registration_close', title: 'Окончание выдачи номеров', value: event.registrationClose },
       {
         key: 'status',
         title: 'Статус мероприятия',

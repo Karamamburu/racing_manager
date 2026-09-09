@@ -1,5 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+
+export type OwnProfileUpdate = {
+  firstName: string;
+  lastName: string;
+  gender: 'M' | 'F' | null;
+  birthDate: Date | null;
+  city: string | null;
+  district: string | null;
+  team: string | null;
+};
 
 export type AppUser = {
   id: string;
@@ -41,8 +51,8 @@ export class UsersService {
           data: {
             userName,
             email: profile.email,
-            firstName,
-            lastName,
+            ...(existing.firstName ? {} : { firstName }),
+            ...(existing.lastName ? {} : { lastName }),
           },
         })
       : await this.prisma.user.create({
@@ -76,6 +86,34 @@ export class UsersService {
       where: { authentikId: sub },
     });
     return dbUser ? this.toAppUser(dbUser) : null;
+  }
+
+  async updateOwnProfile(
+    authentikId: string,
+    data: OwnProfileUpdate,
+  ): Promise<AppUser> {
+    const existing = await this.prisma.user.findUnique({
+      where: { authentikId },
+    });
+    if (!existing) {
+      throw new UnauthorizedException(
+        'Not authenticated. Start with GET /auth/login.',
+      );
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { authentikId },
+      data: {
+        firstName: data.firstName,
+        lastName: data.lastName,
+        gender: data.gender,
+        birthDate: data.birthDate,
+        city: data.city,
+        district: data.district,
+        team: data.team,
+      },
+    });
+    return this.toAppUser(updated);
   }
 
   private toAppUser(dbUser: {

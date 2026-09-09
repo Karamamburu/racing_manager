@@ -10,6 +10,7 @@ import { RolesService } from '../auth/roles.service';
 import { ALESHKINO_TRACK_ID } from '../tracks/aleshkino';
 import { UsersService } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ACTIVE_REGISTRATION_STATUSES, RegistrationStatusCode } from '../registrations/registration-status';
 import {
   parseCreateEventBody,
   type ParsedCreateEvent,
@@ -70,13 +71,14 @@ export type EventDetails = {
 
 export type EventParticipant = {
   id: string;
-  userId: string;
+  userId: string | null;
   fullName: string;
   birthYear: number | null;
   gender: string | null;
   city: string | null;
   district: string | null;
   team: string | null;
+  startNumber: number | null;
   status: string;
   note: string | null;
   registeredAt: string;
@@ -118,26 +120,23 @@ type PersonRow = {
   userName: string;
 };
 
-type ParticipantUserRow = {
-  id: string;
-  firstName: string | null;
-  lastName: string | null;
-  birthDate: Date | null;
-  gender: string | null;
-  city: string | null;
-  district: string | null;
-  team: string | null;
-};
-
 type EventWithDetails = StoredEvent & {
   track: EventDetails['track'];
   createdBy: PersonRow | null;
   registrations: Array<{
     id: string;
+    userId: string | null;
+    firstName: string;
+    lastName: string;
+    gender: string;
+    birthYear: number;
+    city: string | null;
+    district: string | null;
+    team: string | null;
+    startNumber: number | null;
     status: string;
     note: string | null;
     registeredAt: Date;
-    user: ParticipantUserRow;
   }>;
 };
 
@@ -180,6 +179,9 @@ type EventsStore = {
       }): Promise<EventOwnerRow | null>;
     };
     update: (args: { where: { id: string }; data: object }) => Promise<unknown>;
+  };
+  registration: {
+    updateMany: (args: { where: object; data: object }) => Promise<unknown>;
   };
 };
 
@@ -253,7 +255,7 @@ export class EventsService {
         _count: {
           select: {
             registrations: {
-              where: { status: { not: 'CANCELLED' } },
+              where: { status: { in: [...ACTIVE_REGISTRATION_STATUSES] } },
             },
           },
         },
@@ -263,7 +265,7 @@ export class EventsService {
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
-      eventDate: row.eventDate.toISOString().slice(0, 10),
+      eventDate: row.eventDate.toISOString(),
       distanceKm: toKm(row.distanceKm),
       status: row.status,
       trackName: row.track.name,
@@ -292,21 +294,22 @@ export class EventsService {
           },
         },
         registrations: {
-          where: { status: { not: 'CANCELLED' } },
+          where: { status: { in: [...ACTIVE_REGISTRATION_STATUSES] } },
           orderBy: { registeredAt: 'asc' },
-          include: {
-            user: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                birthDate: true,
-                gender: true,
-                city: true,
-                district: true,
-                team: true,
-              },
-            },
+          select: {
+            id: true,
+            userId: true,
+            firstName: true,
+            lastName: true,
+            gender: true,
+            birthYear: true,
+            city: true,
+            district: true,
+            team: true,
+            startNumber: true,
+            status: true,
+            note: true,
+            registeredAt: true,
           },
         },
       },
@@ -321,7 +324,7 @@ export class EventsService {
       name: event.name,
       eventType: event.eventType,
       sport: event.sport,
-      eventDate: event.eventDate.toISOString().slice(0, 10),
+      eventDate: event.eventDate.toISOString(),
       distanceKm: toKm(event.distanceKm),
       description: event.description,
       registrationOpen: event.registrationOpen?.toISOString() ?? null,
@@ -342,19 +345,18 @@ export class EventsService {
         : null,
       registrations: event.registrations.map((registration) => ({
         id: registration.id,
-        userId: registration.user.id,
+        userId: registration.userId,
         fullName: this.formatPersonName(
-          registration.user.firstName,
-          registration.user.lastName,
+          registration.firstName,
+          registration.lastName,
           'Участник',
         ),
-        birthYear: registration.user.birthDate
-          ? registration.user.birthDate.getUTCFullYear()
-          : null,
-        gender: registration.user.gender,
-        city: registration.user.city,
-        district: registration.user.district,
-        team: registration.user.team,
+        birthYear: registration.birthYear,
+        gender: registration.gender,
+        city: registration.city,
+        district: registration.district,
+        team: registration.team,
+        startNumber: registration.startNumber,
         status: registration.status,
         note: registration.note,
         registeredAt: registration.registeredAt.toISOString(),
@@ -396,6 +398,16 @@ export class EventsService {
     await this.store.event.update({
       where: { id: eventId },
       data: { status: 'CANCELLED' },
+    });
+    await this.store.registration.updateMany({
+      where: {
+        eventId,
+        status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
+      },
+      data: {
+        status: RegistrationStatusCode.CANCELLED,
+        startNumber: null,
+      },
     });
 
     return this.findById(eventId);
@@ -442,7 +454,7 @@ export class EventsService {
       name: event.name,
       eventType: event.eventType,
       sport: event.sport,
-      eventDate: event.eventDate.toISOString().slice(0, 10),
+      eventDate: event.eventDate.toISOString(),
       distanceKm: toKm(event.distanceKm),
       description: event.description,
       registrationOpen: event.registrationOpen?.toISOString() ?? null,
