@@ -28,7 +28,11 @@ export class RegistrationsController {
     @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
     @Body() body: unknown,
   ) {
-    return this.registrationsService.create(req.session?.userSub, eventId, body);
+    return this.registrationsService.create(
+      req.session?.userSub,
+      eventId,
+      body,
+    );
   }
 
   @Post('cancel')
