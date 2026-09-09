@@ -56,6 +56,55 @@ function readBirthYear(value: unknown): number {
   return numeric;
 }
 
+export type RegistrationProfileSource = {
+  firstName?: string | null;
+  lastName?: string | null;
+  gender?: string | null;
+  birthDate?: string | null;
+  city?: string | null;
+  district?: string | null;
+  team?: string | null;
+};
+
+export function registrationFieldsFromProfile(
+  profile: RegistrationProfileSource,
+): ParsedCreateRegistration {
+  const firstName = readString(profile.firstName, 'firstName', true);
+  const lastName = readString(profile.lastName, 'lastName', true);
+  if (!firstName || !lastName) {
+    throw new BadRequestException(
+      'Complete your profile before registering: firstName and lastName are required.',
+    );
+  }
+
+  const genderRaw = readString(profile.gender, 'gender', true);
+  if (!genderRaw || !isGender(genderRaw)) {
+    throw new BadRequestException(
+      'Complete your profile before registering: gender must be M or F.',
+    );
+  }
+
+  return {
+    firstName,
+    lastName,
+    gender: genderRaw,
+    birthYear: birthYearFromDate(profile.birthDate),
+    city: readString(profile.city, 'city', false),
+    district: readString(profile.district, 'district', false),
+    team: readString(profile.team, 'team', false),
+  };
+}
+
+function birthYearFromDate(value: unknown): number {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new BadRequestException(
+      'Complete your profile before registering: birthDate is required.',
+    );
+  }
+  const year = Number(value.trim().slice(0, 4));
+  return readBirthYear(year);
+}
+
 export function parseCreateRegistrationBody(
   body: unknown,
 ): ParsedCreateRegistration {

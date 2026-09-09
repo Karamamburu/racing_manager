@@ -7,10 +7,11 @@ import {
 } from '@nestjs/common';
 import { ADMIN_ROLE_CODES } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
-import { UsersService } from '../users/users.service';
+import { UsersService, type AppUser } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   parseCreateRegistrationBody,
+  registrationFieldsFromProfile,
   type ParsedCreateRegistration,
 } from './parse-create-registration';
 import { parseUpdateRegistrationBody } from './parse-update-registration';
@@ -117,13 +118,14 @@ export class RegistrationsService {
     eventId: string,
     body: unknown,
   ): Promise<RegistrationResponse> {
-    const parsed = parseCreateRegistrationBody(body);
+    const actor = authentikId
+      ? await this.requireAuthenticatedUser(authentikId)
+      : null;
+    const parsed = actor
+      ? registrationFieldsFromProfile(actor)
+      : parseCreateRegistrationBody(body);
     const event = await this.requirePlannedEvent(eventId);
     this.assertRegistrationWindow(event);
-
-    const actor = authentikId
-      ? await this.usersService.findBySub(authentikId)
-      : null;
 
     if (actor) {
       const existing = await this.store.registration.findFirst({
@@ -256,6 +258,16 @@ export class RegistrationsService {
       }
       throw error;
     }
+  }
+
+  private async requireAuthenticatedUser(authentikId: string): Promise<AppUser> {
+    const actor = await this.usersService.findBySub(authentikId);
+    if (!actor) {
+      throw new UnauthorizedException(
+        'Not authenticated. Start with GET /auth/login.',
+      );
+    }
+    return actor;
   }
 
   private async requirePlannedEvent(

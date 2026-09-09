@@ -1,5 +1,6 @@
-import { Button, Form, Input, InputNumber, Modal, Result, Select } from 'antd';
+import { Alert, Button, Form, Input, InputNumber, Modal, Result, Select } from 'antd';
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { registrationsService } from '../../../features/registrations/registrationsService';
 import type { CreateRegistrationRequest, GenderCode } from '../../../shared/types/event';
 import type { PersonalResponse } from '../../../shared/types/personal';
@@ -25,6 +26,7 @@ type FeedbackState = {
 type RegisterEventModalProps = {
   open: boolean;
   eventId: string;
+  isAuthenticated: boolean;
   profile: PersonalResponse['profile'] | null | undefined;
   onClose: () => void;
   onRegistered?: () => void;
@@ -43,6 +45,17 @@ function birthYearFromProfile(birthDate: string | null | undefined): number | un
   return Number.isInteger(year) ? year : undefined;
 }
 
+function isProfileComplete(profile: PersonalResponse['profile'] | null | undefined): boolean {
+  if (!profile) return false;
+  const gender = profile.gender === 'M' || profile.gender === 'F';
+  return Boolean(
+    profile.firstName?.trim() &&
+      profile.lastName?.trim() &&
+      gender &&
+      birthYearFromProfile(profile.birthDate),
+  );
+}
+
 function toPayload(values: RegisterFormValues): CreateRegistrationRequest {
   const payload: CreateRegistrationRequest = {
     firstName: values.firstName.trim(),
@@ -59,6 +72,7 @@ function toPayload(values: RegisterFormValues): CreateRegistrationRequest {
 export function RegisterEventModal({
   open,
   eventId,
+  isAuthenticated,
   profile,
   onClose,
   onRegistered,
@@ -66,6 +80,9 @@ export function RegisterEventModal({
   const [form] = Form.useForm<RegisterFormValues>();
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
+  const profileComplete = isProfileComplete(profile);
+  const fieldsLocked = isAuthenticated;
+  const canSubmit = !isAuthenticated || profileComplete;
 
   useEffect(() => {
     if (!open) return;
@@ -98,9 +115,13 @@ export function RegisterEventModal({
   };
 
   const handleFinish = async (values: RegisterFormValues) => {
+    if (!canSubmit) return;
     setSubmitting(true);
     try {
-      const result = await registrationsService.create(eventId, toPayload(values));
+      const result = await registrationsService.create(
+        eventId,
+        isAuthenticated ? undefined : toPayload(values),
+      );
       if (result.status === 201 || result.status === 200) {
         setFeedback({
           status: 'success',
@@ -148,54 +169,91 @@ export function RegisterEventModal({
           <Button key="cancel" onClick={handleCancel} disabled={submitting}>
             Отмена
           </Button>,
-          <Button key="submit" type="primary" loading={submitting} onClick={() => form.submit()}>
+          <Button
+            key="submit"
+            type="primary"
+            loading={submitting}
+            disabled={!canSubmit}
+            onClick={() => form.submit()}
+          >
             Зарегистрироваться
           </Button>,
         ]}
       >
+        {isAuthenticated ? (
+          <Alert
+            type={profileComplete ? 'info' : 'warning'}
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={
+              profileComplete
+                ? 'Данные заявки берутся из вашего профиля'
+                : 'Сначала заполните профиль'
+            }
+            description={
+              profileComplete ? (
+                <>
+                  Поля нельзя изменить здесь. Отредактировать их можно в{' '}
+                  <Link to="/cabinet">личном кабинете</Link>.
+                </>
+              ) : (
+                <>
+                  Для регистрации нужны имя, фамилия, пол и дата рождения.{' '}
+                  <Link to="/cabinet">Открыть личный кабинет</Link>
+                </>
+              )
+            }
+          />
+        ) : null}
         <Form form={form} layout="vertical" onFinish={handleFinish}>
           <Form.Item
             name="firstName"
             label="Имя"
-            rules={[{ required: true, message: 'Укажите имя' }]}
+            rules={[{ required: !fieldsLocked, message: 'Укажите имя' }]}
           >
-            <Input />
+            <Input disabled={fieldsLocked} />
           </Form.Item>
 
           <Form.Item
             name="lastName"
             label="Фамилия"
-            rules={[{ required: true, message: 'Укажите фамилию' }]}
+            rules={[{ required: !fieldsLocked, message: 'Укажите фамилию' }]}
           >
-            <Input />
+            <Input disabled={fieldsLocked} />
           </Form.Item>
 
           <Form.Item
             name="gender"
             label="Пол"
-            rules={[{ required: true, message: 'Выберите пол' }]}
+            rules={[{ required: !fieldsLocked, message: 'Выберите пол' }]}
           >
-            <Select options={genderOptions} />
+            <Select options={genderOptions} disabled={fieldsLocked} />
           </Form.Item>
 
           <Form.Item
             name="birthYear"
             label="Год рождения"
-            rules={[{ required: true, message: 'Укажите год рождения' }]}
+            rules={[{ required: !fieldsLocked, message: 'Укажите год рождения' }]}
           >
-            <InputNumber min={1900} max={currentYear} precision={0} style={{ width: '100%' }} />
+            <InputNumber
+              min={1900}
+              max={currentYear}
+              precision={0}
+              style={{ width: '100%' }}
+              disabled={fieldsLocked}
+            />
           </Form.Item>
 
           <Form.Item name="city" label="Город">
-            <Input />
+            <Input disabled={fieldsLocked} />
           </Form.Item>
 
           <Form.Item name="district" label="Район">
-            <Input />
+            <Input disabled={fieldsLocked} />
           </Form.Item>
 
           <Form.Item name="team" label="Команда">
-            <Input />
+            <Input disabled={fieldsLocked} />
           </Form.Item>
         </Form>
       </Modal>
