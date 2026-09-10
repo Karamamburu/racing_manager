@@ -70,7 +70,12 @@ export function TracksTable({ rows, onBackClick }: TracksTableProps) {
         </Button>
       }
     >
-      <Table columns={trackColumns} dataSource={rows} pagination={false} />
+      <Table
+        columns={trackColumns}
+        dataSource={rows}
+        pagination={false}
+        locale={{ emptyText: 'Пока нет трасс' }}
+      />
     </Card>
   );
 }

@@ -60,10 +60,10 @@ export type EventParticipant = {
 export type GenderCode = 'M' | 'F';
 
 export type CreateRegistrationRequest = {
-  firstName: string;
-  lastName: string;
-  gender: GenderCode;
-  birthYear: number;
+  firstName?: string;
+  lastName?: string;
+  gender?: GenderCode;
+  birthYear?: number;
   city?: string;
   district?: string;
   team?: string;

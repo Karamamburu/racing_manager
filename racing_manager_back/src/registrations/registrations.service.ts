@@ -10,8 +10,8 @@ import { RolesService } from '../auth/roles.service';
 import { UsersService, type AppUser } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  mergeRegistrationFields,
   parseCreateRegistrationBody,
-  registrationFieldsFromProfile,
   type ParsedCreateRegistration,
 } from './parse-create-registration';
 import { parseUpdateRegistrationBody } from './parse-update-registration';
@@ -122,7 +122,7 @@ export class RegistrationsService {
       ? await this.requireAuthenticatedUser(authentikId)
       : null;
     const parsed = actor
-      ? registrationFieldsFromProfile(actor)
+      ? mergeRegistrationFields(actor, body)
       : parseCreateRegistrationBody(body);
     const event = await this.requirePlannedEvent(eventId);
     this.assertRegistrationWindow(event);
