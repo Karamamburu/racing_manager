@@ -1,15 +1,12 @@
 import { PlusOutlined } from '@ant-design/icons';
-import { Button, Space } from 'antd';
+import { Button, Empty, Space } from 'antd';
 import { useNavigate } from 'react-router-dom';
-import {
-  cityOptionsMock,
-  sportOptionsMock,
-  trackCardsMock,
-  trackRowsMock,
-  trackStatsMock,
-} from '../../mocks/tracks';
 import { AppShell } from '../../shared/layout';
-import { TracksCards, TracksFilters, TracksStats, TracksTable } from './components';
+import type { TrackFilterOption } from '../../shared/types/tracks';
+import { TracksFilters, TracksTable } from './components';
+
+const cityOptions: TrackFilterOption[] = [{ value: 'all', label: 'Все города' }];
+const sportOptions: TrackFilterOption[] = [{ value: 'all', label: 'Все дисциплины' }];
 
 export function TracksPage() {
   const navigate = useNavigate();
@@ -25,10 +22,9 @@ export function TracksPage() {
       }
     >
       <Space direction="vertical" size={24} style={{ width: '100%' }}>
-        <TracksStats stats={trackStatsMock} />
-        <TracksFilters cityOptions={cityOptionsMock} sportOptions={sportOptionsMock} />
-        <TracksCards tracks={trackCardsMock} />
-        <TracksTable rows={trackRowsMock} onBackClick={() => navigate('/')} />
+        <TracksFilters cityOptions={cityOptions} sportOptions={sportOptions} />
+        <Empty description="Каталог трасс пока не подключен к серверу" />
+        <TracksTable rows={[]} onBackClick={() => navigate('/')} />
       </Space>
     </AppShell>
   );

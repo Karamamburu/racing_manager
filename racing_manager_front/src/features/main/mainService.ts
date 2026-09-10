@@ -1,13 +1,9 @@
-import { mainResponseMock } from '../../mocks/main';
-import type { MainDashboardResponse } from '../../shared/types/main';
-
-const MAIN_MOCK_DELAY_MS = 450;
+import { apiClient } from '../../shared/api/ApiClient';
+import type { MainPageResponse } from '../../shared/types/main';
 
 export class MainService {
-  public async getDashboardData(): Promise<MainDashboardResponse> {
-    return new Promise((resolve) => {
-      window.setTimeout(() => resolve(mainResponseMock), MAIN_MOCK_DELAY_MS);
-    });
+  public async getDashboardData(): Promise<MainPageResponse> {
+    return apiClient.get<MainPageResponse>('/');
   }
 }
 

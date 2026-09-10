@@ -17,17 +17,20 @@ export type MainSlide = {
   image: string;
 };
 
-export type MainStat = {
-  key: string;
-  title: string;
-  value: number;
-  description: string;
-  suffix?: string;
-  actionLabel?: string;
+export type MainPageUser = {
+  sub: string;
+  username: string | null;
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  name: string | null;
 };
 
-export type MainDashboardResponse = {
-  slides: MainSlide[];
-  stats: MainStat[];
-  events: MainEventRow[];
+export type MainPageResponse = {
+  page: {
+    title: string;
+    message: string;
+  };
+  authenticated: boolean;
+  user: MainPageUser | null;
 };
