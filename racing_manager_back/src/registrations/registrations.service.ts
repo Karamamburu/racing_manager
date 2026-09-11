@@ -90,6 +90,9 @@ type RegistrationsStore = {
       data: object;
     }) => Promise<StoredRegistration>;
   };
+  result: {
+    deleteMany: (args: { where: { registrationId: string } }) => Promise<unknown>;
+  };
 };
 
 function isUniqueViolation(error: unknown): boolean {
@@ -209,6 +212,9 @@ export class RegistrationsService {
       throw new NotFoundException('Registration not found.');
     }
 
+    await this.store.result.deleteMany({
+      where: { registrationId: existing.id },
+    });
     const withdrawn = await this.store.registration.update({
       where: { id: existing.id },
       data: {

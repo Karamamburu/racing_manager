@@ -22,6 +22,7 @@ import { AppShell } from '../../shared/layout';
 import type { EventParticipant } from '../../shared/types/event';
 import type { FeatureItem } from '../../shared/types/track';
 import { EditEventModal } from './components/EditEventModal';
+import { FinishTimeCell } from './components/FinishTimeCell';
 import { RegisterEventModal } from './components/RegisterEventModal';
 import { StartNumberCell } from './components/StartNumberCell';
 
@@ -57,10 +58,21 @@ const genderLabels: Record<string, string> = {
 
 function getParticipantColumns(options: {
   canAssignNumbers: boolean;
-  savingId: string | null;
+  canAssignResults: boolean;
+  savingNumberId: string | null;
+  savingResultId: string | null;
   onAssignNumber: (participant: EventParticipant, startNumber: number) => Promise<void>;
+  onAssignResult: (participant: EventParticipant, timeMilliseconds: number) => Promise<void>;
+  onInvalidResult: () => void;
 }): ColumnsType<EventParticipant> {
   return [
+    {
+      title: 'Место',
+      dataIndex: 'place',
+      key: 'place',
+      width: 80,
+      render: (value: number | null) => value ?? '—',
+    },
     {
       title: 'Стартовый номер',
       dataIndex: 'startNumber',
@@ -69,8 +81,22 @@ function getParticipantColumns(options: {
         <StartNumberCell
           value={value}
           canEdit={options.canAssignNumbers}
-          saving={options.savingId === record.id}
+          saving={options.savingNumberId === record.id}
           onSave={(startNumber) => options.onAssignNumber(record, startNumber)}
+        />
+      ),
+    },
+    {
+      title: 'Время',
+      dataIndex: 'finishTimeMs',
+      key: 'finishTimeMs',
+      render: (value: number | null, record) => (
+        <FinishTimeCell
+          value={value}
+          canEdit={options.canAssignResults && record.startNumber != null}
+          saving={options.savingResultId === record.id}
+          onSave={(timeMilliseconds) => options.onAssignResult(record, timeMilliseconds)}
+          onInvalid={options.onInvalidResult}
         />
       ),
     },
@@ -140,6 +166,7 @@ export function EventPage() {
   const [isCancelling, setIsCancelling] = useState(false);
   const [isCancellingRegistration, setIsCancellingRegistration] = useState(false);
   const [savingStartNumberId, setSavingStartNumberId] = useState<string | null>(null);
+  const [savingFinishTimeId, setSavingFinishTimeId] = useState<string | null>(null);
 
   if (eventQuery.isLoading) {
     return (
@@ -178,6 +205,8 @@ export function EventPage() {
   });
   const canAssignNumbers =
     canCreateEvents(personalQuery.data?.roles) && event.status === 'PLANNED';
+  const canAssignResults =
+    canCreateEvents(personalQuery.data?.roles) && event.status !== 'CANCELLED';
   const myRegistration = event.registrations.find(
     (registration: EventParticipant) =>
       Boolean(registration.userId) && registration.userId === profile?.id,
@@ -217,9 +246,9 @@ export function EventPage() {
     { key: 'participants', title: 'Участников', value: String(event.registrations.length) },
   ];
 
-  const refreshEvent = () => {
+  const refreshEvent = async () => {
     if (!event.id) return;
-    void queryClient.invalidateQueries({ queryKey: eventDetailsQueryKey(event.id) });
+    await queryClient.invalidateQueries({ queryKey: eventDetailsQueryKey(event.id) });
     void queryClient.invalidateQueries({ queryKey: recentEventsQueryKey });
   };
 
@@ -244,10 +273,42 @@ export function EventPage() {
     }
   };
 
+  const assignFinishTime = async (
+    participant: EventParticipant,
+    timeMilliseconds: number,
+  ) => {
+    setSavingFinishTimeId(participant.id);
+    try {
+      await registrationsService.upsertResult(event.id, participant.id, {
+        timeMilliseconds,
+      });
+      await refreshEvent();
+      message.success('Время прохождения записано');
+    } catch (error) {
+      const statusCode = registrationsService.getStatus(error);
+      if (statusCode === 403) {
+        message.error(
+          'Недостаточно прав. Записывать результаты может организатор или администратор.',
+        );
+      } else {
+        message.error(registrationsService.getErrorMessage(error));
+      }
+      throw error;
+    } finally {
+      setSavingFinishTimeId(null);
+    }
+  };
+
   const participantColumns = getParticipantColumns({
     canAssignNumbers,
-    savingId: savingStartNumberId,
+    canAssignResults,
+    savingNumberId: savingStartNumberId,
+    savingResultId: savingFinishTimeId,
     onAssignNumber: assignStartNumber,
+    onAssignResult: assignFinishTime,
+    onInvalidResult: () => {
+      message.error('Введите время в формате мм:сс или ч:мм:сс');
+    },
   });
 
   const handleCancelEvent = () => {

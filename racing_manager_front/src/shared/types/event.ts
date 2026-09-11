@@ -52,6 +52,8 @@ export type EventParticipant = {
   district: string | null;
   team: string | null;
   startNumber: number | null;
+  finishTimeMs: number | null;
+  place: number | null;
   status: string;
   note: string | null;
   registeredAt: string;
@@ -71,6 +73,18 @@ export type CreateRegistrationRequest = {
 
 export type UpdateRegistrationRequest = {
   startNumber: number;
+};
+
+export type UpsertResultRequest = {
+  timeMilliseconds: number;
+};
+
+export type ResultResponse = {
+  id: string;
+  registrationId: string;
+  timeMilliseconds: number;
+  recordedAt: string;
+  updatedAt: string;
 };
 
 export type RegistrationResponse = {

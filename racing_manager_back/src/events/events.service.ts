@@ -79,6 +79,8 @@ export type EventParticipant = {
   district: string | null;
   team: string | null;
   startNumber: number | null;
+  finishTimeMs: number | null;
+  place: number | null;
   status: string;
   note: string | null;
   registeredAt: string;
@@ -120,24 +122,27 @@ type PersonRow = {
   userName: string;
 };
 
+type StoredRegistration = {
+  id: string;
+  userId: string | null;
+  firstName: string;
+  lastName: string;
+  gender: string;
+  birthYear: number;
+  city: string | null;
+  district: string | null;
+  team: string | null;
+  startNumber: number | null;
+  status: string;
+  note: string | null;
+  registeredAt: Date;
+  result: { timeMilliseconds: number } | null;
+};
+
 type EventWithDetails = StoredEvent & {
   track: EventDetails['track'];
   createdBy: PersonRow | null;
-  registrations: Array<{
-    id: string;
-    userId: string | null;
-    firstName: string;
-    lastName: string;
-    gender: string;
-    birthYear: number;
-    city: string | null;
-    district: string | null;
-    team: string | null;
-    startNumber: number | null;
-    status: string;
-    note: string | null;
-    registeredAt: Date;
-  }>;
+  registrations: StoredRegistration[];
 };
 
 type EventOwnerRow = {
@@ -183,7 +188,32 @@ type EventsStore = {
   registration: {
     updateMany: (args: { where: object; data: object }) => Promise<unknown>;
   };
+  result: {
+    deleteMany: (args: { where: object }) => Promise<unknown>;
+  };
 };
+
+function compareRegistrationsByResult(
+  a: StoredRegistration,
+  b: StoredRegistration,
+): number {
+  const aTime = a.result?.timeMilliseconds ?? null;
+  const bTime = b.result?.timeMilliseconds ?? null;
+  if (aTime !== null && bTime !== null) {
+    if (aTime !== bTime) return aTime - bTime;
+    return (a.startNumber ?? Number.POSITIVE_INFINITY) -
+      (b.startNumber ?? Number.POSITIVE_INFINITY);
+  }
+  if (aTime !== null) return -1;
+  if (bTime !== null) return 1;
+
+  const aNumber = a.startNumber;
+  const bNumber = b.startNumber;
+  if (aNumber !== null && bNumber !== null) return aNumber - bNumber;
+  if (aNumber !== null) return -1;
+  if (bNumber !== null) return 1;
+  return a.registeredAt.getTime() - b.registeredAt.getTime();
+}
 
 function toKm(value: DecimalValue): number | null {
   return value === null ? null : Number(value.toString());
@@ -310,6 +340,9 @@ export class EventsService {
             status: true,
             note: true,
             registeredAt: true,
+            result: {
+              select: { timeMilliseconds: true },
+            },
           },
         },
       },
@@ -343,24 +376,7 @@ export class EventsService {
             ),
           }
         : null,
-      registrations: event.registrations.map((registration) => ({
-        id: registration.id,
-        userId: registration.userId,
-        fullName: this.formatPersonName(
-          registration.firstName,
-          registration.lastName,
-          'Участник',
-        ),
-        birthYear: registration.birthYear,
-        gender: registration.gender,
-        city: registration.city,
-        district: registration.district,
-        team: registration.team,
-        startNumber: registration.startNumber,
-        status: registration.status,
-        note: registration.note,
-        registeredAt: registration.registeredAt.toISOString(),
-      })),
+      registrations: this.toRankedParticipants(event.registrations),
     };
   }
 
@@ -395,6 +411,9 @@ export class EventsService {
   ): Promise<EventDetails> {
     await this.assertCanManageCreatedEvent(authentikId, eventId);
 
+    await this.store.result.deleteMany({
+      where: { registration: { eventId } },
+    });
     await this.store.event.update({
       where: { id: eventId },
       data: { status: 'CANCELLED' },
@@ -464,6 +483,38 @@ export class EventsService {
       createdAt: event.createdAt.toISOString(),
       updatedAt: event.updatedAt.toISOString(),
     };
+  }
+
+  private toRankedParticipants(
+    registrations: StoredRegistration[],
+  ): EventParticipant[] {
+    // Fastest finish first; numbered starters without a time follow; then the rest.
+    const ranked = [...registrations].sort(compareRegistrationsByResult);
+    let place = 0;
+    return ranked.map((registration) => {
+      const finishTimeMs = registration.result?.timeMilliseconds ?? null;
+      if (finishTimeMs !== null) place += 1;
+      return {
+        id: registration.id,
+        userId: registration.userId,
+        fullName: this.formatPersonName(
+          registration.firstName,
+          registration.lastName,
+          'Участник',
+        ),
+        birthYear: registration.birthYear,
+        gender: registration.gender,
+        city: registration.city,
+        district: registration.district,
+        team: registration.team,
+        startNumber: registration.startNumber,
+        finishTimeMs,
+        place: finishTimeMs === null ? null : place,
+        status: registration.status,
+        note: registration.note,
+        registeredAt: registration.registeredAt.toISOString(),
+      };
+    });
   }
 
   private formatPersonName(

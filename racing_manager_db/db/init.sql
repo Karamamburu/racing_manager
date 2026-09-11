@@ -133,6 +133,20 @@ CREATE TABLE registrations (
 );
 
 -- ========================================
+-- RESULTS
+-- One finish time per registration. Place is derived by sorting
+-- time_milliseconds ascending (fastest first). A start number must
+-- be assigned before a result can be recorded.
+-- ========================================
+CREATE TABLE results (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  registration_id UUID NOT NULL UNIQUE REFERENCES registrations(id) ON DELETE CASCADE,
+  time_milliseconds INT NOT NULL CHECK (time_milliseconds > 0),
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ========================================
 -- INDEXES
 -- ========================================
 CREATE INDEX idx_users_authentik_id ON users(authentik_id);

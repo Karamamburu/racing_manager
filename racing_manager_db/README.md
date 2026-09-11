@@ -2,10 +2,10 @@
 
 Postgres schema lives in `db/init.sql`. Docker Compose applies it only on the **first** start of an empty volume.
 
-If the database already exists, apply the roles/track seed patch:
+If the database already exists, apply SQL patches from `db/migrate_*.sql`. For race results:
 
 ```bash
-docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" < db/migrate_roles.sql
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_results.sql
 ```
 
 ## Roles

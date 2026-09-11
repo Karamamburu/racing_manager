@@ -147,9 +147,21 @@ model Registration {
   note         String?
   registeredAt DateTime           @default(now()) @map("registered_at") @db.Timestamptz(6)
   updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  result       Result?
 
   @@index([eventId], map: "idx_registrations_event_id")
   @@index([userId], map: "idx_registrations_user_id")
   @@index([status], map: "idx_registrations_status")
   @@map("registrations")
+}
+
+model Result {
+  id               String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  registrationId   String       @unique @map("registration_id") @db.Uuid
+  registration     Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  timeMilliseconds Int          @map("time_milliseconds")
+  recordedAt       DateTime     @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("results")
 }
