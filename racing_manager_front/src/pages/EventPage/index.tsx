@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { canCreateEvents, canManageCreatedEvent } from '../../features/auth/canCreateEvents';
-import { usePersonalQuery } from '../../features/auth/usePersonalQuery';
+import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { eventsService } from '../../features/events/eventsService';
 import { recentEventsQueryKey } from '../../features/events/useRecentEventsQuery';
 import {
@@ -219,7 +219,7 @@ export function EventPage() {
   const queryClient = useQueryClient();
   const { id } = useParams<{ id: string }>();
   const eventQuery = useEventDetailsQuery(id);
-  const personalQuery = usePersonalQuery();
+  const sessionQuery = useSessionQuery();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
@@ -257,20 +257,20 @@ export function EventPage() {
   }
 
   const event = eventQuery.data;
-  const profile = personalQuery.data?.profile;
+  const session = sessionQuery.data;
   const canManage = canManageCreatedEvent({
-    roles: personalQuery.data?.roles,
-    profileId: profile?.id,
+    roles: session?.roles,
+    profileId: session?.userId,
     createdById: event.createdBy?.id,
     status: event.status,
   });
   const canAssignNumbers =
-    canCreateEvents(personalQuery.data?.roles) && event.status === 'PLANNED';
+    canCreateEvents(session?.roles) && event.status === 'PLANNED';
   const canAssignResults =
-    canCreateEvents(personalQuery.data?.roles) && event.status !== 'CANCELLED';
+    canCreateEvents(session?.roles) && event.status !== 'CANCELLED';
   const myRegistration = event.registrations.find(
     (registration: EventParticipant) =>
-      Boolean(registration.userId) && registration.userId === profile?.id,
+      Boolean(registration.userId) && registration.userId === session?.userId,
   );
   const canRegister = isEventRegistrationOpen(event);
   const closedReason = registrationClosedReason(event);
@@ -536,8 +536,6 @@ export function EventPage() {
         open={isRegisterOpen}
         eventId={event.id}
         formats={event.formats}
-        isAuthenticated={Boolean(personalQuery.data?.authenticated)}
-        profile={profile}
         onClose={() => setIsRegisterOpen(false)}
         onRegistered={refreshEvent}
       />

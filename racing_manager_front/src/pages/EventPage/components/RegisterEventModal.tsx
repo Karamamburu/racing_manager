@@ -1,9 +1,11 @@
-import { Alert, Button, DatePicker, Form, Input, InputNumber, Modal, Result, Select, Typography } from 'antd';
+import { Alert, Button, DatePicker, Form, Input, InputNumber, Modal, Result, Select, Skeleton, Typography } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { personalQueryKey, usePersonalQuery } from '../../../features/auth/usePersonalQuery';
+import { useSessionQuery } from '../../../features/auth/useSessionQuery';
 import { personalService } from '../../../features/personal/personalService';
 import { registrationsService } from '../../../features/registrations/registrationsService';
 import type { CreateRegistrationRequest, EventFormatRef, GenderCode } from '../../../shared/types/event';
@@ -34,8 +36,6 @@ type RegisterEventModalProps = {
   open: boolean;
   eventId: string;
   formats: EventFormatRef[];
-  isAuthenticated: boolean;
-  profile: PersonalResponse['profile'] | null | undefined;
   onClose: () => void;
   onRegistered?: () => void;
 };
@@ -132,12 +132,15 @@ export function RegisterEventModal({
   open,
   eventId,
   formats,
-  isAuthenticated,
-  profile,
   onClose,
   onRegistered,
 }: RegisterEventModalProps) {
   const queryClient = useQueryClient();
+  const sessionQuery = useSessionQuery();
+  const isAuthenticated = Boolean(sessionQuery.data?.authenticated);
+  const personalQuery = usePersonalQuery({ enabled: open && isAuthenticated });
+  const profile = personalQuery.data?.profile;
+  const waitingProfile = open && isAuthenticated && !personalQuery.isFetched;
   const [form] = Form.useForm<RegisterFormValues>();
   const [submitting, setSubmitting] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -145,7 +148,7 @@ export function RegisterEventModal({
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [supplements, setSupplements] = useState<CreateRegistrationRequest | null>(null);
   const [profileBirthDate, setProfileBirthDate] = useState<Dayjs | null>(null);
-  const locks = fieldLocks(isAuthenticated, profile);
+  const locks = fieldLocks(isAuthenticated && personalQuery.isSuccess, profile);
   const profileComplete = locks.firstName && locks.lastName && locks.gender && locks.birthYear;
 
   useEffect(() => {
@@ -247,7 +250,7 @@ export function RegisterEventModal({
     setSavingProfile(true);
     try {
       await personalService.updatePersonal(payload);
-      await queryClient.invalidateQueries({ queryKey: ['personal'] });
+      await queryClient.invalidateQueries({ queryKey: personalQueryKey });
       finishSuccess();
     } catch (error) {
       setFeedback({
@@ -280,40 +283,44 @@ export function RegisterEventModal({
             key="submit"
             type="primary"
             loading={submitting}
-            disabled={Boolean(feedback)}
+            disabled={Boolean(feedback) || waitingProfile}
             onClick={() => form.submit()}
           >
             Зарегистрироваться
           </Button>,
         ]}
       >
-        {isAuthenticated ? (
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 16 }}
-            message={
-              profileComplete
-                ? 'Данные заявки берутся из вашего профиля'
-                : 'Недостающие поля можно указать только для этой заявки'
-            }
-            description={
-              profileComplete ? (
-                <>
-                  Поля из профиля нельзя изменить здесь. Отредактировать их можно в{' '}
-                  <Link to="/cabinet">личном кабинете</Link>.
-                </>
-              ) : (
-                <>
-                  Заполненные поля профиля заблокированы. Пустые можно ввести в форме — они попадут
-                  в заявку. После регистрации предложим сохранить их в{' '}
-                  <Link to="/cabinet">профиле</Link>.
-                </>
-              )
-            }
-          />
-        ) : null}
-        <Form form={form} layout="vertical" onFinish={handleFinish}>
+        {waitingProfile ? (
+          <Skeleton active paragraph={{ rows: 8 }} />
+        ) : (
+          <>
+            {isAuthenticated ? (
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message={
+                  profileComplete
+                    ? 'Данные заявки берутся из вашего профиля'
+                    : 'Недостающие поля можно указать только для этой заявки'
+                }
+                description={
+                  profileComplete ? (
+                    <>
+                      Поля из профиля нельзя изменить здесь. Отредактировать их можно в{' '}
+                      <Link to="/cabinet">личном кабинете</Link>.
+                    </>
+                  ) : (
+                    <>
+                      Заполненные поля профиля заблокированы. Пустые можно ввести в форме — они попадут
+                      в заявку. После регистрации предложим сохранить их в{' '}
+                      <Link to="/cabinet">профиле</Link>.
+                    </>
+                  )
+                }
+              />
+            ) : null}
+            <Form form={form} layout="vertical" onFinish={handleFinish}>
           <Form.Item
             name="firstName"
             label="Имя"
@@ -376,10 +383,12 @@ export function RegisterEventModal({
             <Input disabled={locks.district} />
           </Form.Item>
 
-          <Form.Item name="team" label="Команда">
-            <Input disabled={locks.team} />
-          </Form.Item>
-        </Form>
+            <Form.Item name="team" label="Команда">
+              <Input disabled={locks.team} />
+            </Form.Item>
+            </Form>
+          </>
+        )}
       </Modal>
 
       <Modal

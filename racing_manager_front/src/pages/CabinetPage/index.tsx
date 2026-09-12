@@ -13,7 +13,8 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { authService } from '../../features/auth/authService';
-import { usePersonalQuery } from '../../features/auth/usePersonalQuery';
+import { personalQueryKey, usePersonalQuery } from '../../features/auth/usePersonalQuery';
+import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { AppShell } from '../../shared/layout';
 import { EditProfileModal } from './components';
 
@@ -25,10 +26,12 @@ const genderLabels: Record<string, string> = {
 export function CabinetPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const personalQuery = usePersonalQuery();
+  const sessionQuery = useSessionQuery();
+  const isAuthenticated = Boolean(sessionQuery.data?.authenticated);
+  const personalQuery = usePersonalQuery({ enabled: isAuthenticated });
   const [editOpen, setEditOpen] = useState(false);
 
-  if (personalQuery.isLoading) {
+  if (sessionQuery.isLoading || (isAuthenticated && personalQuery.isLoading)) {
     return (
       <AppShell title="Личный кабинет" subtitle="Загружаем персональные данные...">
         <Card>
@@ -38,7 +41,7 @@ export function CabinetPage() {
     );
   }
 
-  if (personalQuery.isError) {
+  if (!isAuthenticated) {
     return (
       <AppShell title="Личный кабинет" subtitle="Не удалось загрузить данные профиля">
         <Result
@@ -48,6 +51,26 @@ export function CabinetPage() {
           extra={[
             <Button key="login" type="primary" onClick={() => authService.startLoginFlow()}>
               Войти
+            </Button>,
+            <Button key="home" onClick={() => navigate('/')}>
+              На главную
+            </Button>,
+          ]}
+        />
+      </AppShell>
+    );
+  }
+
+  if (personalQuery.isError) {
+    return (
+      <AppShell title="Личный кабинет" subtitle="Не удалось загрузить данные профиля">
+        <Result
+          status="error"
+          title="Не удалось загрузить профиль"
+          subTitle="Сессия есть, но персональные данные сейчас недоступны. Попробуйте обновить страницу."
+          extra={[
+            <Button key="retry" type="primary" onClick={() => personalQuery.refetch()}>
+              Повторить
             </Button>,
             <Button key="home" onClick={() => navigate('/')}>
               На главную
@@ -142,7 +165,7 @@ export function CabinetPage() {
         email={user.email ?? profile?.email}
         onClose={() => setEditOpen(false)}
         onUpdated={() => {
-          void queryClient.invalidateQueries({ queryKey: ['personal'] });
+          void queryClient.invalidateQueries({ queryKey: personalQueryKey });
         }}
       />
     </AppShell>

@@ -2,7 +2,7 @@ import { UserOutlined } from '@ant-design/icons';
 import { Avatar, Button, Layout, Space, Typography } from 'antd';
 import type { ReactNode } from 'react';
 import { authService } from '../../../../features/auth/authService';
-import { useAuthStore } from '../../../../features/auth/authStore';
+import { useSessionQuery } from '../../../../features/auth/useSessionQuery';
 
 const { Header } = Layout;
 
@@ -13,16 +13,16 @@ type AppShellHeaderProps = {
 };
 
 export function AppShellHeader({ title, subtitle, extra }: AppShellHeaderProps) {
-  const status = useAuthStore((state) => state.status);
+  const sessionQuery = useSessionQuery();
+  const isAuthenticated = Boolean(sessionQuery.data?.authenticated);
 
-  const authAction =
-    status === 'authenticated' ? (
-      <Button onClick={() => authService.logout()}>Выйти</Button>
-    ) : (
-      <Button type="primary" onClick={() => authService.startLoginFlow()}>
-        Войти
-      </Button>
-    );
+  const authAction = isAuthenticated ? (
+    <Button onClick={() => authService.logout()}>Выйти</Button>
+  ) : (
+    <Button type="primary" onClick={() => authService.startLoginFlow()}>
+      Войти
+    </Button>
+  );
 
   return (
     <Header className="app-header">

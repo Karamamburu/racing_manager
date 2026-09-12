@@ -5,8 +5,8 @@ import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { canCreateEvents } from '../../features/auth/canCreateEvents';
+import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { visibleCatalogEvents } from '../../features/events/catalogEvents';
-import { usePersonalQuery } from '../../features/auth/usePersonalQuery';
 import {
   recentEventsQueryKey,
   useRecentEventsQuery,
@@ -66,10 +66,10 @@ export function MainPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const eventsQuery = useRecentEventsQuery();
-  const personalQuery = usePersonalQuery();
+  const sessionQuery = useSessionQuery();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [showPastEvents, setShowPastEvents] = useState(false);
-  const canCreate = canCreateEvents(personalQuery.data?.roles);
+  const canCreate = canCreateEvents(sessionQuery.data?.roles);
   const visibleEvents = visibleCatalogEvents(eventsQuery.data ?? [], showPastEvents);
   const upcomingCount = visibleCatalogEvents(eventsQuery.data ?? [], false).length;
 
