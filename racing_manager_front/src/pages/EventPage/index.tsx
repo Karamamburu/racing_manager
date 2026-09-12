@@ -205,12 +205,6 @@ function getParticipantColumns(options: {
         return <Tag color={status?.color}>{status?.text ?? value}</Tag>;
       },
     },
-    {
-      title: 'Подана',
-      dataIndex: 'registeredAt',
-      key: 'registeredAt',
-      render: (value: string) => formatDateTime(value),
-    },
   ];
 }
 

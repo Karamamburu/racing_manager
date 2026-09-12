@@ -106,7 +106,12 @@ export function parseUpdatePersonalBody(body: unknown): ParsedUpdatePersonal {
   }
 
   const raw = body as Record<string, unknown>;
-  const firstName = readString(raw.firstName, 'firstName', true, MAX_NAME_LENGTH);
+  const firstName = readString(
+    raw.firstName,
+    'firstName',
+    true,
+    MAX_NAME_LENGTH,
+  );
   const lastName = readString(raw.lastName, 'lastName', true, MAX_NAME_LENGTH);
   if (!firstName || !lastName) {
     throw new BadRequestException('firstName and lastName are required.');
