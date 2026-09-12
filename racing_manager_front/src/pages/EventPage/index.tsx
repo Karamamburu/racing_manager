@@ -278,29 +278,32 @@ export function EventPage() {
   const status = statusLabels[event.status] ?? { text: event.status, color: 'default' };
   const features: FeatureItem[] = [
     { key: 'track', title: 'Трасса', value: event.track.name },
-    { key: 'city', title: 'Город', value: event.track.locationCity ?? '—' },
     {
       key: 'eventType',
-      title: 'Тип',
+      title: 'Тип мероприятия',
       value: eventTypeLabels[event.eventType] ?? event.eventType,
     },
-    { key: 'sport', title: 'Вид спорта', value: sportLabels[event.sport] ?? event.sport },
-    ...(event.formats.length > 0
-      ? [
-          {
-            key: 'formats',
-            title: 'Форматы участия',
-            value: event.formats.map((format) => format.name).join(', '),
-          },
-        ]
-      : []),
+    { key: 'sport', title: 'Дисциплина', value: sportLabels[event.sport] ?? event.sport },
     { key: 'eventDate', title: 'Дата проведения', value: formatDateTime(event.eventDate) },
     {
       key: 'distanceKm',
-      title: 'Дистанция, км',
-      value: event.distanceKm === null ? '—' : String(event.distanceKm),
+      title: 'Дистанция',
+      value: event.distanceKm === null ? '—' : `${event.distanceKm} км`,
     },
-    { key: 'status', title: 'Статус', value: status.text },
+    {
+      key: 'formats',
+      title: 'Форматы участия',
+      value:
+        event.formats.length > 0 ? (
+          <Space size={[4, 8]} wrap>
+            {event.formats.map((format) => (
+              <Tag key={format.id}>{format.name}</Tag>
+            ))}
+          </Space>
+        ) : (
+          '—'
+        ),
+    },
     {
       key: 'registrationOpen',
       title: 'Начало выдачи номеров',
@@ -312,8 +315,6 @@ export function EventPage() {
       value: formatDateTime(event.registrationClose),
     },
     { key: 'createdBy', title: 'Создал', value: event.createdBy?.name ?? '—' },
-    { key: 'createdAt', title: 'Создано', value: formatDateTime(event.createdAt) },
-    { key: 'participants', title: 'Участников', value: String(event.registrations.length) },
   ];
 
   const refreshEvent = async () => {

@@ -1,10 +1,11 @@
+import type { ReactNode } from 'react';
 import type { MainSlide } from './main';
 import type { TracksStat } from './tracks';
 
 export type FeatureItem = {
   key: string;
   title: string;
-  value: string;
+  value: ReactNode;
 };
 
 export type TrackEventType = 'Гонка' | 'Контрольная тренировка' | 'Тестовый старт';
