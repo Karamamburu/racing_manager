@@ -181,6 +181,8 @@ model Registration {
   @@index([userId], map: "idx_registrations_user_id")
   @@index([status], map: "idx_registrations_status")
   @@index([formatId], map: "idx_registrations_format_id")
+  // Guest person uniqueness is an expression index in SQL:
+  // idx_registrations_event_person_active (user_id IS NULL)
   @@map("registrations")
 }
 

@@ -221,8 +221,8 @@ export function RegisterEventModal({
       if (status === 409) {
         setFeedback({
           status: 'conflict',
-          title: 'Вы уже зарегистрированы',
-          subtitle: 'На это мероприятие уже есть активная заявка.',
+          title: 'Участник уже зарегистрирован',
+          subtitle: registrationsService.getErrorMessage(error),
         });
         return;
       }

@@ -8,6 +8,13 @@ If the database already exists, apply SQL patches from `db/migrate_*.sql`. For p
 docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_event_formats.sql
 ```
 
+For one active guest registration per person (name + birth year) on an event. Logged-in users are unique by `user_id` only.
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_person_unique.sql
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_guest_person_unique.sql
+```
+
 ## Roles
 
 Participants have no rows in `user_roles`. Admin roles are granted in SQL after the person has logged in once (Authentik creates the `users` row).

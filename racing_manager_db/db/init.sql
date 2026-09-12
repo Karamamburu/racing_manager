@@ -189,6 +189,14 @@ CREATE INDEX idx_registrations_format_id ON registrations(format_id);
 CREATE UNIQUE INDEX idx_registrations_event_user_active
   ON registrations (event_id, user_id)
   WHERE user_id IS NOT NULL AND status IN ('REGISTERED', 'CONFIRMED');
+CREATE UNIQUE INDEX idx_registrations_event_person_active
+  ON registrations (
+    event_id,
+    lower(btrim(first_name)),
+    lower(btrim(last_name)),
+    birth_year
+  )
+  WHERE user_id IS NULL AND status IN ('REGISTERED', 'CONFIRMED');
 CREATE UNIQUE INDEX idx_registrations_event_start_number
   ON registrations (event_id, start_number)
   WHERE start_number IS NOT NULL;

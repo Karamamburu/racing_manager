@@ -57,6 +57,7 @@ type StoredRegistration = {
   note: string | null;
   registeredAt: Date;
   updatedAt: Date;
+  format?: { name: string } | null;
 };
 
 type EventRegistrationWindow = {
@@ -168,6 +169,11 @@ export class RegistrationsService {
         });
         return this.toResponse(restored);
       }
+    } else {
+      const duplicate = await this.findActiveGuestPerson(eventId, payload);
+      if (duplicate) {
+        throw new ConflictException(this.duplicatePersonMessage(duplicate));
+      }
     }
 
     try {
@@ -182,6 +188,12 @@ export class RegistrationsService {
       return this.toResponse(created);
     } catch (error) {
       if (isUniqueViolation(error)) {
+        if (!actor) {
+          const duplicate = await this.findActiveGuestPerson(eventId, payload);
+          if (duplicate) {
+            throw new ConflictException(this.duplicatePersonMessage(duplicate));
+          }
+        }
         throw new ConflictException('Already registered for this event.');
       }
       throw error;
@@ -337,6 +349,32 @@ export class RegistrationsService {
       );
     }
     return resolved;
+  }
+
+  private async findActiveGuestPerson(
+    eventId: string,
+    person: Pick<ParsedCreateRegistration, 'firstName' | 'lastName' | 'birthYear'>,
+  ): Promise<StoredRegistration | null> {
+    return this.store.registration.findFirst({
+      where: {
+        eventId,
+        userId: null,
+        birthYear: person.birthYear,
+        firstName: { equals: person.firstName, mode: 'insensitive' },
+        lastName: { equals: person.lastName, mode: 'insensitive' },
+        status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
+      },
+      include: { format: { select: { name: true } } },
+    });
+  }
+
+  private duplicatePersonMessage(row: StoredRegistration): string {
+    const person = `${row.firstName} ${row.lastName} ${row.birthYear}`;
+    const formatName = row.format?.name;
+    if (formatName) {
+      return `Участник «${person}» уже зарегистрирован на данное мероприятие в категории: ${formatName}.`;
+    }
+    return `Участник «${person}» уже зарегистрирован на данное мероприятие.`;
   }
 
   private toResponse(row: StoredRegistration): RegistrationResponse {
