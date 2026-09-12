@@ -276,7 +276,13 @@ export function RegisterEventModal({
           <Button key="cancel" onClick={handleCancel} disabled={submitting}>
             Отмена
           </Button>,
-          <Button key="submit" type="primary" loading={submitting} onClick={() => form.submit()}>
+          <Button
+            key="submit"
+            type="primary"
+            loading={submitting}
+            disabled={Boolean(feedback)}
+            onClick={() => form.submit()}
+          >
             Зарегистрироваться
           </Button>,
         ]}
@@ -378,6 +384,8 @@ export function RegisterEventModal({
 
       <Modal
         open={Boolean(feedback)}
+        zIndex={1100}
+        destroyOnClose
         onCancel={closeFeedback}
         footer={
           showProfileOffer
