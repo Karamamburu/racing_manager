@@ -108,6 +108,19 @@ CREATE TABLE events (
 );
 
 -- ========================================
+-- EVENT LAPS
+-- Planned laps of an event. distance_km is the length of one lap.
+-- events.distance_km is the sum of these rows.
+-- ========================================
+CREATE TABLE event_laps (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  lap_number INT NOT NULL CHECK (lap_number > 0),
+  distance_km NUMERIC(6, 2) NOT NULL CHECK (distance_km > 0),
+  UNIQUE (event_id, lap_number)
+);
+
+-- ========================================
 -- PARTICIPATION FORMATS
 -- Catalog of start styles / equipment classes per sport.
 -- RUN and BIKE have no rows: ranking is by gender only.
@@ -158,9 +171,10 @@ CREATE TABLE registrations (
 
 -- ========================================
 -- RESULTS
--- One finish time per registration. Place is derived by sorting
--- time_milliseconds ascending (fastest first) within each
--- (format_id, gender) classification. A start number must
+-- One finish time per registration. time_milliseconds is the sum
+-- of result_laps for events that have laps. Place is derived by
+-- sorting complete finish times ascending (fastest first) within
+-- each (format_id, gender) classification. A start number must
 -- be assigned before a result can be recorded.
 -- ========================================
 CREATE TABLE results (
@@ -172,6 +186,20 @@ CREATE TABLE results (
 );
 
 -- ========================================
+-- RESULT LAPS
+-- Split time for one planned event lap of one result.
+-- ========================================
+CREATE TABLE result_laps (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  result_id UUID NOT NULL REFERENCES results(id) ON DELETE CASCADE,
+  event_lap_id UUID NOT NULL REFERENCES event_laps(id) ON DELETE CASCADE,
+  time_milliseconds INT NOT NULL CHECK (time_milliseconds > 0),
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (result_id, event_lap_id)
+);
+
+-- ========================================
 -- INDEXES
 -- ========================================
 CREATE INDEX idx_users_authentik_id ON users(authentik_id);
@@ -180,6 +208,9 @@ CREATE INDEX idx_events_track_id ON events(track_id);
 CREATE INDEX idx_events_date ON events(event_date);
 CREATE INDEX idx_events_sport ON events(sport);
 CREATE INDEX idx_events_status ON events(status);
+CREATE INDEX idx_event_laps_event_id ON event_laps(event_id);
+CREATE INDEX idx_result_laps_result_id ON result_laps(result_id);
+CREATE INDEX idx_result_laps_event_lap_id ON result_laps(event_lap_id);
 CREATE INDEX idx_participation_formats_sport ON participation_formats(sport);
 CREATE INDEX idx_event_formats_format_id ON event_formats(format_id);
 CREATE INDEX idx_registrations_event_id ON registrations(event_id);

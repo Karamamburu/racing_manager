@@ -1,8 +1,10 @@
-import { Button, Checkbox, DatePicker, Form, Input, InputNumber, Modal, Result, Select } from 'antd';
+import { Button, Checkbox, DatePicker, Form, Input, Modal, Result, Select } from 'antd';
 import type { Dayjs } from 'dayjs';
 import { useEffect, useState } from 'react';
 import { authService } from '../../../features/auth/authService';
 import { eventsService } from '../../../features/events/eventsService';
+import { EventLapsFormItems } from '../../../features/events/EventLapsFormItems';
+import { buildEventLapsPayload } from '../../../features/events/eventLaps';
 import { dateTimePickerProps } from '../../../shared/formatDateTime';
 import type {
   CreateEventRequest,
@@ -16,7 +18,8 @@ type CreateEventFormValues = {
   eventType: EventTypeCode;
   sport: SportCode;
   eventDate: Dayjs;
-  distanceKm?: number | null;
+  lapCount: number;
+  lapDistanceKm: number;
   description?: string;
   registrationOpen?: Dayjs | null;
   registrationClose?: Dayjs | null;
@@ -61,6 +64,7 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
       form.setFieldsValue({
         eventType: 'TIME_TRIAL',
         sport: 'SKI',
+        lapCount: 1,
       });
     } else {
       setFormats([]);
@@ -109,14 +113,16 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
   };
 
   const handleFinish = async (values: CreateEventFormValues) => {
+    const laps = buildEventLapsPayload(values.lapCount, values.lapDistanceKm);
     const payload: CreateEventRequest = {
       name: values.name.trim(),
       eventType: values.eventType,
       sport: values.sport,
       eventDate: values.eventDate.toDate().toISOString(),
       formatIds: values.formatIds ?? [],
+      laps,
+      distanceKm: Number((values.lapCount * values.lapDistanceKm).toFixed(2)),
     };
-    if (values.distanceKm) payload.distanceKm = values.distanceKm;
     if (values.description?.trim()) payload.description = values.description.trim();
     if (values.registrationOpen) {
       payload.registrationOpen = values.registrationOpen.toDate().toISOString();
@@ -196,7 +202,7 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ eventType: 'TIME_TRIAL', sport: 'SKI' }}
+          initialValues={{ eventType: 'TIME_TRIAL', sport: 'SKI', lapCount: 1 }}
           onFinish={handleFinish}
         >
           <Form.Item label="Трасса">
@@ -251,9 +257,7 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
             <DatePicker {...dateTimePickerProps} />
           </Form.Item>
 
-          <Form.Item name="distanceKm" label="Дистанция, км">
-            <InputNumber min={0.01} step={0.1} style={{ width: '100%' }} placeholder="10.5" />
-          </Form.Item>
+          <EventLapsFormItems />
 
           <Form.Item name="description" label="Описание">
             <Input.TextArea rows={3} placeholder="Необязательно" />

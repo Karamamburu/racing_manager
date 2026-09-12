@@ -32,6 +32,12 @@ export type EventFormatRef = {
   sortOrder: number;
 };
 
+export type EventLapRef = {
+  id: string;
+  lapNumber: number;
+  distanceKm: number;
+};
+
 export type EventResponse = {
   id: string;
   trackId: string;
@@ -48,6 +54,7 @@ export type EventResponse = {
   createdAt: string;
   updatedAt: string;
   formats: EventFormatRef[];
+  laps: EventLapRef[];
 };
 
 export type RecentEventRow = {
@@ -84,6 +91,7 @@ export type EventDetails = {
     name: string;
   } | null;
   formats: EventFormatRef[];
+  laps: EventLapRef[];
   registrations: EventParticipant[];
 };
 
@@ -100,6 +108,7 @@ export type EventParticipant = {
   finishTimeMs: number | null;
   place: number | null;
   format: EventFormatRef | null;
+  laps: { lapNumber: number; timeMilliseconds: number }[];
   status: string;
   note: string | null;
   registeredAt: string;
@@ -148,6 +157,17 @@ type StoredFormat = {
   sortOrder: number;
 };
 
+type StoredLap = {
+  id: string;
+  lapNumber: number;
+  distanceKm: DecimalValue;
+};
+
+type StoredResultLap = {
+  timeMilliseconds: number;
+  eventLap: { lapNumber: number };
+};
+
 type StoredRegistration = {
   id: string;
   userId: string | null;
@@ -164,13 +184,17 @@ type StoredRegistration = {
   status: string;
   note: string | null;
   registeredAt: Date;
-  result: { timeMilliseconds: number } | null;
+  result: {
+    timeMilliseconds: number;
+    laps: StoredResultLap[];
+  } | null;
 };
 
 type EventWithDetails = StoredEvent & {
   track: EventDetails['track'];
   createdBy: PersonRow | null;
   eventFormats: { format: StoredFormat }[];
+  laps: StoredLap[];
   registrations: StoredRegistration[];
 };
 
@@ -190,7 +214,12 @@ type EventsStore = {
     create: (args: {
       data: object;
       include?: object;
-    }) => Promise<StoredEvent & { eventFormats?: { format: StoredFormat }[] }>;
+    }) => Promise<
+      StoredEvent & {
+        eventFormats?: { format: StoredFormat }[];
+        laps?: StoredLap[];
+      }
+    >;
     findMany: (args: object) => Promise<CatalogEvent[]>;
     findUnique: {
       (args: {
@@ -212,19 +241,35 @@ type EventsStore = {
   };
 };
 
+function isCompleteResult(
+  registration: StoredRegistration,
+  eventLapCount: number,
+): boolean {
+  if (!registration.result) return false;
+  if (eventLapCount === 0) return true;
+  return registration.result.laps.length === eventLapCount;
+}
+
 function compareRegistrationsByResult(
   a: StoredRegistration,
   b: StoredRegistration,
+  eventLapCount: number,
 ): number {
-  const aTime = a.result?.timeMilliseconds ?? null;
-  const bTime = b.result?.timeMilliseconds ?? null;
-  if (aTime !== null && bTime !== null) {
+  const aComplete = isCompleteResult(a, eventLapCount);
+  const bComplete = isCompleteResult(b, eventLapCount);
+  if (aComplete && bComplete) {
+    const aTime = a.result?.timeMilliseconds ?? 0;
+    const bTime = b.result?.timeMilliseconds ?? 0;
     if (aTime !== bTime) return aTime - bTime;
-    return (a.startNumber ?? Number.POSITIVE_INFINITY) -
-      (b.startNumber ?? Number.POSITIVE_INFINITY);
+    return (
+      (a.startNumber ?? Number.POSITIVE_INFINITY) -
+      (b.startNumber ?? Number.POSITIVE_INFINITY)
+    );
   }
-  if (aTime !== null) return -1;
-  if (bTime !== null) return 1;
+  if (aComplete) return -1;
+  if (bComplete) return 1;
+  if (a.result && !b.result) return -1;
+  if (!a.result && b.result) return 1;
 
   const aNumber = a.startNumber;
   const bNumber = b.startNumber;
@@ -257,6 +302,31 @@ function mapEventFormats(
   return [...(eventFormats ?? [])]
     .map((row) => toFormatRef(row.format))
     .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
+}
+
+function toLapRef(lap: StoredLap): EventLapRef {
+  return {
+    id: lap.id,
+    lapNumber: lap.lapNumber,
+    distanceKm: toKm(lap.distanceKm) ?? 0,
+  };
+}
+
+function mapEventLaps(laps: StoredLap[] | undefined): EventLapRef[] {
+  return [...(laps ?? [])]
+    .map(toLapRef)
+    .sort((a, b) => a.lapNumber - b.lapNumber);
+}
+
+function mapParticipantLaps(
+  laps: StoredResultLap[] | undefined,
+): { lapNumber: number; timeMilliseconds: number }[] {
+  return [...(laps ?? [])]
+    .map((lap) => ({
+      lapNumber: lap.eventLap.lapNumber,
+      timeMilliseconds: lap.timeMilliseconds,
+    }))
+    .sort((a, b) => a.lapNumber - b.lapNumber);
 }
 
 @Injectable()
@@ -310,15 +380,28 @@ export class EventsService {
         eventFormats: {
           create: formatIds.map((formatId) => ({ formatId })),
         },
+        laps: {
+          create: parsed.laps.map((lap) => ({
+            lapNumber: lap.lapNumber,
+            distanceKm: lap.distanceKm,
+          })),
+        },
       },
       include: {
         eventFormats: {
           include: { format: true },
         },
+        laps: {
+          orderBy: { lapNumber: 'asc' },
+        },
       },
     });
 
-    return this.toResponse(created, mapEventFormats(created.eventFormats));
+    return this.toResponse(
+      created,
+      mapEventFormats(created.eventFormats),
+      mapEventLaps(created.laps),
+    );
   }
 
   async listFormats(sportRaw?: string): Promise<ParticipationFormatDto[]> {
@@ -393,6 +476,9 @@ export class EventsService {
         eventFormats: {
           include: { format: true },
         },
+        laps: {
+          orderBy: { lapNumber: 'asc' },
+        },
         registrations: {
           where: { status: { in: [...ACTIVE_REGISTRATION_STATUSES] } },
           orderBy: { registeredAt: 'asc' },
@@ -420,7 +506,15 @@ export class EventsService {
             note: true,
             registeredAt: true,
             result: {
-              select: { timeMilliseconds: true },
+              select: {
+                timeMilliseconds: true,
+                laps: {
+                  select: {
+                    timeMilliseconds: true,
+                    eventLap: { select: { lapNumber: true } },
+                  },
+                },
+              },
             },
           },
         },
@@ -456,7 +550,11 @@ export class EventsService {
           }
         : null,
       formats: mapEventFormats(event.eventFormats),
-      registrations: this.toRankedParticipants(event.registrations),
+      laps: mapEventLaps(event.laps),
+      registrations: this.toRankedParticipants(
+        event.registrations,
+        event.laps.length,
+      ),
     };
   }
 
@@ -474,6 +572,7 @@ export class EventsService {
       select: {
         sport: true,
         eventFormats: { select: { formatId: true } },
+        laps: { select: { id: true, lapNumber: true } },
       },
     });
     if (!current) {
@@ -514,6 +613,27 @@ export class EventsService {
       }
     }
 
+    const currentLapNumbers = current.laps
+      .map((lap) => lap.lapNumber)
+      .sort((a, b) => a - b);
+    const incomingLapNumbers = parsed.laps.map((lap) => lap.lapNumber);
+    const sameLapStructure =
+      currentLapNumbers.length === incomingLapNumbers.length &&
+      currentLapNumbers.every(
+        (lapNumber, index) => lapNumber === incomingLapNumbers[index],
+      );
+
+    if (!sameLapStructure) {
+      const resultCount = await this.prisma.result.count({
+        where: { registration: { eventId } },
+      });
+      if (resultCount > 0) {
+        throw new BadRequestException(
+          'Cannot change laps while the event has results.',
+        );
+      }
+    }
+
     await this.prisma.$transaction([
       this.prisma.event.update({
         where: { id: eventId },
@@ -542,6 +662,25 @@ export class EventsService {
             }),
           ]
         : []),
+      ...(sameLapStructure
+        ? parsed.laps.map((lap) =>
+            this.prisma.eventLap.update({
+              where: {
+                eventId_lapNumber: { eventId, lapNumber: lap.lapNumber },
+              },
+              data: { distanceKm: lap.distanceKm },
+            }),
+          )
+        : [
+            this.prisma.eventLap.deleteMany({ where: { eventId } }),
+            this.prisma.eventLap.createMany({
+              data: parsed.laps.map((lap) => ({
+                eventId,
+                lapNumber: lap.lapNumber,
+                distanceKm: lap.distanceKm,
+              })),
+            }),
+          ]),
     ]);
 
     return this.findById(eventId);
@@ -641,6 +780,7 @@ export class EventsService {
   private toResponse(
     event: StoredEvent,
     formats: EventFormatRef[] = [],
+    laps: EventLapRef[] = [],
   ): EventResponse {
     return {
       id: event.id,
@@ -658,11 +798,13 @@ export class EventsService {
       createdAt: event.createdAt.toISOString(),
       updatedAt: event.updatedAt.toISOString(),
       formats,
+      laps,
     };
   }
 
   private toRankedParticipants(
     registrations: StoredRegistration[],
+    eventLapCount: number,
   ): EventParticipant[] {
     const groups = new Map<string, StoredRegistration[]>();
     for (const registration of registrations) {
@@ -674,11 +816,14 @@ export class EventsService {
 
     const ranked: EventParticipant[] = [];
     for (const group of groups.values()) {
-      const sorted = [...group].sort(compareRegistrationsByResult);
+      const sorted = [...group].sort((a, b) =>
+        compareRegistrationsByResult(a, b, eventLapCount),
+      );
       let place = 0;
       for (const registration of sorted) {
         const finishTimeMs = registration.result?.timeMilliseconds ?? null;
-        if (finishTimeMs !== null) place += 1;
+        const complete = isCompleteResult(registration, eventLapCount);
+        if (complete) place += 1;
         ranked.push({
           id: registration.id,
           userId: registration.userId,
@@ -694,10 +839,11 @@ export class EventsService {
           team: registration.team,
           startNumber: registration.startNumber,
           finishTimeMs,
-          place: finishTimeMs === null ? null : place,
+          place: complete ? place : null,
           format: registration.format
             ? toFormatRef(registration.format)
             : null,
+          laps: mapParticipantLaps(registration.result?.laps),
           status: registration.status,
           note: registration.note,
           registeredAt: registration.registeredAt.toISOString(),

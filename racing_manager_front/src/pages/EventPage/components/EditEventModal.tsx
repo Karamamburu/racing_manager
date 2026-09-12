@@ -1,9 +1,11 @@
-import { Button, Checkbox, DatePicker, Form, Input, InputNumber, Modal, Result, Select } from 'antd';
+import { Button, Checkbox, DatePicker, Form, Input, Modal, Result, Select } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
 import { authService } from '../../../features/auth/authService';
 import { eventsService } from '../../../features/events/eventsService';
+import { EventLapsFormItems } from '../../../features/events/EventLapsFormItems';
+import { buildEventLapsPayload } from '../../../features/events/eventLaps';
 import { dateTimePickerProps } from '../../../shared/formatDateTime';
 import type {
   CreateEventRequest,
@@ -18,7 +20,8 @@ type EditEventFormValues = {
   eventType: EventTypeCode;
   sport: SportCode;
   eventDate: Dayjs;
-  distanceKm?: number | null;
+  lapCount: number;
+  lapDistanceKm: number;
   description?: string;
   registrationOpen?: Dayjs | null;
   registrationClose?: Dayjs | null;
@@ -53,13 +56,15 @@ const sportOptions = [
 ];
 
 function toPayload(values: EditEventFormValues): CreateEventRequest {
+  const laps = buildEventLapsPayload(values.lapCount, values.lapDistanceKm);
   const payload: CreateEventRequest = {
     name: values.name.trim(),
     eventType: values.eventType,
     sport: values.sport,
     eventDate: values.eventDate.toDate().toISOString(),
+    laps,
+    distanceKm: Number((values.lapCount * values.lapDistanceKm).toFixed(2)),
   };
-  if (values.distanceKm) payload.distanceKm = values.distanceKm;
   if (values.description?.trim()) payload.description = values.description.trim();
   if (values.registrationOpen) {
     payload.registrationOpen = values.registrationOpen.toDate().toISOString();
@@ -88,7 +93,12 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
       eventType: event.eventType as EventTypeCode,
       sport: event.sport as SportCode,
       eventDate: dayjs(event.eventDate),
-      distanceKm: event.distanceKm,
+      lapCount: event.laps.length || 1,
+      lapDistanceKm:
+        event.laps[0]?.distanceKm ??
+        (event.distanceKm && event.laps.length
+          ? Number((event.distanceKm / event.laps.length).toFixed(2))
+          : event.distanceKm ?? undefined),
       description: event.description ?? undefined,
       registrationOpen: event.registrationOpen ? dayjs(event.registrationOpen) : null,
       registrationClose: event.registrationClose ? dayjs(event.registrationClose) : null,
@@ -262,9 +272,7 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
             <DatePicker {...dateTimePickerProps} />
           </Form.Item>
 
-          <Form.Item name="distanceKm" label="Дистанция, км">
-            <InputNumber min={0.01} step={0.1} style={{ width: '100%' }} />
-          </Form.Item>
+          <EventLapsFormItems />
 
           <Form.Item name="description" label="Описание">
             <Input.TextArea rows={3} />
