@@ -4,12 +4,20 @@ import type {
   CreatedEventResponse,
   CreateEventRequest,
   EventDetails,
+  ParticipationFormat,
   RecentEventRow,
+  SportCode,
 } from '../../shared/types/event';
 
 export class EventsService {
   public async listRecent(): Promise<RecentEventRow[]> {
     return apiClient.get<RecentEventRow[]>('/events');
+  }
+
+  public async listFormats(sport: SportCode): Promise<ParticipationFormat[]> {
+    return apiClient.get<ParticipationFormat[]>(
+      `/participation-formats?sport=${encodeURIComponent(sport)}`,
+    );
   }
 
   public async getById(id: string): Promise<EventDetails> {

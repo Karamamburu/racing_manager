@@ -2,10 +2,17 @@
 
 Postgres schema lives in `db/init.sql`. Docker Compose applies it only on the **first** start of an empty volume.
 
-If the database already exists, apply the roles/track seed patch:
+If the database already exists, apply SQL patches from `db/migrate_*.sql`. For participation formats:
 
 ```bash
-docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" < db/migrate_roles.sql
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_event_formats.sql
+```
+
+For one active guest registration per person (name + birth year) on an event. Logged-in users are unique by `user_id` only.
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_person_unique.sql
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_guest_person_unique.sql
 ```
 
 ## Roles
@@ -57,6 +64,7 @@ fetch('/api/admin/events', {
     name: 'КТ Алёшкино',
     eventType: 'TIME_TRIAL',
     sport: 'SKI',
+    formatIds: [1, 2],
     eventDate: '2026-12-06',
     distanceKm: 10.5,
     description: 'Контрольная тренировка',
@@ -67,4 +75,5 @@ fetch('/api/admin/events', {
 ```
 
 `eventType`: `RACE` (default) or `TIME_TRIAL`. `sport`: `RUN`, `SKI`, `ROLLER_SKI`, `BIKE`.
+`formatIds`: required for SKI and ROLLER_SKI (catalog from `GET /participation-formats?sport=SKI`). Omit or send `[]` for RUN and BIKE.
 

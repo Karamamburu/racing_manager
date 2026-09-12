@@ -1,11 +1,36 @@
 import { Controller, Get, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { Session } from 'express-session';
+import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
+import { RolesService } from './roles.service';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly usersService: UsersService,
+    private readonly rolesService: RolesService,
+  ) {}
+
+  @Get('session')
+  async session(@Req() req: Request) {
+    const userSub = req.session?.userSub;
+    if (!userSub) {
+      return { authenticated: false, userId: null, roles: [] };
+    }
+
+    const [user, roles] = await Promise.all([
+      this.usersService.findBySub(userSub),
+      this.rolesService.findCodesByAuthentikId(userSub),
+    ]);
+
+    return {
+      authenticated: true,
+      userId: user?.id ?? null,
+      roles,
+    };
+  }
 
   @Get('login')
   login(@Req() req: Request, @Res() res: Response) {

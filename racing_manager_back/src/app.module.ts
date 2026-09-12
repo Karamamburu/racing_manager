@@ -6,6 +6,7 @@ import { EventsModule } from './events/events.module';
 import { PersonalModule } from './personal/personal.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RegistrationsModule } from './registrations/registrations.module';
+import { ResultsModule } from './results/results.module';
 import { UsersModule } from './users/users.module';
 import { MainModule } from './main/main.module';
 
@@ -19,6 +20,7 @@ import { MainModule } from './main/main.module';
     AdminModule,
     EventsModule,
     RegistrationsModule,
+    ResultsModule,
     MainModule,
   ],
 })

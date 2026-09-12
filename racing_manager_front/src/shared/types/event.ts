@@ -1,8 +1,21 @@
-import type { FeatureItem } from './track';
-
 export type EventTypeCode = 'RACE' | 'TIME_TRIAL';
 
 export type SportCode = 'RUN' | 'SKI' | 'ROLLER_SKI' | 'BIKE';
+
+export type ParticipationFormat = {
+  id: number;
+  sport: SportCode;
+  code: string;
+  name: string;
+  sortOrder: number;
+};
+
+export type EventFormatRef = {
+  id: number;
+  code: string;
+  name: string;
+  sortOrder: number;
+};
 
 export type CreateEventRequest = {
   name: string;
@@ -13,6 +26,7 @@ export type CreateEventRequest = {
   description?: string;
   registrationOpen?: string;
   registrationClose?: string;
+  formatIds?: number[];
 };
 
 export type CreatedEventResponse = {
@@ -30,6 +44,7 @@ export type CreatedEventResponse = {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+  formats: EventFormatRef[];
 };
 
 export type RecentEventRow = {
@@ -52,6 +67,9 @@ export type EventParticipant = {
   district: string | null;
   team: string | null;
   startNumber: number | null;
+  finishTimeMs: number | null;
+  place: number | null;
+  format: EventFormatRef | null;
   status: string;
   note: string | null;
   registeredAt: string;
@@ -67,10 +85,23 @@ export type CreateRegistrationRequest = {
   city?: string;
   district?: string;
   team?: string;
+  formatId?: number;
 };
 
 export type UpdateRegistrationRequest = {
   startNumber: number;
+};
+
+export type UpsertResultRequest = {
+  timeMilliseconds: number;
+};
+
+export type ResultResponse = {
+  id: string;
+  registrationId: string;
+  timeMilliseconds: number;
+  recordedAt: string;
+  updatedAt: string;
 };
 
 export type RegistrationResponse = {
@@ -84,6 +115,7 @@ export type RegistrationResponse = {
   city: string | null;
   district: string | null;
   team: string | null;
+  formatId: number | null;
   startNumber: number | null;
   status: string;
   note: string | null;
@@ -114,21 +146,8 @@ export type EventDetails = {
     id: string;
     name: string;
   } | null;
+  formats: EventFormatRef[];
   registrations: EventParticipant[];
-};
-
-export type WheelType = 'Быстрые' | 'Медленные' | 'Классика';
-
-export type EventRegistrationFormValues = {
-  fullName: string;
-  birthYear: number;
-  wheelType: WheelType;
-  team: string;
-  district: string;
-};
-
-export type EventRegistration = EventRegistrationFormValues & {
-  startNumber: 'TBD';
 };
 
 export type EventRaceSummary = {
@@ -139,15 +158,4 @@ export type EventRaceSummary = {
   eventType: string;
   status: 'PLANNED' | 'DONE' | 'CANCELLED';
   registeredCount: number;
-};
-
-export type EventPageResponse = {
-  id: string;
-  title: string;
-  subtitle: string;
-  features: FeatureItem[];
-  descriptionParagraphs: string[];
-  mapLink: string;
-  registrationFormInitial: EventRegistrationFormValues;
-  registeredUsers: EventRegistration[];
 };

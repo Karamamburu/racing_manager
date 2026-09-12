@@ -1,12 +1,14 @@
-import { Alert, Button, DatePicker, Form, Input, InputNumber, Modal, Result, Select, Typography } from 'antd';
+import { Alert, Button, DatePicker, Form, Input, InputNumber, Modal, Result, Select, Skeleton, Typography } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { personalQueryKey, usePersonalQuery } from '../../../features/auth/usePersonalQuery';
+import { useSessionQuery } from '../../../features/auth/useSessionQuery';
 import { personalService } from '../../../features/personal/personalService';
 import { registrationsService } from '../../../features/registrations/registrationsService';
-import type { CreateRegistrationRequest, GenderCode } from '../../../shared/types/event';
+import type { CreateRegistrationRequest, EventFormatRef, GenderCode } from '../../../shared/types/event';
 import type { PersonalProfile, PersonalResponse, UpdatePersonalRequest } from '../../../shared/types/personal';
 
 type RegisterFormValues = {
@@ -17,6 +19,7 @@ type RegisterFormValues = {
   city?: string;
   district?: string;
   team?: string;
+  formatId?: number;
 };
 
 type FieldLocks = Record<keyof RegisterFormValues, boolean>;
@@ -32,8 +35,7 @@ type FeedbackState = {
 type RegisterEventModalProps = {
   open: boolean;
   eventId: string;
-  isAuthenticated: boolean;
-  profile: PersonalResponse['profile'] | null | undefined;
+  formats: EventFormatRef[];
   onClose: () => void;
   onRegistered?: () => void;
 };
@@ -69,6 +71,7 @@ function fieldLocks(
       city: false,
       district: false,
       team: false,
+      formatId: false,
     };
   }
   return {
@@ -79,6 +82,7 @@ function fieldLocks(
     city: Boolean(profile?.city?.trim()),
     district: Boolean(profile?.district?.trim()),
     team: Boolean(profile?.team?.trim()),
+    formatId: false,
   };
 }
 
@@ -91,11 +95,13 @@ function toPayload(values: RegisterFormValues, locks: FieldLocks): CreateRegistr
   if (!locks.city && values.city?.trim()) payload.city = values.city.trim();
   if (!locks.district && values.district?.trim()) payload.district = values.district.trim();
   if (!locks.team && values.team?.trim()) payload.team = values.team.trim();
+  if (values.formatId != null) payload.formatId = values.formatId;
   return payload;
 }
 
 function hasSupplements(payload: CreateRegistrationRequest): boolean {
-  return Object.values(payload).some((value) => value !== undefined && value !== '');
+  const { formatId: _formatId, ...personal } = payload;
+  return Object.values(personal).some((value) => value !== undefined && value !== '');
 }
 
 function toProfileUpdate(
@@ -125,12 +131,16 @@ function toProfileUpdate(
 export function RegisterEventModal({
   open,
   eventId,
-  isAuthenticated,
-  profile,
+  formats,
   onClose,
   onRegistered,
 }: RegisterEventModalProps) {
   const queryClient = useQueryClient();
+  const sessionQuery = useSessionQuery();
+  const isAuthenticated = Boolean(sessionQuery.data?.authenticated);
+  const personalQuery = usePersonalQuery({ enabled: open && isAuthenticated });
+  const profile = personalQuery.data?.profile;
+  const waitingProfile = open && isAuthenticated && !personalQuery.isFetched;
   const [form] = Form.useForm<RegisterFormValues>();
   const [submitting, setSubmitting] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -138,7 +148,7 @@ export function RegisterEventModal({
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [supplements, setSupplements] = useState<CreateRegistrationRequest | null>(null);
   const [profileBirthDate, setProfileBirthDate] = useState<Dayjs | null>(null);
-  const locks = fieldLocks(isAuthenticated, profile);
+  const locks = fieldLocks(isAuthenticated && personalQuery.isSuccess, profile);
   const profileComplete = locks.firstName && locks.lastName && locks.gender && locks.birthYear;
 
   useEffect(() => {
@@ -152,8 +162,9 @@ export function RegisterEventModal({
       city: profile?.city ?? undefined,
       district: profile?.district ?? undefined,
       team: profile?.team ?? undefined,
+      formatId: formats.length === 1 ? formats[0].id : undefined,
     });
-  }, [form, open, profile]);
+  }, [form, formats, open, profile]);
 
   const resetLocalState = () => {
     form.resetFields();
@@ -213,8 +224,8 @@ export function RegisterEventModal({
       if (status === 409) {
         setFeedback({
           status: 'conflict',
-          title: 'Вы уже зарегистрированы',
-          subtitle: 'На это мероприятие уже есть активная заявка.',
+          title: 'Участник уже зарегистрирован',
+          subtitle: registrationsService.getErrorMessage(error),
         });
         return;
       }
@@ -239,7 +250,7 @@ export function RegisterEventModal({
     setSavingProfile(true);
     try {
       await personalService.updatePersonal(payload);
-      await queryClient.invalidateQueries({ queryKey: ['personal'] });
+      await queryClient.invalidateQueries({ queryKey: personalQueryKey });
       finishSuccess();
     } catch (error) {
       setFeedback({
@@ -268,38 +279,48 @@ export function RegisterEventModal({
           <Button key="cancel" onClick={handleCancel} disabled={submitting}>
             Отмена
           </Button>,
-          <Button key="submit" type="primary" loading={submitting} onClick={() => form.submit()}>
+          <Button
+            key="submit"
+            type="primary"
+            loading={submitting}
+            disabled={Boolean(feedback) || waitingProfile}
+            onClick={() => form.submit()}
+          >
             Зарегистрироваться
           </Button>,
         ]}
       >
-        {isAuthenticated ? (
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 16 }}
-            message={
-              profileComplete
-                ? 'Данные заявки берутся из вашего профиля'
-                : 'Недостающие поля можно указать только для этой заявки'
-            }
-            description={
-              profileComplete ? (
-                <>
-                  Поля из профиля нельзя изменить здесь. Отредактировать их можно в{' '}
-                  <Link to="/cabinet">личном кабинете</Link>.
-                </>
-              ) : (
-                <>
-                  Заполненные поля профиля заблокированы. Пустые можно ввести в форме — они попадут
-                  в заявку. После регистрации предложим сохранить их в{' '}
-                  <Link to="/cabinet">профиле</Link>.
-                </>
-              )
-            }
-          />
-        ) : null}
-        <Form form={form} layout="vertical" onFinish={handleFinish}>
+        {waitingProfile ? (
+          <Skeleton active paragraph={{ rows: 8 }} />
+        ) : (
+          <>
+            {isAuthenticated ? (
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message={
+                  profileComplete
+                    ? 'Данные заявки берутся из вашего профиля'
+                    : 'Недостающие поля можно указать только для этой заявки'
+                }
+                description={
+                  profileComplete ? (
+                    <>
+                      Поля из профиля нельзя изменить здесь. Отредактировать их можно в{' '}
+                      <Link to="/cabinet">личном кабинете</Link>.
+                    </>
+                  ) : (
+                    <>
+                      Заполненные поля профиля заблокированы. Пустые можно ввести в форме — они попадут
+                      в заявку. После регистрации предложим сохранить их в{' '}
+                      <Link to="/cabinet">профиле</Link>.
+                    </>
+                  )
+                }
+              />
+            ) : null}
+            <Form form={form} layout="vertical" onFinish={handleFinish}>
           <Form.Item
             name="firstName"
             label="Имя"
@@ -324,6 +345,22 @@ export function RegisterEventModal({
             <Select options={genderOptions} disabled={locks.gender} />
           </Form.Item>
 
+          {formats.length > 0 ? (
+            <Form.Item
+              name="formatId"
+              label="Формат участия"
+              rules={[{ required: true, message: 'Выберите формат участия' }]}
+            >
+              <Select
+                disabled={formats.length === 1}
+                options={formats.map((format) => ({
+                  label: format.name,
+                  value: format.id,
+                }))}
+              />
+            </Form.Item>
+          ) : null}
+
           <Form.Item
             name="birthYear"
             label="Год рождения"
@@ -346,14 +383,18 @@ export function RegisterEventModal({
             <Input disabled={locks.district} />
           </Form.Item>
 
-          <Form.Item name="team" label="Команда">
-            <Input disabled={locks.team} />
-          </Form.Item>
-        </Form>
+            <Form.Item name="team" label="Команда">
+              <Input disabled={locks.team} />
+            </Form.Item>
+            </Form>
+          </>
+        )}
       </Modal>
 
       <Modal
         open={Boolean(feedback)}
+        zIndex={1100}
+        destroyOnClose
         onCancel={closeFeedback}
         footer={
           showProfileOffer

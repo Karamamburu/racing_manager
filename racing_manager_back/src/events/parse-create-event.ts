@@ -16,13 +16,14 @@ export type ParsedCreateEvent = {
   description: string | null;
   registrationOpen: Date | null;
   registrationClose: Date | null;
+  formatIds: number[];
 };
 
 function isEventType(value: string): value is EventTypeCode {
   return (EVENT_TYPES as readonly string[]).includes(value);
 }
 
-function isSport(value: string): value is SportCode {
+export function isSport(value: string): value is SportCode {
   return (SPORTS as readonly string[]).includes(value);
 }
 
@@ -63,6 +64,26 @@ function parseDateTime(value: string, field: string): Date {
     throw new BadRequestException(`${field} must be an ISO datetime.`);
   }
   return parsed;
+}
+
+function parseFormatIds(value: unknown): number[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new BadRequestException(
+      'formatIds must be an array of positive integers.',
+    );
+  }
+  const ids: number[] = [];
+  for (const item of value) {
+    const numeric = typeof item === 'number' ? item : Number(item);
+    if (!Number.isInteger(numeric) || numeric <= 0) {
+      throw new BadRequestException(
+        'formatIds must be an array of positive integers.',
+      );
+    }
+    if (!ids.includes(numeric)) ids.push(numeric);
+  }
+  return ids;
 }
 
 export function parseCreateEventBody(body: unknown): ParsedCreateEvent {
@@ -148,5 +169,6 @@ export function parseCreateEventBody(body: unknown): ParsedCreateEvent {
     description,
     registrationOpen,
     registrationClose,
+    formatIds: parseFormatIds(raw.formatIds),
   };
 }

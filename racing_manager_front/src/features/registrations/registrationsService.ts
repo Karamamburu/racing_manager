@@ -3,7 +3,9 @@ import { apiClient } from '../../shared/api/ApiClient';
 import type {
   CreateRegistrationRequest,
   RegistrationResponse,
+  ResultResponse,
   UpdateRegistrationRequest,
+  UpsertResultRequest,
 } from '../../shared/types/event';
 
 export class RegistrationsService {
@@ -32,6 +34,17 @@ export class RegistrationsService {
   ): Promise<{ status: number; data: RegistrationResponse }> {
     return apiClient.patchResult<RegistrationResponse>(
       `/events/${eventId}/registrations/${registrationId}`,
+      payload,
+    );
+  }
+
+  public async upsertResult(
+    eventId: string,
+    registrationId: string,
+    payload: UpsertResultRequest,
+  ): Promise<{ status: number; data: ResultResponse }> {
+    return apiClient.putResult<ResultResponse>(
+      `/events/${eventId}/registrations/${registrationId}/result`,
       payload,
     );
   }

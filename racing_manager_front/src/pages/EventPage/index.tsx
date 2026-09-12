@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { canCreateEvents, canManageCreatedEvent } from '../../features/auth/canCreateEvents';
-import { usePersonalQuery } from '../../features/auth/usePersonalQuery';
+import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { eventsService } from '../../features/events/eventsService';
 import { recentEventsQueryKey } from '../../features/events/useRecentEventsQuery';
 import {
@@ -19,9 +19,10 @@ import { registrationsService } from '../../features/registrations/registrations
 import { FeaturesCard } from '../../shared/components';
 import { formatDateTime } from '../../shared/formatDateTime';
 import { AppShell } from '../../shared/layout';
-import type { EventParticipant } from '../../shared/types/event';
+import type { EventFormatRef, EventParticipant } from '../../shared/types/event';
 import type { FeatureItem } from '../../shared/types/track';
 import { EditEventModal } from './components/EditEventModal';
+import { FinishTimeCell } from './components/FinishTimeCell';
 import { RegisterEventModal } from './components/RegisterEventModal';
 import { StartNumberCell } from './components/StartNumberCell';
 
@@ -55,12 +56,83 @@ const genderLabels: Record<string, string> = {
   F: 'Женский',
 };
 
+const genderGroupLabels: Record<string, string> = {
+  M: 'Мужчины',
+  F: 'Женщины',
+};
+
+const GENDER_ORDER = ['M', 'F'] as const;
+
+type ClassificationSection = {
+  key: string;
+  title: string;
+  rows: EventParticipant[];
+};
+
+function classificationTitle(gender: string, formatName: string | null): string {
+  const genderLabel = genderGroupLabels[gender] ?? gender;
+  if (!formatName) return genderLabel;
+  return `${genderLabel} · ${formatName}`;
+}
+
+function groupParticipants(
+  participants: EventParticipant[],
+  formats: EventFormatRef[],
+): ClassificationSection[] {
+  const sortedFormats = [...formats].sort(
+    (a, b) => a.sortOrder - b.sortOrder || a.id - b.id,
+  );
+  const sections: ClassificationSection[] = [];
+
+  if (sortedFormats.length === 0) {
+    for (const gender of GENDER_ORDER) {
+      const rows = participants.filter((participant) => participant.gender === gender);
+      if (rows.length) {
+        sections.push({
+          key: gender,
+          title: classificationTitle(gender, null),
+          rows,
+        });
+      }
+    }
+    return sections;
+  }
+
+  for (const format of sortedFormats) {
+    for (const gender of GENDER_ORDER) {
+      const rows = participants.filter(
+        (participant) =>
+          participant.format?.id === format.id && participant.gender === gender,
+      );
+      if (rows.length) {
+        sections.push({
+          key: `${format.id}-${gender}`,
+          title: classificationTitle(gender, format.name),
+          rows,
+        });
+      }
+    }
+  }
+  return sections;
+}
+
 function getParticipantColumns(options: {
   canAssignNumbers: boolean;
-  savingId: string | null;
+  canAssignResults: boolean;
+  savingNumberId: string | null;
+  savingResultId: string | null;
   onAssignNumber: (participant: EventParticipant, startNumber: number) => Promise<void>;
+  onAssignResult: (participant: EventParticipant, timeMilliseconds: number) => Promise<void>;
+  onInvalidResult: () => void;
 }): ColumnsType<EventParticipant> {
   return [
+    {
+      title: 'Место',
+      dataIndex: 'place',
+      key: 'place',
+      width: 80,
+      render: (value: number | null) => value ?? '—',
+    },
     {
       title: 'Стартовый номер',
       dataIndex: 'startNumber',
@@ -69,8 +141,23 @@ function getParticipantColumns(options: {
         <StartNumberCell
           value={value}
           canEdit={options.canAssignNumbers}
-          saving={options.savingId === record.id}
+          saving={options.savingNumberId === record.id}
           onSave={(startNumber) => options.onAssignNumber(record, startNumber)}
+        />
+      ),
+    },
+    {
+      title: 'Время',
+      dataIndex: 'finishTimeMs',
+      key: 'finishTimeMs',
+      width: 130,
+      render: (value: number | null, record) => (
+        <FinishTimeCell
+          value={value}
+          canEdit={options.canAssignResults && record.startNumber != null}
+          saving={options.savingResultId === record.id}
+          onSave={(timeMilliseconds) => options.onAssignResult(record, timeMilliseconds)}
+          onInvalid={options.onInvalidResult}
         />
       ),
     },
@@ -132,7 +219,7 @@ export function EventPage() {
   const queryClient = useQueryClient();
   const { id } = useParams<{ id: string }>();
   const eventQuery = useEventDetailsQuery(id);
-  const personalQuery = usePersonalQuery();
+  const sessionQuery = useSessionQuery();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
@@ -140,6 +227,7 @@ export function EventPage() {
   const [isCancelling, setIsCancelling] = useState(false);
   const [isCancellingRegistration, setIsCancellingRegistration] = useState(false);
   const [savingStartNumberId, setSavingStartNumberId] = useState<string | null>(null);
+  const [savingFinishTimeId, setSavingFinishTimeId] = useState<string | null>(null);
 
   if (eventQuery.isLoading) {
     return (
@@ -169,18 +257,20 @@ export function EventPage() {
   }
 
   const event = eventQuery.data;
-  const profile = personalQuery.data?.profile;
+  const session = sessionQuery.data;
   const canManage = canManageCreatedEvent({
-    roles: personalQuery.data?.roles,
-    profileId: profile?.id,
+    roles: session?.roles,
+    profileId: session?.userId,
     createdById: event.createdBy?.id,
     status: event.status,
   });
   const canAssignNumbers =
-    canCreateEvents(personalQuery.data?.roles) && event.status === 'PLANNED';
+    canCreateEvents(session?.roles) && event.status === 'PLANNED';
+  const canAssignResults =
+    canCreateEvents(session?.roles) && event.status !== 'CANCELLED';
   const myRegistration = event.registrations.find(
     (registration: EventParticipant) =>
-      Boolean(registration.userId) && registration.userId === profile?.id,
+      Boolean(registration.userId) && registration.userId === session?.userId,
   );
   const canRegister = isEventRegistrationOpen(event);
   const closedReason = registrationClosedReason(event);
@@ -195,6 +285,15 @@ export function EventPage() {
       value: eventTypeLabels[event.eventType] ?? event.eventType,
     },
     { key: 'sport', title: 'Вид спорта', value: sportLabels[event.sport] ?? event.sport },
+    ...(event.formats.length > 0
+      ? [
+          {
+            key: 'formats',
+            title: 'Форматы участия',
+            value: event.formats.map((format) => format.name).join(', '),
+          },
+        ]
+      : []),
     { key: 'eventDate', title: 'Дата проведения', value: formatDateTime(event.eventDate) },
     {
       key: 'distanceKm',
@@ -217,9 +316,9 @@ export function EventPage() {
     { key: 'participants', title: 'Участников', value: String(event.registrations.length) },
   ];
 
-  const refreshEvent = () => {
+  const refreshEvent = async () => {
     if (!event.id) return;
-    void queryClient.invalidateQueries({ queryKey: eventDetailsQueryKey(event.id) });
+    await queryClient.invalidateQueries({ queryKey: eventDetailsQueryKey(event.id) });
     void queryClient.invalidateQueries({ queryKey: recentEventsQueryKey });
   };
 
@@ -244,11 +343,44 @@ export function EventPage() {
     }
   };
 
+  const assignFinishTime = async (
+    participant: EventParticipant,
+    timeMilliseconds: number,
+  ) => {
+    setSavingFinishTimeId(participant.id);
+    try {
+      await registrationsService.upsertResult(event.id, participant.id, {
+        timeMilliseconds,
+      });
+      await refreshEvent();
+      message.success('Время прохождения записано');
+    } catch (error) {
+      const statusCode = registrationsService.getStatus(error);
+      if (statusCode === 403) {
+        message.error(
+          'Недостаточно прав. Записывать результаты может организатор или администратор.',
+        );
+      } else {
+        message.error(registrationsService.getErrorMessage(error));
+      }
+      throw error;
+    } finally {
+      setSavingFinishTimeId(null);
+    }
+  };
+
   const participantColumns = getParticipantColumns({
     canAssignNumbers,
-    savingId: savingStartNumberId,
+    canAssignResults,
+    savingNumberId: savingStartNumberId,
+    savingResultId: savingFinishTimeId,
     onAssignNumber: assignStartNumber,
+    onAssignResult: assignFinishTime,
+    onInvalidResult: () => {
+      message.error('Введите время цифрами. Минуты и секунды — до 59, например 13215 → 01:32:15');
+    },
   });
+  const participantSections = groupParticipants(event.registrations, event.formats);
 
   const handleCancelEvent = () => {
     setIsCancelConfirmOpen(true);
@@ -367,13 +499,31 @@ export function EventPage() {
         </Card>
 
         <Card title={`Зарегистрированные участники (${event.registrations.length})`}>
-          <Table
-            columns={participantColumns}
-            dataSource={event.registrations}
-            rowKey="id"
-            pagination={false}
-            locale={{ emptyText: 'Пока никто не зарегистрировался' }}
-          />
+          {participantSections.length === 0 ? (
+            <Table
+              columns={participantColumns}
+              dataSource={[]}
+              rowKey="id"
+              pagination={false}
+              locale={{ emptyText: 'Пока никто не зарегистрировался' }}
+            />
+          ) : (
+            <Space direction="vertical" size={24} style={{ width: '100%' }}>
+              {participantSections.map((section) => (
+                <div key={section.key}>
+                  <Typography.Title level={5} style={{ marginTop: 0 }}>
+                    {section.title}
+                  </Typography.Title>
+                  <Table
+                    columns={participantColumns}
+                    dataSource={section.rows}
+                    rowKey="id"
+                    pagination={false}
+                  />
+                </div>
+              ))}
+            </Space>
+          )}
         </Card>
       </Space>
       <EditEventModal
@@ -385,8 +535,7 @@ export function EventPage() {
       <RegisterEventModal
         open={isRegisterOpen}
         eventId={event.id}
-        isAuthenticated={Boolean(personalQuery.data?.authenticated)}
-        profile={profile}
+        formats={event.formats}
         onClose={() => setIsRegisterOpen(false)}
         onRegistered={refreshEvent}
       />
