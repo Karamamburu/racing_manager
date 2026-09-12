@@ -1,10 +1,15 @@
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Result, Select } from 'antd';
+import { Button, Checkbox, DatePicker, Form, Input, InputNumber, Modal, Result, Select } from 'antd';
 import type { Dayjs } from 'dayjs';
 import { useEffect, useState } from 'react';
 import { authService } from '../../../features/auth/authService';
 import { eventsService } from '../../../features/events/eventsService';
 import { dateTimePickerProps } from '../../../shared/formatDateTime';
-import type { CreateEventRequest, EventTypeCode, SportCode } from '../../../shared/types/event';
+import type {
+  CreateEventRequest,
+  EventTypeCode,
+  ParticipationFormat,
+  SportCode,
+} from '../../../shared/types/event';
 
 type CreateEventFormValues = {
   name: string;
@@ -15,6 +20,7 @@ type CreateEventFormValues = {
   description?: string;
   registrationOpen?: Dayjs | null;
   registrationClose?: Dayjs | null;
+  formatIds?: number[];
 };
 
 type FeedbackStatus = 'success' | 'unauthorized' | 'forbidden' | 'error';
@@ -47,6 +53,8 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
   const [form] = Form.useForm<CreateEventFormValues>();
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
+  const [formats, setFormats] = useState<ParticipationFormat[]>([]);
+  const sport = Form.useWatch('sport', form);
 
   useEffect(() => {
     if (open) {
@@ -54,8 +62,35 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
         eventType: 'TIME_TRIAL',
         sport: 'SKI',
       });
+    } else {
+      setFormats([]);
     }
   }, [form, open]);
+
+  useEffect(() => {
+    if (!open || !sport) {
+      return;
+    }
+    let cancelled = false;
+    eventsService
+      .listFormats(sport)
+      .then((rows) => {
+        if (cancelled) return;
+        setFormats(rows);
+        form.setFieldValue(
+          'formatIds',
+          rows.map((row) => row.id),
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFormats([]);
+        form.setFieldValue('formatIds', []);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form, open, sport]);
 
   const handleCancel = () => {
     if (submitting) return;
@@ -79,6 +114,7 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
       eventType: values.eventType,
       sport: values.sport,
       eventDate: values.eventDate.toDate().toISOString(),
+      formatIds: values.formatIds ?? [],
     };
     if (values.distanceKm) payload.distanceKm = values.distanceKm;
     if (values.description?.trim()) payload.description = values.description.trim();
@@ -152,7 +188,7 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
           <Button key="cancel" onClick={handleCancel} disabled={submitting}>
             Отмена
           </Button>,
-          <Button key="submit" type="primary" loading={submitting} onClick={() => form.submit()}>
+          <Button key="submit" type="primary" loading={submitting} onClick={() => form.submit()} disabled={Boolean(sport === 'SKI' || sport === 'ROLLER_SKI') && formats.length === 0}>
             Создать
           </Button>,
         ]}
@@ -190,6 +226,22 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
           >
             <Select options={sportOptions} />
           </Form.Item>
+
+          {formats.length > 0 ? (
+            <Form.Item
+              name="formatIds"
+              label="Форматы участия"
+              rules={[{ type: 'array', min: 1, message: 'Выберите хотя бы один формат' }]}
+            >
+              <Checkbox.Group
+                style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+                options={formats.map((format) => ({
+                  label: format.name,
+                  value: format.id,
+                }))}
+              />
+            </Form.Item>
+          ) : null}
 
           <Form.Item
             name="eventDate"

@@ -32,6 +32,7 @@ export type RegistrationResponse = {
   city: string | null;
   district: string | null;
   team: string | null;
+  formatId: number | null;
   startNumber: number | null;
   status: string;
   note: string | null;
@@ -50,6 +51,7 @@ type StoredRegistration = {
   city: string | null;
   district: string | null;
   team: string | null;
+  formatId: number | null;
   startNumber: number | null;
   status: string;
   note: string | null;
@@ -62,6 +64,7 @@ type EventRegistrationWindow = {
   status: string;
   registrationOpen: Date | null;
   registrationClose: Date | null;
+  eventFormats: { formatId: number }[];
 };
 
 type RegistrationWritePayload = ParsedCreateRegistration & {
@@ -79,6 +82,7 @@ type RegistrationsStore = {
         status: true;
         registrationOpen: true;
         registrationClose: true;
+        eventFormats: { select: { formatId: true } };
       };
     }) => Promise<EventRegistrationWindow | null>;
   };
@@ -129,6 +133,8 @@ export class RegistrationsService {
       : parseCreateRegistrationBody(body);
     const event = await this.requirePlannedEvent(eventId);
     this.assertRegistrationWindow(event);
+    const formatId = this.resolveFormatId(event, parsed.formatId);
+    const payload = { ...parsed, formatId };
 
     if (actor) {
       const existing = await this.store.registration.findFirst({
@@ -154,7 +160,7 @@ export class RegistrationsService {
         const restored = await this.store.registration.update({
           where: { id: withdrawn.id },
           data: {
-            ...parsed,
+            ...payload,
             status: RegistrationStatusCode.REGISTERED,
             startNumber: null,
             registeredAt: new Date(),
@@ -169,7 +175,7 @@ export class RegistrationsService {
         data: {
           eventId,
           userId: actor?.id ?? null,
-          ...parsed,
+          ...payload,
           status: RegistrationStatusCode.REGISTERED,
         },
       });
@@ -286,6 +292,7 @@ export class RegistrationsService {
         status: true,
         registrationOpen: true,
         registrationClose: true,
+        eventFormats: { select: { formatId: true } },
       },
     });
     if (!event) {
@@ -306,6 +313,32 @@ export class RegistrationsService {
     }
   }
 
+  private resolveFormatId(
+    event: EventRegistrationWindow,
+    formatId: number | null,
+  ): number | null {
+    const enabled = event.eventFormats.map((row) => row.formatId);
+    if (enabled.length === 0) {
+      if (formatId != null) {
+        throw new BadRequestException(
+          'This event has no participation formats.',
+        );
+      }
+      return null;
+    }
+    const resolved =
+      formatId == null && enabled.length === 1 ? enabled[0] : formatId;
+    if (resolved == null) {
+      throw new BadRequestException('formatId is required.');
+    }
+    if (!enabled.includes(resolved)) {
+      throw new BadRequestException(
+        'formatId is not enabled for this event.',
+      );
+    }
+    return resolved;
+  }
+
   private toResponse(row: StoredRegistration): RegistrationResponse {
     return {
       id: row.id,
@@ -318,6 +351,7 @@ export class RegistrationsService {
       city: row.city,
       district: row.district,
       team: row.team,
+      formatId: row.formatId,
       startNumber: row.startNumber,
       status: row.status,
       note: row.note,

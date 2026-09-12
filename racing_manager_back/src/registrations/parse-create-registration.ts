@@ -13,6 +13,7 @@ export type ParsedCreateRegistration = {
   city: string | null;
   district: string | null;
   team: string | null;
+  formatId: number | null;
 };
 
 type OptionalRegistrationFields = {
@@ -23,6 +24,7 @@ type OptionalRegistrationFields = {
   city: string | null;
   district: string | null;
   team: string | null;
+  formatId: number | null;
 };
 
 function isGender(value: string): value is GenderCode {
@@ -82,6 +84,15 @@ function optionalBirthYearFromDate(value: unknown): number | null {
   return readBirthYear(year);
 }
 
+function readOptionalFormatId(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(numeric) || numeric <= 0) {
+    throw new BadRequestException('formatId must be a positive integer.');
+  }
+  return numeric;
+}
+
 export type RegistrationProfileSource = {
   firstName?: string | null;
   lastName?: string | null;
@@ -103,6 +114,7 @@ function fieldsFromProfile(
     city: readString(profile.city, 'city', false),
     district: readString(profile.district, 'district', false),
     team: readString(profile.team, 'team', false),
+    formatId: null,
   };
 }
 
@@ -116,6 +128,7 @@ function parseOptionalRegistrationBody(body: unknown): OptionalRegistrationField
       city: null,
       district: null,
       team: null,
+      formatId: null,
     };
   }
   if (typeof body !== 'object' || Array.isArray(body)) {
@@ -135,6 +148,7 @@ function parseOptionalRegistrationBody(body: unknown): OptionalRegistrationField
     city: readString(raw.city, 'city', false),
     district: readString(raw.district, 'district', false),
     team: readString(raw.team, 'team', false),
+    formatId: readOptionalFormatId(raw.formatId),
   };
 }
 
@@ -158,6 +172,7 @@ function requireCompleteRegistration(
     city: fields.city,
     district: fields.district,
     team: fields.team,
+    formatId: fields.formatId,
   };
 }
 
@@ -181,6 +196,7 @@ export function mergeRegistrationFields(
     city: fromProfile.city ?? fromBody.city,
     district: fromProfile.district ?? fromBody.district,
     team: fromProfile.team ?? fromBody.team,
+    formatId: fromBody.formatId,
   });
 }
 
@@ -211,5 +227,6 @@ export function parseCreateRegistrationBody(
     city: readString(raw.city, 'city', false),
     district: readString(raw.district, 'district', false),
     team: readString(raw.team, 'team', false),
+    formatId: readOptionalFormatId(raw.formatId),
   };
 }

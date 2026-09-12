@@ -1,6 +1,12 @@
 import { Input } from 'antd';
 import { useEffect, useRef, useState } from 'react';
-import { formatFinishTime, parseFinishTime } from '../../../shared/formatFinishTime';
+import {
+  appendDurationDigit,
+  finishTimeMsToDigits,
+  formatDurationDigits,
+  formatFinishTime,
+  parseDurationDigits,
+} from '../../../shared/formatFinishTime';
 
 type FinishTimeCellProps = {
   value: number | null;
@@ -18,11 +24,13 @@ export function FinishTimeCell({
   onInvalid,
 }: FinishTimeCellProps) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value == null ? '' : formatFinishTime(value));
+  const [digits, setDigits] = useState(value == null ? '' : finishTimeMsToDigits(value));
   const committing = useRef(false);
+  const handledByKey = useRef(false);
+  const replaceNextDigit = useRef(false);
 
   useEffect(() => {
-    if (!editing) setDraft(value == null ? '' : formatFinishTime(value));
+    if (!editing) setDigits(value == null ? '' : finishTimeMsToDigits(value));
   }, [editing, value]);
 
   if (!canEdit) return <>{formatFinishTime(value)}</>;
@@ -50,14 +58,9 @@ export function FinishTimeCell({
 
   const commit = async () => {
     if (committing.current || saving) return;
-    const trimmed = draft.trim();
-    if (!trimmed) {
-      setEditing(false);
-      return;
-    }
     let parsed: number | null;
     try {
-      parsed = parseFinishTime(trimmed);
+      parsed = parseDurationDigits(digits);
     } catch {
       onInvalid?.();
       return;
@@ -77,26 +80,92 @@ export function FinishTimeCell({
     }
   };
 
+  const isEntireValueSelected = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLInputElement)) return false;
+    return target.selectionStart === 0 && target.selectionEnd === target.value.length;
+  };
+
   return (
     <Input
       autoFocus
       size="small"
       disabled={saving}
-      value={draft === '—' ? '' : draft}
-      placeholder="мм:сс"
-      style={{ width: 110 }}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={() => {
-        void commit();
+      value={formatDurationDigits(digits)}
+      placeholder="чч:мм:сс"
+      inputMode="numeric"
+      autoComplete="off"
+      style={{ width: 118, fontVariantNumeric: 'tabular-nums' }}
+      onFocus={(event) => {
+        event.target.select();
+        replaceNextDigit.current = true;
       }}
-      onPressEnter={() => {
-        void commit();
+      onChange={(event) => {
+        if (handledByKey.current) {
+          handledByKey.current = false;
+          return;
+        }
+        const inputType = (event.nativeEvent as InputEvent).inputType ?? '';
+        const data = (event.nativeEvent as InputEvent).data ?? '';
+        if (inputType.startsWith('delete')) {
+          setDigits((current) =>
+            replaceNextDigit.current || isEntireValueSelected(event.target)
+              ? ''
+              : current.slice(0, -1),
+          );
+          replaceNextDigit.current = false;
+          return;
+        }
+        if (inputType.startsWith('insert')) {
+          const nextDigits = data.replace(/\D/g, '');
+          if (!nextDigits) return;
+          setDigits((current) =>
+            replaceNextDigit.current || isEntireValueSelected(event.target)
+              ? nextDigits.slice(-6)
+              : (current + nextDigits).slice(-6),
+          );
+          replaceNextDigit.current = false;
+        }
+      }}
+      onPaste={(event) => {
+        event.preventDefault();
+        const pasted = event.clipboardData.getData('text').replace(/\D/g, '').slice(-6);
+        setDigits(pasted);
       }}
       onKeyDown={(event) => {
+        if (event.key >= '0' && event.key <= '9') {
+          event.preventDefault();
+          handledByKey.current = true;
+          setDigits((current) =>
+            replaceNextDigit.current || isEntireValueSelected(event.target)
+              ? event.key
+              : appendDurationDigit(current, event.key),
+          );
+          replaceNextDigit.current = false;
+          return;
+        }
+        if (event.key === 'Backspace') {
+          event.preventDefault();
+          handledByKey.current = true;
+          setDigits((current) =>
+            replaceNextDigit.current || isEntireValueSelected(event.target)
+              ? ''
+              : current.slice(0, -1),
+          );
+          replaceNextDigit.current = false;
+          return;
+        }
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          void commit();
+          return;
+        }
         if (event.key === 'Escape') {
-          setDraft(value == null ? '' : formatFinishTime(value));
+          setDigits(value == null ? '' : finishTimeMsToDigits(value));
           setEditing(false);
         }
+      }}
+      onBlur={() => {
+        void commit();
       }}
     />
   );

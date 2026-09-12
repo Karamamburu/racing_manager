@@ -1,4 +1,4 @@
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Result, Select } from 'antd';
+import { Button, Checkbox, DatePicker, Form, Input, InputNumber, Modal, Result, Select } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
@@ -9,6 +9,7 @@ import type {
   CreateEventRequest,
   EventDetails,
   EventTypeCode,
+  ParticipationFormat,
   SportCode,
 } from '../../../shared/types/event';
 
@@ -21,6 +22,7 @@ type EditEventFormValues = {
   description?: string;
   registrationOpen?: Dayjs | null;
   registrationClose?: Dayjs | null;
+  formatIds?: number[];
 };
 
 type FeedbackStatus = 'success' | 'unauthorized' | 'forbidden' | 'error';
@@ -65,6 +67,7 @@ function toPayload(values: EditEventFormValues): CreateEventRequest {
   if (values.registrationClose) {
     payload.registrationClose = values.registrationClose.toDate().toISOString();
   }
+  payload.formatIds = values.formatIds ?? [];
   return payload;
 }
 
@@ -72,9 +75,14 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
   const [form] = Form.useForm<EditEventFormValues>();
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
+  const [formats, setFormats] = useState<ParticipationFormat[]>([]);
+  const sport = Form.useWatch('sport', form);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setFormats([]);
+      return;
+    }
     form.setFieldsValue({
       name: event.name,
       eventType: event.eventType as EventTypeCode,
@@ -84,8 +92,39 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
       description: event.description ?? undefined,
       registrationOpen: event.registrationOpen ? dayjs(event.registrationOpen) : null,
       registrationClose: event.registrationClose ? dayjs(event.registrationClose) : null,
+      formatIds: event.formats.map((format) => format.id),
     });
   }, [event, form, open]);
+
+  useEffect(() => {
+    if (!open || !sport) return;
+    let cancelled = false;
+    eventsService
+      .listFormats(sport)
+      .then((rows) => {
+        if (cancelled) return;
+        setFormats(rows);
+        if (sport === event.sport) {
+          form.setFieldValue(
+            'formatIds',
+            event.formats.map((format) => format.id),
+          );
+        } else {
+          form.setFieldValue(
+            'formatIds',
+            rows.map((row) => row.id),
+          );
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFormats([]);
+        form.setFieldValue('formatIds', []);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [event, form, open, sport]);
 
   const handleCancel = () => {
     if (submitting) return;
@@ -165,7 +204,7 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
           <Button key="cancel" onClick={handleCancel} disabled={submitting}>
             Отмена
           </Button>,
-          <Button key="submit" type="primary" loading={submitting} onClick={() => form.submit()}>
+          <Button key="submit" type="primary" loading={submitting} onClick={() => form.submit()} disabled={Boolean(sport === 'SKI' || sport === 'ROLLER_SKI') && formats.length === 0}>
             Сохранить
           </Button>,
         ]}
@@ -198,6 +237,22 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
           >
             <Select options={sportOptions} />
           </Form.Item>
+
+          {formats.length > 0 ? (
+            <Form.Item
+              name="formatIds"
+              label="Форматы участия"
+              rules={[{ type: 'array', min: 1, message: 'Выберите хотя бы один формат' }]}
+            >
+              <Checkbox.Group
+                style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+                options={formats.map((format) => ({
+                  label: format.name,
+                  value: format.id,
+                }))}
+              />
+            </Form.Item>
+          ) : null}
 
           <Form.Item
             name="eventDate"

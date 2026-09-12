@@ -108,11 +108,34 @@ CREATE TABLE events (
 );
 
 -- ========================================
+-- PARTICIPATION FORMATS
+-- Catalog of start styles / equipment classes per sport.
+-- RUN and BIKE have no rows: ranking is by gender only.
+-- An event enables a subset; the rider picks one at registration.
+-- Place is derived per (format, gender), not overall.
+-- ========================================
+CREATE TABLE participation_formats (
+  id SERIAL PRIMARY KEY,
+  sport sport_type NOT NULL,
+  code TEXT NOT NULL,
+  name TEXT NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  UNIQUE (sport, code)
+);
+
+CREATE TABLE event_formats (
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  format_id INT NOT NULL REFERENCES participation_formats(id),
+  PRIMARY KEY (event_id, format_id)
+);
+
+-- ========================================
 -- REGISTRATIONS
 -- Guest registrations have user_id = NULL and store participant fields here.
 -- Logged-in users are linked via user_id; participant fields are a snapshot
 -- of the form submitted at registration time.
 -- start_number is assigned later by a race administrator.
+-- format_id is required when the event has participation formats.
 -- ========================================
 CREATE TABLE registrations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -125,6 +148,7 @@ CREATE TABLE registrations (
   city TEXT,
   district TEXT,
   team TEXT,
+  format_id INT REFERENCES participation_formats(id),
   start_number INT CHECK (start_number > 0),
   status registration_status NOT NULL DEFAULT 'REGISTERED',
   note TEXT,
@@ -135,7 +159,8 @@ CREATE TABLE registrations (
 -- ========================================
 -- RESULTS
 -- One finish time per registration. Place is derived by sorting
--- time_milliseconds ascending (fastest first). A start number must
+-- time_milliseconds ascending (fastest first) within each
+-- (format_id, gender) classification. A start number must
 -- be assigned before a result can be recorded.
 -- ========================================
 CREATE TABLE results (
@@ -155,9 +180,12 @@ CREATE INDEX idx_events_track_id ON events(track_id);
 CREATE INDEX idx_events_date ON events(event_date);
 CREATE INDEX idx_events_sport ON events(sport);
 CREATE INDEX idx_events_status ON events(status);
+CREATE INDEX idx_participation_formats_sport ON participation_formats(sport);
+CREATE INDEX idx_event_formats_format_id ON event_formats(format_id);
 CREATE INDEX idx_registrations_event_id ON registrations(event_id);
 CREATE INDEX idx_registrations_user_id ON registrations(user_id);
 CREATE INDEX idx_registrations_status ON registrations(status);
+CREATE INDEX idx_registrations_format_id ON registrations(format_id);
 CREATE UNIQUE INDEX idx_registrations_event_user_active
   ON registrations (event_id, user_id)
   WHERE user_id IS NOT NULL AND status IN ('REGISTERED', 'CONFIRMED');
@@ -180,3 +208,11 @@ VALUES (
   'Лыжная трасса Алёшкино. Контрольные тренировки и гонки сообщества.',
   true
 );
+
+INSERT INTO participation_formats (sport, code, name, sort_order) VALUES
+  ('SKI', 'FREESTYLE', 'Свободный стиль', 1),
+  ('SKI', 'CLASSIC', 'Классический стиль', 2),
+  ('ROLLER_SKI', 'FAST_WHEELS', 'Быстрые колёса', 1),
+  ('ROLLER_SKI', 'SLOW_WHEELS', 'Медленные колёса', 2),
+  ('ROLLER_SKI', 'CLASSIC', 'Классика', 3),
+  ('ROLLER_SKI', 'INLINE', 'Ролики (без палок)', 4);

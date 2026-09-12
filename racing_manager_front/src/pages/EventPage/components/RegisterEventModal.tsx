@@ -6,7 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { personalService } from '../../../features/personal/personalService';
 import { registrationsService } from '../../../features/registrations/registrationsService';
-import type { CreateRegistrationRequest, GenderCode } from '../../../shared/types/event';
+import type { CreateRegistrationRequest, EventFormatRef, GenderCode } from '../../../shared/types/event';
 import type { PersonalProfile, PersonalResponse, UpdatePersonalRequest } from '../../../shared/types/personal';
 
 type RegisterFormValues = {
@@ -17,6 +17,7 @@ type RegisterFormValues = {
   city?: string;
   district?: string;
   team?: string;
+  formatId?: number;
 };
 
 type FieldLocks = Record<keyof RegisterFormValues, boolean>;
@@ -32,6 +33,7 @@ type FeedbackState = {
 type RegisterEventModalProps = {
   open: boolean;
   eventId: string;
+  formats: EventFormatRef[];
   isAuthenticated: boolean;
   profile: PersonalResponse['profile'] | null | undefined;
   onClose: () => void;
@@ -69,6 +71,7 @@ function fieldLocks(
       city: false,
       district: false,
       team: false,
+      formatId: false,
     };
   }
   return {
@@ -79,6 +82,7 @@ function fieldLocks(
     city: Boolean(profile?.city?.trim()),
     district: Boolean(profile?.district?.trim()),
     team: Boolean(profile?.team?.trim()),
+    formatId: false,
   };
 }
 
@@ -91,11 +95,13 @@ function toPayload(values: RegisterFormValues, locks: FieldLocks): CreateRegistr
   if (!locks.city && values.city?.trim()) payload.city = values.city.trim();
   if (!locks.district && values.district?.trim()) payload.district = values.district.trim();
   if (!locks.team && values.team?.trim()) payload.team = values.team.trim();
+  if (values.formatId != null) payload.formatId = values.formatId;
   return payload;
 }
 
 function hasSupplements(payload: CreateRegistrationRequest): boolean {
-  return Object.values(payload).some((value) => value !== undefined && value !== '');
+  const { formatId: _formatId, ...personal } = payload;
+  return Object.values(personal).some((value) => value !== undefined && value !== '');
 }
 
 function toProfileUpdate(
@@ -125,6 +131,7 @@ function toProfileUpdate(
 export function RegisterEventModal({
   open,
   eventId,
+  formats,
   isAuthenticated,
   profile,
   onClose,
@@ -152,8 +159,9 @@ export function RegisterEventModal({
       city: profile?.city ?? undefined,
       district: profile?.district ?? undefined,
       team: profile?.team ?? undefined,
+      formatId: formats.length === 1 ? formats[0].id : undefined,
     });
-  }, [form, open, profile]);
+  }, [form, formats, open, profile]);
 
   const resetLocalState = () => {
     form.resetFields();
@@ -323,6 +331,22 @@ export function RegisterEventModal({
           >
             <Select options={genderOptions} disabled={locks.gender} />
           </Form.Item>
+
+          {formats.length > 0 ? (
+            <Form.Item
+              name="formatId"
+              label="Формат участия"
+              rules={[{ required: true, message: 'Выберите формат участия' }]}
+            >
+              <Select
+                disabled={formats.length === 1}
+                options={formats.map((format) => ({
+                  label: format.name,
+                  value: format.id,
+                }))}
+              />
+            </Form.Item>
+          ) : null}
 
           <Form.Item
             name="birthYear"

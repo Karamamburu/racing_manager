@@ -19,7 +19,7 @@ import { registrationsService } from '../../features/registrations/registrations
 import { FeaturesCard } from '../../shared/components';
 import { formatDateTime } from '../../shared/formatDateTime';
 import { AppShell } from '../../shared/layout';
-import type { EventParticipant } from '../../shared/types/event';
+import type { EventFormatRef, EventParticipant } from '../../shared/types/event';
 import type { FeatureItem } from '../../shared/types/track';
 import { EditEventModal } from './components/EditEventModal';
 import { FinishTimeCell } from './components/FinishTimeCell';
@@ -56,6 +56,66 @@ const genderLabels: Record<string, string> = {
   F: 'Женский',
 };
 
+const genderGroupLabels: Record<string, string> = {
+  M: 'Мужчины',
+  F: 'Женщины',
+};
+
+const GENDER_ORDER = ['M', 'F'] as const;
+
+type ClassificationSection = {
+  key: string;
+  title: string;
+  rows: EventParticipant[];
+};
+
+function classificationTitle(gender: string, formatName: string | null): string {
+  const genderLabel = genderGroupLabels[gender] ?? gender;
+  if (!formatName) return genderLabel;
+  return `${genderLabel} · ${formatName}`;
+}
+
+function groupParticipants(
+  participants: EventParticipant[],
+  formats: EventFormatRef[],
+): ClassificationSection[] {
+  const sortedFormats = [...formats].sort(
+    (a, b) => a.sortOrder - b.sortOrder || a.id - b.id,
+  );
+  const sections: ClassificationSection[] = [];
+
+  if (sortedFormats.length === 0) {
+    for (const gender of GENDER_ORDER) {
+      const rows = participants.filter((participant) => participant.gender === gender);
+      if (rows.length) {
+        sections.push({
+          key: gender,
+          title: classificationTitle(gender, null),
+          rows,
+        });
+      }
+    }
+    return sections;
+  }
+
+  for (const format of sortedFormats) {
+    for (const gender of GENDER_ORDER) {
+      const rows = participants.filter(
+        (participant) =>
+          participant.format?.id === format.id && participant.gender === gender,
+      );
+      if (rows.length) {
+        sections.push({
+          key: `${format.id}-${gender}`,
+          title: classificationTitle(gender, format.name),
+          rows,
+        });
+      }
+    }
+  }
+  return sections;
+}
+
 function getParticipantColumns(options: {
   canAssignNumbers: boolean;
   canAssignResults: boolean;
@@ -90,6 +150,7 @@ function getParticipantColumns(options: {
       title: 'Время',
       dataIndex: 'finishTimeMs',
       key: 'finishTimeMs',
+      width: 130,
       render: (value: number | null, record) => (
         <FinishTimeCell
           value={value}
@@ -224,6 +285,15 @@ export function EventPage() {
       value: eventTypeLabels[event.eventType] ?? event.eventType,
     },
     { key: 'sport', title: 'Вид спорта', value: sportLabels[event.sport] ?? event.sport },
+    ...(event.formats.length > 0
+      ? [
+          {
+            key: 'formats',
+            title: 'Форматы участия',
+            value: event.formats.map((format) => format.name).join(', '),
+          },
+        ]
+      : []),
     { key: 'eventDate', title: 'Дата проведения', value: formatDateTime(event.eventDate) },
     {
       key: 'distanceKm',
@@ -307,9 +377,10 @@ export function EventPage() {
     onAssignNumber: assignStartNumber,
     onAssignResult: assignFinishTime,
     onInvalidResult: () => {
-      message.error('Введите время в формате мм:сс или ч:мм:сс');
+      message.error('Введите время цифрами. Минуты и секунды — до 59, например 13215 → 01:32:15');
     },
   });
+  const participantSections = groupParticipants(event.registrations, event.formats);
 
   const handleCancelEvent = () => {
     setIsCancelConfirmOpen(true);
@@ -428,13 +499,31 @@ export function EventPage() {
         </Card>
 
         <Card title={`Зарегистрированные участники (${event.registrations.length})`}>
-          <Table
-            columns={participantColumns}
-            dataSource={event.registrations}
-            rowKey="id"
-            pagination={false}
-            locale={{ emptyText: 'Пока никто не зарегистрировался' }}
-          />
+          {participantSections.length === 0 ? (
+            <Table
+              columns={participantColumns}
+              dataSource={[]}
+              rowKey="id"
+              pagination={false}
+              locale={{ emptyText: 'Пока никто не зарегистрировался' }}
+            />
+          ) : (
+            <Space direction="vertical" size={24} style={{ width: '100%' }}>
+              {participantSections.map((section) => (
+                <div key={section.key}>
+                  <Typography.Title level={5} style={{ marginTop: 0 }}>
+                    {section.title}
+                  </Typography.Title>
+                  <Table
+                    columns={participantColumns}
+                    dataSource={section.rows}
+                    rowKey="id"
+                    pagination={false}
+                  />
+                </div>
+              ))}
+            </Space>
+          )}
         </Card>
       </Space>
       <EditEventModal
@@ -446,6 +535,7 @@ export function EventPage() {
       <RegisterEventModal
         open={isRegisterOpen}
         eventId={event.id}
+        formats={event.formats}
         isAuthenticated={Boolean(personalQuery.data?.authenticated)}
         profile={profile}
         onClose={() => setIsRegisterOpen(false)}

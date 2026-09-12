@@ -13,8 +13,24 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ACTIVE_REGISTRATION_STATUSES, RegistrationStatusCode } from '../registrations/registration-status';
 import {
   parseCreateEventBody,
+  isSport,
   type ParsedCreateEvent,
 } from './parse-create-event';
+
+export type ParticipationFormatDto = {
+  id: number;
+  sport: string;
+  code: string;
+  name: string;
+  sortOrder: number;
+};
+
+export type EventFormatRef = {
+  id: number;
+  code: string;
+  name: string;
+  sortOrder: number;
+};
 
 export type EventResponse = {
   id: string;
@@ -31,6 +47,7 @@ export type EventResponse = {
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
+  formats: EventFormatRef[];
 };
 
 export type RecentEventRow = {
@@ -66,6 +83,7 @@ export type EventDetails = {
     id: string;
     name: string;
   } | null;
+  formats: EventFormatRef[];
   registrations: EventParticipant[];
 };
 
@@ -81,6 +99,7 @@ export type EventParticipant = {
   startNumber: number | null;
   finishTimeMs: number | null;
   place: number | null;
+  format: EventFormatRef | null;
   status: string;
   note: string | null;
   registeredAt: string;
@@ -122,6 +141,13 @@ type PersonRow = {
   userName: string;
 };
 
+type StoredFormat = {
+  id: number;
+  code: string;
+  name: string;
+  sortOrder: number;
+};
+
 type StoredRegistration = {
   id: string;
   userId: string | null;
@@ -132,6 +158,8 @@ type StoredRegistration = {
   city: string | null;
   district: string | null;
   team: string | null;
+  formatId: number | null;
+  format: StoredFormat | null;
   startNumber: number | null;
   status: string;
   note: string | null;
@@ -142,6 +170,7 @@ type StoredRegistration = {
 type EventWithDetails = StoredEvent & {
   track: EventDetails['track'];
   createdBy: PersonRow | null;
+  eventFormats: { format: StoredFormat }[];
   registrations: StoredRegistration[];
 };
 
@@ -149,17 +178,6 @@ type EventOwnerRow = {
   id: string;
   createdById: string | null;
   status: string;
-};
-
-type EventWritePayload = {
-  name: string;
-  eventType: string;
-  sport: string;
-  eventDate: Date;
-  distanceKm: number | null;
-  description: string | null;
-  registrationOpen: Date | null;
-  registrationClose: Date | null;
 };
 
 type EventsStore = {
@@ -170,8 +188,9 @@ type EventsStore = {
   };
   event: {
     create: (args: {
-      data: EventWritePayload & { trackId: string; createdById: string };
-    }) => Promise<StoredEvent>;
+      data: object;
+      include?: object;
+    }) => Promise<StoredEvent & { eventFormats?: { format: StoredFormat }[] }>;
     findMany: (args: object) => Promise<CatalogEvent[]>;
     findUnique: {
       (args: {
@@ -223,12 +242,29 @@ function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+function toFormatRef(format: StoredFormat): EventFormatRef {
+  return {
+    id: format.id,
+    code: format.code,
+    name: format.name,
+    sortOrder: format.sortOrder,
+  };
+}
+
+function mapEventFormats(
+  eventFormats: { format: StoredFormat }[] | undefined,
+): EventFormatRef[] {
+  return [...(eventFormats ?? [])]
+    .map((row) => toFormatRef(row.format))
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
+}
+
 @Injectable()
 export class EventsService {
   private readonly store: EventsStore;
 
   constructor(
-    prisma: PrismaService,
+    private readonly prisma: PrismaService,
     private readonly rolesService: RolesService,
     private readonly usersService: UsersService,
   ) {
@@ -249,6 +285,7 @@ export class EventsService {
     }
 
     const parsed: ParsedCreateEvent = parseCreateEventBody(body);
+    const formatIds = await this.resolveFormatIds(parsed.sport, parsed.formatIds);
     const track = await this.store.track.findUnique({
       where: { id: ALESHKINO_TRACK_ID },
     });
@@ -270,10 +307,40 @@ export class EventsService {
         registrationOpen: parsed.registrationOpen,
         registrationClose: parsed.registrationClose,
         createdById: actor.id,
+        eventFormats: {
+          create: formatIds.map((formatId) => ({ formatId })),
+        },
+      },
+      include: {
+        eventFormats: {
+          include: { format: true },
+        },
       },
     });
 
-    return this.toResponse(created);
+    return this.toResponse(created, mapEventFormats(created.eventFormats));
+  }
+
+  async listFormats(sportRaw?: string): Promise<ParticipationFormatDto[]> {
+    const sport = sportRaw?.trim();
+    if (sport && !isSport(sport)) {
+      throw new BadRequestException(
+        'sport must be RUN, SKI, ROLLER_SKI or BIKE.',
+      );
+    }
+
+    const rows = await this.prisma.participationFormat.findMany({
+      where: sport && isSport(sport) ? { sport } : undefined,
+      orderBy: [{ sport: 'asc' }, { sortOrder: 'asc' }, { id: 'asc' }],
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      sport: row.sport,
+      code: row.code,
+      name: row.name,
+      sortOrder: row.sortOrder,
+    }));
   }
 
   async listRecent(): Promise<RecentEventRow[]> {
@@ -323,6 +390,9 @@ export class EventsService {
             userName: true,
           },
         },
+        eventFormats: {
+          include: { format: true },
+        },
         registrations: {
           where: { status: { in: [...ACTIVE_REGISTRATION_STATUSES] } },
           orderBy: { registeredAt: 'asc' },
@@ -336,6 +406,15 @@ export class EventsService {
             city: true,
             district: true,
             team: true,
+            formatId: true,
+            format: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                sortOrder: true,
+              },
+            },
             startNumber: true,
             status: true,
             note: true,
@@ -376,6 +455,7 @@ export class EventsService {
             ),
           }
         : null,
+      formats: mapEventFormats(event.eventFormats),
       registrations: this.toRankedParticipants(event.registrations),
     };
   }
@@ -387,20 +467,82 @@ export class EventsService {
   ): Promise<EventDetails> {
     await this.assertCanManageCreatedEvent(authentikId, eventId);
     const parsed: ParsedCreateEvent = parseCreateEventBody(body);
+    const formatIds = await this.resolveFormatIds(parsed.sport, parsed.formatIds);
 
-    await this.store.event.update({
+    const current = await this.prisma.event.findUnique({
       where: { id: eventId },
-      data: {
-        name: parsed.name,
-        eventType: asString(parsed.eventType),
-        sport: asString(parsed.sport),
-        eventDate: parsed.eventDate,
-        distanceKm: parsed.distanceKm,
-        description: parsed.description,
-        registrationOpen: parsed.registrationOpen,
-        registrationClose: parsed.registrationClose,
+      select: {
+        sport: true,
+        eventFormats: { select: { formatId: true } },
       },
     });
+    if (!current) {
+      throw new NotFoundException('Event not found.');
+    }
+
+    if (current.sport !== parsed.sport) {
+      const activeCount = await this.prisma.registration.count({
+        where: {
+          eventId,
+          status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
+        },
+      });
+      if (activeCount > 0) {
+        throw new BadRequestException(
+          'Cannot change sport while the event has registrations.',
+        );
+      }
+    }
+
+    const existingIds = current.eventFormats.map((row) => row.formatId);
+    const toRemove = existingIds.filter((id) => !formatIds.includes(id));
+    const toAdd = formatIds.filter((id) => !existingIds.includes(id));
+
+    if (toRemove.length > 0) {
+      const inUse = await this.prisma.registration.findFirst({
+        where: {
+          eventId,
+          formatId: { in: toRemove },
+          status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
+        },
+        select: { id: true },
+      });
+      if (inUse) {
+        throw new BadRequestException(
+          'Cannot remove a format that already has registrations.',
+        );
+      }
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.event.update({
+        where: { id: eventId },
+        data: {
+          name: parsed.name,
+          eventType: parsed.eventType,
+          sport: parsed.sport,
+          eventDate: parsed.eventDate,
+          distanceKm: parsed.distanceKm,
+          description: parsed.description,
+          registrationOpen: parsed.registrationOpen,
+          registrationClose: parsed.registrationClose,
+        },
+      }),
+      ...(toRemove.length > 0
+        ? [
+            this.prisma.eventFormat.deleteMany({
+              where: { eventId, formatId: { in: toRemove } },
+            }),
+          ]
+        : []),
+      ...(toAdd.length > 0
+        ? [
+            this.prisma.eventFormat.createMany({
+              data: toAdd.map((formatId) => ({ eventId, formatId })),
+            }),
+          ]
+        : []),
+    ]);
 
     return this.findById(eventId);
   }
@@ -466,7 +608,40 @@ export class EventsService {
     }
   }
 
-  private toResponse(event: StoredEvent): EventResponse {
+  private async resolveFormatIds(
+    sport: string,
+    formatIds: number[],
+  ): Promise<number[]> {
+    const catalog = await this.prisma.participationFormat.findMany({
+      where: { sport: sport as 'RUN' | 'SKI' | 'ROLLER_SKI' | 'BIKE' },
+      select: { id: true },
+    });
+    const allowed = new Set(catalog.map((row) => row.id));
+    if (catalog.length === 0) {
+      if (formatIds.length > 0) {
+        throw new BadRequestException(
+          'This sport has no participation formats.',
+        );
+      }
+      return [];
+    }
+    if (formatIds.length === 0) {
+      throw new BadRequestException('formatIds is required for this sport.');
+    }
+    for (const id of formatIds) {
+      if (!allowed.has(id)) {
+        throw new BadRequestException(
+          'formatIds must belong to the selected sport.',
+        );
+      }
+    }
+    return formatIds;
+  }
+
+  private toResponse(
+    event: StoredEvent,
+    formats: EventFormatRef[] = [],
+  ): EventResponse {
     return {
       id: event.id,
       trackId: event.trackId,
@@ -482,39 +657,54 @@ export class EventsService {
       createdBy: event.createdById,
       createdAt: event.createdAt.toISOString(),
       updatedAt: event.updatedAt.toISOString(),
+      formats,
     };
   }
 
   private toRankedParticipants(
     registrations: StoredRegistration[],
   ): EventParticipant[] {
-    // Fastest finish first; numbered starters without a time follow; then the rest.
-    const ranked = [...registrations].sort(compareRegistrationsByResult);
-    let place = 0;
-    return ranked.map((registration) => {
-      const finishTimeMs = registration.result?.timeMilliseconds ?? null;
-      if (finishTimeMs !== null) place += 1;
-      return {
-        id: registration.id,
-        userId: registration.userId,
-        fullName: this.formatPersonName(
-          registration.firstName,
-          registration.lastName,
-          'Участник',
-        ),
-        birthYear: registration.birthYear,
-        gender: registration.gender,
-        city: registration.city,
-        district: registration.district,
-        team: registration.team,
-        startNumber: registration.startNumber,
-        finishTimeMs,
-        place: finishTimeMs === null ? null : place,
-        status: registration.status,
-        note: registration.note,
-        registeredAt: registration.registeredAt.toISOString(),
-      };
-    });
+    const groups = new Map<string, StoredRegistration[]>();
+    for (const registration of registrations) {
+      const key = `${registration.formatId ?? 'none'}:${registration.gender}`;
+      const group = groups.get(key);
+      if (group) group.push(registration);
+      else groups.set(key, [registration]);
+    }
+
+    const ranked: EventParticipant[] = [];
+    for (const group of groups.values()) {
+      const sorted = [...group].sort(compareRegistrationsByResult);
+      let place = 0;
+      for (const registration of sorted) {
+        const finishTimeMs = registration.result?.timeMilliseconds ?? null;
+        if (finishTimeMs !== null) place += 1;
+        ranked.push({
+          id: registration.id,
+          userId: registration.userId,
+          fullName: this.formatPersonName(
+            registration.firstName,
+            registration.lastName,
+            'Участник',
+          ),
+          birthYear: registration.birthYear,
+          gender: registration.gender,
+          city: registration.city,
+          district: registration.district,
+          team: registration.team,
+          startNumber: registration.startNumber,
+          finishTimeMs,
+          place: finishTimeMs === null ? null : place,
+          format: registration.format
+            ? toFormatRef(registration.format)
+            : null,
+          status: registration.status,
+          note: registration.note,
+          registeredAt: registration.registeredAt.toISOString(),
+        });
+      }
+    }
+    return ranked;
   }
 
   private formatPersonName(

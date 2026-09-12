@@ -120,6 +120,7 @@ model Event {
   createdBy          User?       @relation(fields: [createdById], references: [id])
   createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  eventFormats       EventFormat[]
   registrations      Registration[]
 
   @@index([trackId], map: "idx_events_track_id")
@@ -127,6 +128,31 @@ model Event {
   @@index([sport], map: "idx_events_sport")
   @@index([status], map: "idx_events_status")
   @@map("events")
+}
+
+model ParticipationFormat {
+  id             Int            @id @default(autoincrement())
+  sport          SportType
+  code           String
+  name           String
+  sortOrder      Int            @default(0) @map("sort_order")
+  eventFormats   EventFormat[]
+  registrations  Registration[]
+
+  @@unique([sport, code])
+  @@index([sport], map: "idx_participation_formats_sport")
+  @@map("participation_formats")
+}
+
+model EventFormat {
+  eventId  String              @map("event_id") @db.Uuid
+  formatId Int                 @map("format_id")
+  event    Event               @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  format   ParticipationFormat @relation(fields: [formatId], references: [id])
+
+  @@id([eventId, formatId])
+  @@index([formatId], map: "idx_event_formats_format_id")
+  @@map("event_formats")
 }
 
 model Registration {
@@ -142,6 +168,8 @@ model Registration {
   city         String?
   district     String?
   team         String?
+  formatId     Int?               @map("format_id")
+  format       ParticipationFormat? @relation(fields: [formatId], references: [id])
   startNumber  Int?               @map("start_number")
   status       RegistrationStatus @default(REGISTERED)
   note         String?
@@ -152,6 +180,7 @@ model Registration {
   @@index([eventId], map: "idx_registrations_event_id")
   @@index([userId], map: "idx_registrations_user_id")
   @@index([status], map: "idx_registrations_status")
+  @@index([formatId], map: "idx_registrations_format_id")
   @@map("registrations")
 }
 
