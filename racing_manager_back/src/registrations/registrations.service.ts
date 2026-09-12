@@ -63,6 +63,7 @@ type StoredRegistration = {
 type EventRegistrationWindow = {
   id: string;
   status: string;
+  eventDate: Date;
   registrationOpen: Date | null;
   registrationClose: Date | null;
   eventFormats: { formatId: number }[];
@@ -81,6 +82,7 @@ type RegistrationsStore = {
       select: {
         id: true;
         status: true;
+        eventDate: true;
         registrationOpen: true;
         registrationClose: true;
         eventFormats: { select: { formatId: true } };
@@ -302,6 +304,7 @@ export class RegistrationsService {
       select: {
         id: true,
         status: true,
+        eventDate: true,
         registrationOpen: true,
         registrationClose: true,
         eventFormats: { select: { formatId: true } },
@@ -320,7 +323,10 @@ export class RegistrationsService {
 
   private assertRegistrationWindow(event: EventRegistrationWindow) {
     const now = Date.now();
-    if (event.registrationClose && now > event.registrationClose.getTime()) {
+    const closesAt = event.registrationClose
+      ? Math.min(event.registrationClose.getTime(), event.eventDate.getTime())
+      : event.eventDate.getTime();
+    if (now > closesAt) {
       throw new BadRequestException('Registration is closed.');
     }
   }
