@@ -16,9 +16,12 @@ import {
   type ParsedCreateRegistration,
 } from './parse-create-registration';
 import { parseUpdateRegistrationBody } from './parse-update-registration';
+import { parseUpdateRegistrationStatusBody } from './parse-update-registration-status';
 import {
   ACTIVE_REGISTRATION_STATUSES,
-  isActiveRegistrationStatus,
+  LISTED_REGISTRATION_STATUSES,
+  clearsRegistrationOnStatus,
+  isListedRegistrationStatus,
   RegistrationStatusCode,
 } from './registration-status';
 
@@ -146,7 +149,7 @@ export class RegistrationsService {
         where: {
           eventId,
           userId: actor.id,
-          status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
+          status: { in: [...LISTED_REGISTRATION_STATUSES] },
         },
       });
       if (existing) {
@@ -255,7 +258,7 @@ export class RegistrationsService {
   ): Promise<RegistrationResponse> {
     await this.rolesService.assertHasAnyRole(authentikId, ADMIN_ROLE_CODES);
     const parsed = parseUpdateRegistrationBody(body);
-    await this.requirePlannedEvent(eventId);
+    await this.requireAssignableEvent(eventId);
 
     const existing = await this.store.registration.findFirst({
       where: { id: registrationId, eventId },
@@ -263,9 +266,9 @@ export class RegistrationsService {
     if (!existing) {
       throw new NotFoundException('Registration not found.');
     }
-    if (!isActiveRegistrationStatus(existing.status)) {
+    if (!isListedRegistrationStatus(existing.status)) {
       throw new BadRequestException(
-        'Only an active registration can be updated.',
+        'Only a listed registration can be updated.',
       );
     }
 
@@ -274,7 +277,9 @@ export class RegistrationsService {
         where: { id: existing.id },
         data: {
           startNumber: parsed.startNumber,
-          status: RegistrationStatusCode.CONFIRMED,
+          ...(existing.status === RegistrationStatusCode.REGISTERED
+            ? { status: RegistrationStatusCode.CONFIRMED }
+            : {}),
         },
       });
       return this.toResponse(updated);
@@ -286,6 +291,52 @@ export class RegistrationsService {
       }
       throw error;
     }
+  }
+
+  async updateStatus(
+    authentikId: string | undefined,
+    eventId: string,
+    registrationId: string,
+    body: unknown,
+  ): Promise<RegistrationResponse> {
+    await this.rolesService.assertHasAnyRole(authentikId, ADMIN_ROLE_CODES);
+    const status = parseUpdateRegistrationStatusBody(body);
+    await this.requireManageableEvent(eventId);
+
+    const existing = await this.store.registration.findFirst({
+      where: { id: registrationId, eventId },
+    });
+    if (!existing) {
+      throw new NotFoundException('Registration not found.');
+    }
+    if (!isListedRegistrationStatus(existing.status)) {
+      throw new BadRequestException(
+        'Only a listed registration can change status.',
+      );
+    }
+    if (existing.status === status) {
+      return this.toResponse(existing);
+    }
+
+    if (clearsRegistrationOnStatus(status)) {
+      await this.store.result.deleteMany({
+        where: { registrationId: existing.id },
+      });
+      const cancelled = await this.store.registration.update({
+        where: { id: existing.id },
+        data: {
+          status,
+          startNumber: null,
+        },
+      });
+      return this.toResponse(cancelled);
+    }
+
+    const updated = await this.store.registration.update({
+      where: { id: existing.id },
+      data: { status },
+    });
+    return this.toResponse(updated);
   }
 
   private async requireAuthenticatedUser(authentikId: string): Promise<AppUser> {
@@ -319,6 +370,44 @@ export class RegistrationsService {
     if (event.status !== 'PLANNED') {
       throw new BadRequestException(
         'Registration is only available for a planned event.',
+      );
+    }
+    return event;
+  }
+
+  private async requireManageableEvent(
+    eventId: string,
+  ): Promise<EventRegistrationWindow> {
+    await this.eventStatusSync.syncDueStatuses();
+    const event = await this.store.event.findUnique({
+      where: { id: eventId },
+      select: {
+        id: true,
+        status: true,
+        eventDate: true,
+        registrationOpen: true,
+        registrationClose: true,
+        eventFormats: { select: { formatId: true } },
+      },
+    });
+    if (!event) {
+      throw new NotFoundException('Event not found.');
+    }
+    if (event.status === 'CANCELLED') {
+      throw new BadRequestException(
+        'Cannot change registrations for a cancelled event.',
+      );
+    }
+    return event;
+  }
+
+  private async requireAssignableEvent(
+    eventId: string,
+  ): Promise<EventRegistrationWindow> {
+    const event = await this.requireManageableEvent(eventId);
+    if (event.status !== 'PLANNED' && event.status !== 'IN_PROGRESS') {
+      throw new BadRequestException(
+        'Start numbers can be assigned only for a planned or in-progress event.',
       );
     }
     return event;
@@ -371,7 +460,7 @@ export class RegistrationsService {
         birthYear: person.birthYear,
         firstName: { equals: person.firstName, mode: 'insensitive' },
         lastName: { equals: person.lastName, mode: 'insensitive' },
-        status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
+        status: { in: [...LISTED_REGISTRATION_STATUSES] },
       },
       include: { format: { select: { name: true } } },
     });

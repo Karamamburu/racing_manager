@@ -1,3 +1,5 @@
+import { isRankedRegistrationStatus } from '../registrations/registration-status';
+
 export type PersonalStats = {
   starts: number;
   wins: number;
@@ -18,6 +20,7 @@ export type StatsRegistration = {
   formatId: number | null;
   gender: string;
   startNumber: number | null;
+  status: string;
   event: {
     status: string;
     eventDate: Date;
@@ -30,6 +33,7 @@ export type StatsRegistration = {
 };
 
 export function isCompleteStatsResult(row: StatsRegistration): boolean {
+  if (!isRankedRegistrationStatus(row.status)) return false;
   if (!row.result) return false;
   if (row.event.lapCount === 0) return true;
   return row.result.lapCount === row.event.lapCount;

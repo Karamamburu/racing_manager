@@ -1,4 +1,0 @@
--- Add IN_PROGRESS to event_status.
--- Safe to re-run: ADD VALUE IF NOT EXISTS.
-
-ALTER TYPE event_status ADD VALUE IF NOT EXISTS 'IN_PROGRESS' AFTER 'PLANNED';

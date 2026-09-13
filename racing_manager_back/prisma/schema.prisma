@@ -45,6 +45,10 @@ enum RegistrationStatus {
   CONFIRMED
   CANCELLED
   WITHDRAWN
+  DNS
+  DNF
+  QQ
+  DSQ
 
   @@map("registration_status")
 }

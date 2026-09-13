@@ -2,7 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import type { SessionUser } from '../auth/session';
 import { RolesService } from '../auth/roles.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { ACTIVE_REGISTRATION_STATUSES } from '../registrations/registration-status';
+import { LISTED_REGISTRATION_STATUSES } from '../registrations/registration-status';
 import { UsersService, type AppUser } from '../users/users.service';
 import {
   computePersonalStats,
@@ -45,6 +45,7 @@ const statsRegistrationSelect = {
   formatId: true,
   gender: true,
   startNumber: true,
+  status: true,
   event: {
     select: {
       status: true,
@@ -111,7 +112,7 @@ export class PersonalService {
     const ownRows = await this.prisma.registration.findMany({
       where: {
         userId,
-        status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
+        status: { in: [...LISTED_REGISTRATION_STATUSES] },
       },
       select: statsRegistrationSelect,
     });
@@ -125,7 +126,7 @@ export class PersonalService {
       ? await this.prisma.registration.findMany({
           where: {
             eventId: { in: finishEventIds },
-            status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
+            status: { in: [...LISTED_REGISTRATION_STATUSES] },
           },
           select: statsRegistrationSelect,
         })
@@ -184,6 +185,7 @@ function toStatsRegistration(row: {
   formatId: number | null;
   gender: string;
   startNumber: number | null;
+  status: string;
   event: { status: string; eventDate: Date; _count: { laps: number } };
   result: { timeMilliseconds: number; _count: { laps: number } } | null;
 }): StatsRegistration {
@@ -193,6 +195,7 @@ function toStatsRegistration(row: {
     formatId: row.formatId,
     gender: row.gender,
     startNumber: row.startNumber,
+    status: row.status,
     event: {
       status: row.event.status,
       eventDate: row.event.eventDate,

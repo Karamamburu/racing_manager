@@ -6,7 +6,7 @@ import {
 import { ADMIN_ROLE_CODES } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { isActiveRegistrationStatus } from '../registrations/registration-status';
+import { isRecordableRegistrationStatus } from '../registrations/registration-status';
 import { parseUpsertResultBody } from './parse-upsert-result';
 
 export type ResultLapResponse = {
@@ -107,9 +107,9 @@ export class ResultsService {
   }
 
   private assertRecordableRegistration(registration: RegistrationForResult) {
-    if (!isActiveRegistrationStatus(registration.status)) {
+    if (!isRecordableRegistrationStatus(registration.status)) {
       throw new BadRequestException(
-        'Only an active registration can receive a result.',
+        'Only a confirmed or racing registration can receive a result.',
       );
     }
     if (registration.startNumber == null) {
