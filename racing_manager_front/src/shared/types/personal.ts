@@ -18,11 +18,19 @@ export type PersonalProfile = {
   birthDate: string | null;
 };
 
+export type PersonalStats = {
+  starts: number;
+  wins: number;
+  podiums: number;
+  upcomingStarts: number;
+};
+
 export type PersonalResponse = {
   authenticated: boolean;
   user: SessionUser;
   roles: string[];
   profile: PersonalProfile | null;
+  stats?: PersonalStats;
 };
 
 export type UpdatePersonalRequest = {

@@ -41,4 +41,10 @@ export class MainService {
         : null,
     };
   }
+
+  async getStats() {
+    return {
+      registeredUsers: await this.usersService.count(),
+    };
+  }
 }

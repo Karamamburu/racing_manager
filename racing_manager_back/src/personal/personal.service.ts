@@ -1,7 +1,16 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import type { SessionUser } from '../auth/session';
 import { RolesService } from '../auth/roles.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { ACTIVE_REGISTRATION_STATUSES } from '../registrations/registration-status';
 import { UsersService, type AppUser } from '../users/users.service';
+import {
+  computePersonalStats,
+  EMPTY_PERSONAL_STATS,
+  isCompleteStatsResult,
+  type PersonalStats,
+  type StatsRegistration,
+} from './compute-personal-stats';
 import { parseUpdatePersonalBody } from './parse-update-personal';
 
 export type PersonalProfile = {
@@ -27,13 +36,36 @@ export type PersonalResponse = {
   };
   roles: string[];
   profile: PersonalProfile | null;
+  stats: PersonalStats;
 };
+
+const statsRegistrationSelect = {
+  id: true,
+  eventId: true,
+  formatId: true,
+  gender: true,
+  startNumber: true,
+  event: {
+    select: {
+      status: true,
+      eventDate: true,
+      _count: { select: { laps: true } },
+    },
+  },
+  result: {
+    select: {
+      timeMilliseconds: true,
+      _count: { select: { laps: true } },
+    },
+  },
+} as const;
 
 @Injectable()
 export class PersonalService {
   constructor(
     private readonly usersService: UsersService,
     private readonly rolesService: RolesService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async getPersonal(
@@ -42,8 +74,11 @@ export class PersonalService {
   ): Promise<PersonalResponse> {
     const sub = this.requireAuthentikId(authentikId);
     const userFromStore = await this.usersService.findBySub(sub);
-    const roles = await this.rolesService.findCodesByAuthentikId(sub);
-    return this.toResponse(sub, sessionUser, userFromStore, roles);
+    const [roles, stats] = await Promise.all([
+      this.rolesService.findCodesByAuthentikId(sub),
+      this.getStats(userFromStore?.id),
+    ]);
+    return this.toResponse(sub, sessionUser, userFromStore, roles, stats);
   }
 
   async updateOwnPersonal(
@@ -54,8 +89,11 @@ export class PersonalService {
     const sub = this.requireAuthentikId(authentikId);
     const parsed = parseUpdatePersonalBody(body);
     const updated = await this.usersService.updateOwnProfile(sub, parsed);
-    const roles = await this.rolesService.findCodesByAuthentikId(sub);
-    return this.toResponse(sub, sessionUser, updated, roles);
+    const [roles, stats] = await Promise.all([
+      this.rolesService.findCodesByAuthentikId(sub),
+      this.getStats(updated.id),
+    ]);
+    return this.toResponse(sub, sessionUser, updated, roles, stats);
   }
 
   private requireAuthentikId(authentikId: string | undefined): string {
@@ -67,11 +105,41 @@ export class PersonalService {
     return authentikId;
   }
 
+  private async getStats(userId: string | undefined): Promise<PersonalStats> {
+    if (!userId) return EMPTY_PERSONAL_STATS;
+
+    const ownRows = await this.prisma.registration.findMany({
+      where: {
+        userId,
+        status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
+      },
+      select: statsRegistrationSelect,
+    });
+    const own = ownRows.map(toStatsRegistration);
+    const finishEventIds = [
+      ...new Set(
+        own.filter(isCompleteStatsResult).map((row) => row.eventId),
+      ),
+    ];
+    const competitorRows = finishEventIds.length
+      ? await this.prisma.registration.findMany({
+          where: {
+            eventId: { in: finishEventIds },
+            status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
+          },
+          select: statsRegistrationSelect,
+        })
+      : [];
+
+    return computePersonalStats(own, competitorRows.map(toStatsRegistration));
+  }
+
   private toResponse(
     sub: string,
     sessionUser: SessionUser | undefined,
     userFromStore: AppUser | null,
     roles: string[],
+    stats: PersonalStats,
   ): PersonalResponse {
     const profileName =
       [userFromStore?.firstName, userFromStore?.lastName]
@@ -90,6 +158,7 @@ export class PersonalService {
       },
       roles,
       profile: userFromStore ? this.toProfile(userFromStore) : null,
+      stats,
     };
   }
 
@@ -107,4 +176,33 @@ export class PersonalService {
       birthDate: user.birthDate ?? null,
     };
   }
+}
+
+function toStatsRegistration(row: {
+  id: string;
+  eventId: string;
+  formatId: number | null;
+  gender: string;
+  startNumber: number | null;
+  event: { status: string; eventDate: Date; _count: { laps: number } };
+  result: { timeMilliseconds: number; _count: { laps: number } } | null;
+}): StatsRegistration {
+  return {
+    id: row.id,
+    eventId: row.eventId,
+    formatId: row.formatId,
+    gender: row.gender,
+    startNumber: row.startNumber,
+    event: {
+      status: row.event.status,
+      eventDate: row.event.eventDate,
+      lapCount: row.event._count.laps,
+    },
+    result: row.result
+      ? {
+          timeMilliseconds: row.result.timeMilliseconds,
+          lapCount: row.result._count.laps,
+        }
+      : null,
+  };
 }

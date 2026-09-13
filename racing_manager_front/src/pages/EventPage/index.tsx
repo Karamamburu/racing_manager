@@ -18,8 +18,9 @@ import {
 import { registrationsService } from '../../features/registrations/registrationsService';
 import { FeaturesCard } from '../../shared/components';
 import { formatDateTime } from '../../shared/formatDateTime';
+import { formatFinishTime } from '../../shared/formatFinishTime';
 import { AppShell } from '../../shared/layout';
-import type { EventFormatRef, EventParticipant } from '../../shared/types/event';
+import type { EventFormatRef, EventLap, EventParticipant } from '../../shared/types/event';
 import type { FeatureItem } from '../../shared/types/track';
 import { EditEventModal } from './components/EditEventModal';
 import { FinishTimeCell } from './components/FinishTimeCell';
@@ -69,6 +70,31 @@ type ClassificationSection = {
   rows: EventParticipant[];
 };
 
+type SavingLap = {
+  registrationId: string;
+  lapNumber: number;
+};
+
+function formatLapCount(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${count} круг`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} круга`;
+  return `${count} кругов`;
+}
+
+function formatEventLaps(laps: EventLap[]): string {
+  if (laps.length === 0) return '—';
+  const first = laps[0].distanceKm;
+  const allEqual = laps.every((lap) => lap.distanceKm === first);
+  if (allEqual) return `${formatLapCount(laps.length)} по ${first} км`;
+  return laps.map((lap) => `${lap.lapNumber}: ${lap.distanceKm} км`).join(', ');
+}
+
+function participantLapTime(participant: EventParticipant, lapNumber: number): number | null {
+  return (participant.laps ?? []).find((lap) => lap.lapNumber === lapNumber)?.timeMilliseconds ?? null;
+}
+
 function classificationTitle(gender: string, formatName: string | null): string {
   const genderLabel = genderGroupLabels[gender] ?? gender;
   if (!formatName) return genderLabel;
@@ -117,14 +143,49 @@ function groupParticipants(
 }
 
 function getParticipantColumns(options: {
+  eventLaps: EventLap[];
   canAssignNumbers: boolean;
   canAssignResults: boolean;
   savingNumberId: string | null;
   savingResultId: string | null;
+  savingLap: SavingLap | null;
   onAssignNumber: (participant: EventParticipant, startNumber: number) => Promise<void>;
+  onAssignLap: (
+    participant: EventParticipant,
+    lapNumber: number,
+    timeMilliseconds: number,
+  ) => Promise<void>;
   onAssignResult: (participant: EventParticipant, timeMilliseconds: number) => Promise<void>;
   onInvalidResult: () => void;
 }): ColumnsType<EventParticipant> {
+  const recordsByLaps = options.eventLaps.length > 0;
+  const lapColumns: ColumnsType<EventParticipant> = options.eventLaps.map((lap) => ({
+    title: (
+      <span>
+        Круг {lap.lapNumber}
+        <div style={{ fontWeight: 400, fontSize: 12, color: 'rgba(0, 0, 0, 0.45)' }}>
+          {lap.distanceKm} км
+        </div>
+      </span>
+    ),
+    key: `lap-${lap.lapNumber}`,
+    width: 130,
+    render: (_value: unknown, record) => (
+      <FinishTimeCell
+        value={participantLapTime(record, lap.lapNumber)}
+        canEdit={options.canAssignResults && record.startNumber != null}
+        saving={
+          options.savingLap?.registrationId === record.id &&
+          options.savingLap.lapNumber === lap.lapNumber
+        }
+        onSave={(timeMilliseconds) =>
+          options.onAssignLap(record, lap.lapNumber, timeMilliseconds)
+        }
+        onInvalid={options.onInvalidResult}
+      />
+    ),
+  }));
+
   return [
     {
       title: 'Место',
@@ -134,7 +195,7 @@ function getParticipantColumns(options: {
       render: (value: number | null) => value ?? '—',
     },
     {
-      title: 'Стартовый номер',
+      title: '№',
       dataIndex: 'startNumber',
       key: 'startNumber',
       render: (value: number | null, record) => (
@@ -146,23 +207,43 @@ function getParticipantColumns(options: {
         />
       ),
     },
+    ...lapColumns,
     {
-      title: 'Время',
+      title: recordsByLaps ? (
+        <Tooltip title="Сумма времени кругов">
+          <span>Время</span>
+        </Tooltip>
+      ) : (
+        'Время'
+      ),
       dataIndex: 'finishTimeMs',
       key: 'finishTimeMs',
-      width: 130,
-      render: (value: number | null, record) => (
-        <FinishTimeCell
-          value={value}
-          canEdit={options.canAssignResults && record.startNumber != null}
-          saving={options.savingResultId === record.id}
-          onSave={(timeMilliseconds) => options.onAssignResult(record, timeMilliseconds)}
-          onInvalid={options.onInvalidResult}
-        />
-      ),
+      width: 150,
+      render: (value: number | null, record) => {
+        if (!recordsByLaps) {
+          return (
+            <FinishTimeCell
+              value={value}
+              canEdit={options.canAssignResults && record.startNumber != null}
+              saving={options.savingResultId === record.id}
+              onSave={(timeMilliseconds) => options.onAssignResult(record, timeMilliseconds)}
+              onInvalid={options.onInvalidResult}
+            />
+          );
+        }
+        const filled = (record.laps ?? []).length;
+        const incomplete = value != null && filled < options.eventLaps.length;
+        const label = formatFinishTime(value);
+        if (!incomplete) return label;
+        return (
+          <Tooltip title={`Заполнено кругов: ${filled} из ${options.eventLaps.length}`}>
+            <span>{label}</span>
+          </Tooltip>
+        );
+      },
     },
     {
-      title: 'ФИО',
+      title: 'Участник',
       dataIndex: 'fullName',
       key: 'fullName',
     },
@@ -205,12 +286,6 @@ function getParticipantColumns(options: {
         return <Tag color={status?.color}>{status?.text ?? value}</Tag>;
       },
     },
-    {
-      title: 'Подана',
-      dataIndex: 'registeredAt',
-      key: 'registeredAt',
-      render: (value: string) => formatDateTime(value),
-    },
   ];
 }
 
@@ -228,6 +303,7 @@ export function EventPage() {
   const [isCancellingRegistration, setIsCancellingRegistration] = useState(false);
   const [savingStartNumberId, setSavingStartNumberId] = useState<string | null>(null);
   const [savingFinishTimeId, setSavingFinishTimeId] = useState<string | null>(null);
+  const [savingLap, setSavingLap] = useState<SavingLap | null>(null);
 
   if (eventQuery.isLoading) {
     return (
@@ -275,32 +351,41 @@ export function EventPage() {
   const canRegister = isEventRegistrationOpen(event);
   const closedReason = registrationClosedReason(event);
   const showRegister = event.status === 'PLANNED' && !myRegistration;
+  const hasHeaderActions = showRegister || Boolean(myRegistration) || canManage;
   const status = statusLabels[event.status] ?? { text: event.status, color: 'default' };
   const features: FeatureItem[] = [
     { key: 'track', title: 'Трасса', value: event.track.name },
-    { key: 'city', title: 'Город', value: event.track.locationCity ?? '—' },
     {
       key: 'eventType',
-      title: 'Тип',
+      title: 'Тип мероприятия',
       value: eventTypeLabels[event.eventType] ?? event.eventType,
     },
-    { key: 'sport', title: 'Вид спорта', value: sportLabels[event.sport] ?? event.sport },
-    ...(event.formats.length > 0
-      ? [
-          {
-            key: 'formats',
-            title: 'Форматы участия',
-            value: event.formats.map((format) => format.name).join(', '),
-          },
-        ]
-      : []),
+    { key: 'sport', title: 'Дисциплина', value: sportLabels[event.sport] ?? event.sport },
     { key: 'eventDate', title: 'Дата проведения', value: formatDateTime(event.eventDate) },
     {
       key: 'distanceKm',
-      title: 'Дистанция, км',
-      value: event.distanceKm === null ? '—' : String(event.distanceKm),
+      title: 'Дистанция',
+      value: event.distanceKm === null ? '—' : `${event.distanceKm} км`,
     },
-    { key: 'status', title: 'Статус', value: status.text },
+    {
+      key: 'laps',
+      title: 'Круги',
+      value: formatEventLaps(event.laps ?? []),
+    },
+    {
+      key: 'formats',
+      title: 'Форматы участия',
+      value:
+        event.formats.length > 0 ? (
+          <Space size={[4, 8]} wrap>
+            {event.formats.map((format: EventFormatRef) => (
+              <Tag key={format.id}>{format.name}</Tag>
+            ))}
+          </Space>
+        ) : (
+          '—'
+        ),
+    },
     {
       key: 'registrationOpen',
       title: 'Начало выдачи номеров',
@@ -312,8 +397,6 @@ export function EventPage() {
       value: formatDateTime(event.registrationClose),
     },
     { key: 'createdBy', title: 'Создал', value: event.createdBy?.name ?? '—' },
-    { key: 'createdAt', title: 'Создано', value: formatDateTime(event.createdAt) },
-    { key: 'participants', title: 'Участников', value: String(event.registrations.length) },
   ];
 
   const refreshEvent = async () => {
@@ -340,6 +423,33 @@ export function EventPage() {
       throw error;
     } finally {
       setSavingStartNumberId(null);
+    }
+  };
+
+  const assignLapTime = async (
+    participant: EventParticipant,
+    lapNumber: number,
+    timeMilliseconds: number,
+  ) => {
+    setSavingLap({ registrationId: participant.id, lapNumber });
+    try {
+      await registrationsService.upsertResult(event.id, participant.id, {
+        laps: [{ lapNumber, timeMilliseconds }],
+      });
+      await refreshEvent();
+      message.success(`Время круга ${lapNumber} записано`);
+    } catch (error) {
+      const statusCode = registrationsService.getStatus(error);
+      if (statusCode === 403) {
+        message.error(
+          'Недостаточно прав. Записывать результаты может организатор или администратор.',
+        );
+      } else {
+        message.error(registrationsService.getErrorMessage(error));
+      }
+      throw error;
+    } finally {
+      setSavingLap(null);
     }
   };
 
@@ -370,11 +480,14 @@ export function EventPage() {
   };
 
   const participantColumns = getParticipantColumns({
+    eventLaps: event.laps ?? [],
     canAssignNumbers,
     canAssignResults,
     savingNumberId: savingStartNumberId,
     savingResultId: savingFinishTimeId,
+    savingLap,
     onAssignNumber: assignStartNumber,
+    onAssignLap: assignLapTime,
     onAssignResult: assignFinishTime,
     onInvalidResult: () => {
       message.error('Введите время цифрами. Минуты и секунды — до 59, например 13215 → 01:32:15');
@@ -433,41 +546,40 @@ export function EventPage() {
       title={event.name}
       subtitle={`${event.track.name} · ${formatDateTime(event.eventDate)}`}
       extra={
-        <Space wrap>
-          {showRegister ? (
-            <Tooltip title={!canRegister ? closedReason : undefined}>
-              <span>
-                <Button
-                  type="primary"
-                  disabled={!canRegister}
-                  onClick={() => setIsRegisterOpen(true)}
-                >
-                  Зарегистрироваться
-                </Button>
-              </span>
-            </Tooltip>
-          ) : null}
-          {myRegistration ? (
-            <Button
-              danger
-              loading={isCancellingRegistration}
-              onClick={() => setIsCancelRegistrationOpen(true)}
-            >
-              Отозвать заявку
-            </Button>
-          ) : null}
-          {canManage ? (
-            <>
-              <Button onClick={() => setIsEditOpen(true)}>Редактировать</Button>
-              <Button danger loading={isCancelling} onClick={handleCancelEvent}>
-                Отменить мероприятие
+        hasHeaderActions ? (
+          <Space wrap>
+            {showRegister ? (
+              <Tooltip title={!canRegister ? closedReason : undefined}>
+                <span>
+                  <Button
+                    type="primary"
+                    disabled={!canRegister}
+                    onClick={() => setIsRegisterOpen(true)}
+                  >
+                    Зарегистрироваться
+                  </Button>
+                </span>
+              </Tooltip>
+            ) : null}
+            {myRegistration ? (
+              <Button
+                danger
+                loading={isCancellingRegistration}
+                onClick={() => setIsCancelRegistrationOpen(true)}
+              >
+                Отозвать заявку
               </Button>
-            </>
-          ) : null}
-          <Button type="default" onClick={() => navigate('/')}>
-            На главную
-          </Button>
-        </Space>
+            ) : null}
+            {canManage ? (
+              <>
+                <Button onClick={() => setIsEditOpen(true)}>Редактировать</Button>
+                <Button danger loading={isCancelling} onClick={handleCancelEvent}>
+                  Отменить мероприятие
+                </Button>
+              </>
+            ) : null}
+          </Space>
+        ) : undefined
       }
     >
       <Space direction="vertical" size={24} style={{ width: '100%' }}>
@@ -505,6 +617,7 @@ export function EventPage() {
               dataSource={[]}
               rowKey="id"
               pagination={false}
+              scroll={{ x: 'max-content' }}
               locale={{ emptyText: 'Пока никто не зарегистрировался' }}
             />
           ) : (
@@ -519,6 +632,7 @@ export function EventPage() {
                     dataSource={section.rows}
                     rowKey="id"
                     pagination={false}
+                    scroll={{ x: 'max-content' }}
                   />
                 </div>
               ))}

@@ -16,7 +16,7 @@ import { authService } from '../../features/auth/authService';
 import { personalQueryKey, usePersonalQuery } from '../../features/auth/usePersonalQuery';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { AppShell } from '../../shared/layout';
-import { EditProfileModal } from './components';
+import { CabinetStats, EditProfileModal } from './components';
 
 const genderLabels: Record<string, string> = {
   M: 'Мужской',
@@ -109,12 +109,9 @@ export function CabinetPage() {
       title="Личный кабинет"
       subtitle="Персональные данные пользователя"
       extra={
-        <Space>
-          <Button type="primary" onClick={() => setEditOpen(true)}>
-            Редактировать профиль
-          </Button>
-          <Button onClick={() => navigate('/')}>На главную</Button>
-        </Space>
+        <Button type="primary" onClick={() => setEditOpen(true)}>
+          Редактировать профиль
+        </Button>
       }
     >
       <Space direction="vertical" size={24} style={{ width: '100%' }}>
@@ -123,6 +120,17 @@ export function CabinetPage() {
           showIcon
           message="Сессия активна"
           description="Профиль загружен из endpoint /personal на основе текущей серверной сессии."
+        />
+
+        <CabinetStats
+          stats={
+            data.stats ?? {
+              starts: 0,
+              wins: 0,
+              podiums: 0,
+              upcomingStarts: 0,
+            }
+          }
         />
 
         <Card title="Профиль">

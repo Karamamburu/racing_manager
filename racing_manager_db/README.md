@@ -8,6 +8,12 @@ If the database already exists, apply SQL patches from `db/migrate_*.sql`. For p
 docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_event_formats.sql
 ```
 
+For event laps and split times:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_laps.sql
+```
+
 For one active guest registration per person (name + birth year) on an event. Logged-in users are unique by `user_id` only.
 
 ```bash
@@ -66,7 +72,11 @@ fetch('/api/admin/events', {
     sport: 'SKI',
     formatIds: [1, 2],
     eventDate: '2026-12-06',
-    distanceKm: 10.5,
+    laps: [
+      { lapNumber: 1, distanceKm: 2.5 },
+      { lapNumber: 2, distanceKm: 2.5 },
+      { lapNumber: 3, distanceKm: 2.5 },
+    ],
     description: 'Контрольная тренировка',
     registrationOpen: '2026-11-01T09:00:00.000Z',
     registrationClose: '2026-12-05T21:00:00.000Z',
@@ -76,4 +86,7 @@ fetch('/api/admin/events', {
 
 `eventType`: `RACE` (default) or `TIME_TRIAL`. `sport`: `RUN`, `SKI`, `ROLLER_SKI`, `BIKE`.
 `formatIds`: required for SKI and ROLLER_SKI (catalog from `GET /participation-formats?sport=SKI`). Omit or send `[]` for RUN and BIKE.
+`laps`: required. Numbered from 1. `events.distance_km` is the sum of lap distances.
+
+Results for an event with laps: `PUT /events/:eventId/registrations/:registrationId/result` with `{ laps: [{ lapNumber: 1, timeMilliseconds: 123000 }] }`. The finish time is the sum of recorded laps and is not set directly.
 

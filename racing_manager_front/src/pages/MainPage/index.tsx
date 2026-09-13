@@ -1,4 +1,4 @@
-import { ClockCircleTwoTone, PlusOutlined } from '@ant-design/icons';
+import { ClockCircleTwoTone, FlagTwoTone, PlusOutlined, TeamOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Checkbox, Col, Row, Skeleton, Space, Statistic, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -12,6 +12,7 @@ import {
   useRecentEventsQuery,
 } from '../../features/events/useRecentEventsQuery';
 import { mainSlides } from '../../features/main/mainSlides';
+import { usePlatformStatsQuery } from '../../features/main/usePlatformStatsQuery';
 import { PromoSlider } from '../../shared/components';
 import { formatDateTime } from '../../shared/formatDateTime';
 import { AppShell } from '../../shared/layout';
@@ -66,25 +67,26 @@ export function MainPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const eventsQuery = useRecentEventsQuery();
+  const statsQuery = usePlatformStatsQuery();
   const sessionQuery = useSessionQuery();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [showPastEvents, setShowPastEvents] = useState(false);
   const canCreate = canCreateEvents(sessionQuery.data?.roles);
-  const visibleEvents = visibleCatalogEvents(eventsQuery.data ?? [], showPastEvents);
-  const upcomingCount = visibleCatalogEvents(eventsQuery.data ?? [], false).length;
-
-  const extra = (
-    <Space>
-      {canCreate ? (
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsCreateOpen(true)}>
-          Создать мероприятие
-        </Button>
-      ) : null}
-      <Button type="default" onClick={() => navigate('/cabinet')}>
-        Личный кабинет
-      </Button>
-    </Space>
+  const upcomingEvents = visibleCatalogEvents(eventsQuery.data ?? [], false);
+  const visibleEvents = showPastEvents
+    ? visibleCatalogEvents(eventsQuery.data ?? [], true)
+    : upcomingEvents;
+  const upcomingCount = upcomingEvents.length;
+  const upcomingRegistrations = upcomingEvents.reduce(
+    (sum, event) => sum + event.registeredCount,
+    0,
   );
+
+  const extra = canCreate ? (
+    <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsCreateOpen(true)}>
+      Создать мероприятие
+    </Button>
+  ) : undefined;
 
   const createModal = (
     <CreateEventModal
@@ -110,9 +112,29 @@ export function MainPage() {
             <Col xs={24} md={8}>
               <Card>
                 <Statistic
-                  title="Ближайшие гонки"
+                  title="Ближайшие мероприятия"
                   value={eventsQuery.isLoading ? undefined : upcomingCount}
                   prefix={<ClockCircleTwoTone />}
+                  loading={eventsQuery.isLoading}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} md={8}>
+              <Card>
+                <Statistic
+                  title="Зарегистрированных пользователей на платформе"
+                  value={statsQuery.isLoading ? undefined : statsQuery.data?.registeredUsers}
+                  prefix={<TeamOutlined />}
+                  loading={statsQuery.isLoading}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} md={8}>
+              <Card>
+                <Statistic
+                  title="Заявок на ближайшие старты"
+                  value={eventsQuery.isLoading ? undefined : upcomingRegistrations}
+                  prefix={<FlagTwoTone />}
                   loading={eventsQuery.isLoading}
                 />
               </Card>

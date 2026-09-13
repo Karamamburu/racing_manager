@@ -17,6 +17,22 @@ export type EventFormatRef = {
   sortOrder: number;
 };
 
+export type EventLap = {
+  id: string;
+  lapNumber: number;
+  distanceKm: number;
+};
+
+export type ParticipantLap = {
+  lapNumber: number;
+  timeMilliseconds: number;
+};
+
+export type CreateEventLapRequest = {
+  lapNumber: number;
+  distanceKm: number;
+};
+
 export type CreateEventRequest = {
   name: string;
   eventType: EventTypeCode;
@@ -27,6 +43,7 @@ export type CreateEventRequest = {
   registrationOpen?: string;
   registrationClose?: string;
   formatIds?: number[];
+  laps: CreateEventLapRequest[];
 };
 
 export type CreatedEventResponse = {
@@ -45,6 +62,7 @@ export type CreatedEventResponse = {
   createdAt: string;
   updatedAt: string;
   formats: EventFormatRef[];
+  laps: EventLap[];
 };
 
 export type RecentEventRow = {
@@ -70,6 +88,7 @@ export type EventParticipant = {
   finishTimeMs: number | null;
   place: number | null;
   format: EventFormatRef | null;
+  laps: ParticipantLap[];
   status: string;
   note: string | null;
   registeredAt: string;
@@ -93,7 +112,8 @@ export type UpdateRegistrationRequest = {
 };
 
 export type UpsertResultRequest = {
-  timeMilliseconds: number;
+  timeMilliseconds?: number;
+  laps?: ParticipantLap[];
 };
 
 export type ResultResponse = {
@@ -102,6 +122,7 @@ export type ResultResponse = {
   timeMilliseconds: number;
   recordedAt: string;
   updatedAt: string;
+  laps: ParticipantLap[];
 };
 
 export type RegistrationResponse = {
@@ -147,6 +168,7 @@ export type EventDetails = {
     name: string;
   } | null;
   formats: EventFormatRef[];
+  laps: EventLap[];
   registrations: EventParticipant[];
 };
 
