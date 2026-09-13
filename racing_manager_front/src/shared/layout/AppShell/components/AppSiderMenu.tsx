@@ -22,10 +22,9 @@ const navItems = [
     label: <Link to="/cabinet">Личный кабинет</Link>,
   },
   {
-    key: 'calendar',
+    key: '/calendar',
     icon: <CalendarOutlined />,
-    label: 'Календарь',
-    disabled: true,
+    label: <Link to="/calendar">Календарь</Link>,
   },
   {
     key: '/tracks',

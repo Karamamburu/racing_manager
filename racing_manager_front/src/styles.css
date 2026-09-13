@@ -44,6 +44,46 @@ body {
   justify-content: flex-end;
 }
 
+.event-calendar-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event-calendar-list li {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.event-calendar-list .ant-badge-status {
+  width: 100%;
+  overflow: hidden;
+}
+
+.event-calendar-item {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.event-calendar-item:hover {
+  color: #177ddc;
+}
+
+.event-calendar-month {
+  font-size: 14px;
+  text-align: center;
+}
+
 @media (max-width: 768px) {
   .app-header {
     padding: 0 16px;
