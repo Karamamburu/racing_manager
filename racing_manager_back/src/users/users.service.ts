@@ -88,6 +88,10 @@ export class UsersService {
     return dbUser ? this.toAppUser(dbUser) : null;
   }
 
+  async count(): Promise<number> {
+    return this.prisma.user.count();
+  }
+
   async updateOwnProfile(
     authentikId: string,
     data: OwnProfileUpdate,

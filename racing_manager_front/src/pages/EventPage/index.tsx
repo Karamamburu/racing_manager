@@ -351,6 +351,7 @@ export function EventPage() {
   const canRegister = isEventRegistrationOpen(event);
   const closedReason = registrationClosedReason(event);
   const showRegister = event.status === 'PLANNED' && !myRegistration;
+  const hasHeaderActions = showRegister || Boolean(myRegistration) || canManage;
   const status = statusLabels[event.status] ?? { text: event.status, color: 'default' };
   const features: FeatureItem[] = [
     { key: 'track', title: 'Трасса', value: event.track.name },
@@ -545,41 +546,40 @@ export function EventPage() {
       title={event.name}
       subtitle={`${event.track.name} · ${formatDateTime(event.eventDate)}`}
       extra={
-        <Space wrap>
-          {showRegister ? (
-            <Tooltip title={!canRegister ? closedReason : undefined}>
-              <span>
-                <Button
-                  type="primary"
-                  disabled={!canRegister}
-                  onClick={() => setIsRegisterOpen(true)}
-                >
-                  Зарегистрироваться
-                </Button>
-              </span>
-            </Tooltip>
-          ) : null}
-          {myRegistration ? (
-            <Button
-              danger
-              loading={isCancellingRegistration}
-              onClick={() => setIsCancelRegistrationOpen(true)}
-            >
-              Отозвать заявку
-            </Button>
-          ) : null}
-          {canManage ? (
-            <>
-              <Button onClick={() => setIsEditOpen(true)}>Редактировать</Button>
-              <Button danger loading={isCancelling} onClick={handleCancelEvent}>
-                Отменить мероприятие
+        hasHeaderActions ? (
+          <Space wrap>
+            {showRegister ? (
+              <Tooltip title={!canRegister ? closedReason : undefined}>
+                <span>
+                  <Button
+                    type="primary"
+                    disabled={!canRegister}
+                    onClick={() => setIsRegisterOpen(true)}
+                  >
+                    Зарегистрироваться
+                  </Button>
+                </span>
+              </Tooltip>
+            ) : null}
+            {myRegistration ? (
+              <Button
+                danger
+                loading={isCancellingRegistration}
+                onClick={() => setIsCancelRegistrationOpen(true)}
+              >
+                Отозвать заявку
               </Button>
-            </>
-          ) : null}
-          <Button type="default" onClick={() => navigate('/')}>
-            На главную
-          </Button>
-        </Space>
+            ) : null}
+            {canManage ? (
+              <>
+                <Button onClick={() => setIsEditOpen(true)}>Редактировать</Button>
+                <Button danger loading={isCancelling} onClick={handleCancelEvent}>
+                  Отменить мероприятие
+                </Button>
+              </>
+            ) : null}
+          </Space>
+        ) : undefined
       }
     >
       <Space direction="vertical" size={24} style={{ width: '100%' }}>

@@ -13,4 +13,9 @@ export class MainController {
       sessionUser: req.session?.user,
     });
   }
+
+  @Get('stats')
+  getStats() {
+    return this.mainService.getStats();
+  }
 }

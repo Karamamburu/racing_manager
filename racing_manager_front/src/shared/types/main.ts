@@ -34,3 +34,7 @@ export type MainPageResponse = {
   authenticated: boolean;
   user: MainPageUser | null;
 };
+
+export type PlatformStats = {
+  registeredUsers: number;
+};
