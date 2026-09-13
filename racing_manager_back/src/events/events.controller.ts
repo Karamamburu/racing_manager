@@ -39,6 +39,16 @@ export class EventsController {
     return this.eventsService.update(req.session?.userSub, id, body);
   }
 
+  @Patch(':id/status')
+  @Roles(...ADMIN_ROLE_CODES)
+  updateStatus(
+    @Req() req: Request,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() body: unknown,
+  ) {
+    return this.eventsService.updateStatus(req.session?.userSub, id, body);
+  }
+
   @Post(':id/cancel')
   @Roles(RoleCode.ADMINISTRATOR)
   cancel(

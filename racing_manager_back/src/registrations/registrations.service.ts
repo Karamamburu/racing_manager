@@ -9,6 +9,7 @@ import { ADMIN_ROLE_CODES } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
 import { UsersService, type AppUser } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { EventStatusSyncService } from '../events/event-status-sync.service';
 import {
   mergeRegistrationFields,
   parseCreateRegistrationBody,
@@ -119,6 +120,7 @@ export class RegistrationsService {
     prisma: PrismaService,
     private readonly usersService: UsersService,
     private readonly rolesService: RolesService,
+    private readonly eventStatusSync: EventStatusSyncService,
   ) {
     this.store = prisma as unknown as RegistrationsStore;
   }
@@ -299,6 +301,7 @@ export class RegistrationsService {
   private async requirePlannedEvent(
     eventId: string,
   ): Promise<EventRegistrationWindow> {
+    await this.eventStatusSync.syncDueStatuses();
     const event = await this.store.event.findUnique({
       where: { id: eventId },
       select: {

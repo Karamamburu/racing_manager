@@ -4,6 +4,10 @@ export function canCreateEvents(roles: string[] | undefined): boolean {
   );
 }
 
+export function canChangeEventStatus(roles: string[] | undefined): boolean {
+  return canCreateEvents(roles);
+}
+
 export function canManageCreatedEvent(params: {
   roles: string[] | undefined;
   profileId: string | null | undefined;

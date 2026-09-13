@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- ========================================
 CREATE TYPE sport_type AS ENUM ('RUN', 'SKI', 'ROLLER_SKI', 'BIKE');
 CREATE TYPE event_type AS ENUM ('RACE', 'TIME_TRIAL');
-CREATE TYPE event_status AS ENUM ('PLANNED', 'DONE', 'CANCELLED');
+CREATE TYPE event_status AS ENUM ('PLANNED', 'IN_PROGRESS', 'DONE', 'CANCELLED');
 CREATE TYPE registration_status AS ENUM ('REGISTERED', 'CONFIRMED', 'CANCELLED', 'WITHDRAWN');
 CREATE TYPE gender_type AS ENUM ('M', 'F');
 

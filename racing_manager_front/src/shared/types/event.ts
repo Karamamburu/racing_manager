@@ -1,5 +1,7 @@
 export type EventTypeCode = 'RACE' | 'TIME_TRIAL';
 
+export type EventStatusCode = 'PLANNED' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED';
+
 export type SportCode = 'RUN' | 'SKI' | 'ROLLER_SKI' | 'BIKE';
 
 export type ParticipationFormat = {
@@ -70,7 +72,7 @@ export type RecentEventRow = {
   name: string;
   eventDate: string;
   distanceKm: number | null;
-  status: 'PLANNED' | 'DONE' | 'CANCELLED';
+  status: EventStatusCode;
   trackName: string;
   registeredCount: number;
 };
@@ -178,6 +180,6 @@ export type EventRaceSummary = {
   trackName: string;
   eventDate: string;
   eventType: string;
-  status: 'PLANNED' | 'DONE' | 'CANCELLED';
+  status: EventStatusCode;
   registeredCount: number;
 };

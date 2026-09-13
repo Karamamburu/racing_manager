@@ -1,5 +1,6 @@
 import { Card, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { eventStatusMeta } from '../../../shared/eventStatus';
 import { formatDateTime } from '../../../shared/formatDateTime';
 import type { TrackEventRow } from '../../../shared/types/track';
 
@@ -33,8 +34,10 @@ function getEventsColumns(onEventClick?: (event: TrackEventRow) => void): Column
       title: 'Статус',
       dataIndex: 'status',
       key: 'status',
-      render: (status: TrackEventRow['status']) =>
-        status === 'DONE' ? <Tag color="green">DONE</Tag> : <Tag color="blue">PLANNED</Tag>,
+      render: (status: TrackEventRow['status']) => {
+        const meta = eventStatusMeta(status);
+        return <Tag color={meta.color}>{meta.text}</Tag>;
+      },
     },
   ];
 }

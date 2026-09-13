@@ -16,6 +16,9 @@ import {
   isSport,
   type ParsedCreateEvent,
 } from './parse-create-event';
+import { EventStatusCode } from './event-status';
+import { EventStatusSyncService } from './event-status-sync.service';
+import { parseUpdateEventStatusBody } from './parse-update-event-status';
 
 export type ParticipationFormatDto = {
   id: number;
@@ -337,6 +340,7 @@ export class EventsService {
     private readonly prisma: PrismaService,
     private readonly rolesService: RolesService,
     private readonly usersService: UsersService,
+    private readonly eventStatusSync: EventStatusSyncService,
   ) {
     this.store = prisma as unknown as EventsStore;
   }
@@ -427,6 +431,7 @@ export class EventsService {
   }
 
   async listRecent(): Promise<RecentEventRow[]> {
+    await this.eventStatusSync.syncDueStatuses();
     const rows = await this.store.event.findMany({
       where: { status: { not: 'CANCELLED' } },
       orderBy: [{ eventDate: 'asc' }, { createdAt: 'asc' }],
@@ -453,7 +458,13 @@ export class EventsService {
     }));
   }
 
-  async findById(id: string): Promise<EventDetails> {
+  async findById(
+    id: string,
+    options: { syncStatuses?: boolean } = {},
+  ): Promise<EventDetails> {
+    if (options.syncStatuses !== false) {
+      await this.eventStatusSync.syncDueStatuses();
+    }
     const event = await this.store.event.findUnique({
       where: { id },
       include: {
@@ -686,18 +697,53 @@ export class EventsService {
     return this.findById(eventId);
   }
 
+  async updateStatus(
+    authentikId: string | undefined,
+    eventId: string,
+    body: unknown,
+  ): Promise<EventDetails> {
+    await this.rolesService.assertAdminAccess(authentikId);
+    const status = parseUpdateEventStatusBody(body);
+
+    const event = await this.store.event.findUnique({
+      where: { id: eventId },
+      select: { id: true, createdById: true, status: true },
+    });
+    if (!event) {
+      throw new NotFoundException('Event not found.');
+    }
+    if (event.status === status) {
+      return this.findById(eventId, { syncStatuses: false });
+    }
+
+    if (status === EventStatusCode.CANCELLED) {
+      await this.applyCancel(eventId);
+    } else {
+      await this.store.event.update({
+        where: { id: eventId },
+        data: { status },
+      });
+    }
+
+    return this.findById(eventId, { syncStatuses: false });
+  }
+
   async cancel(
     authentikId: string | undefined,
     eventId: string,
   ): Promise<EventDetails> {
     await this.assertCanManageCreatedEvent(authentikId, eventId);
+    await this.applyCancel(eventId);
+    return this.findById(eventId, { syncStatuses: false });
+  }
 
+  private async applyCancel(eventId: string): Promise<void> {
     await this.store.result.deleteMany({
       where: { registration: { eventId } },
     });
     await this.store.event.update({
       where: { id: eventId },
-      data: { status: 'CANCELLED' },
+      data: { status: EventStatusCode.CANCELLED },
     });
     await this.store.registration.updateMany({
       where: {
@@ -709,8 +755,6 @@ export class EventsService {
         startNumber: null,
       },
     });
-
-    return this.findById(eventId);
   }
 
   private async assertCanManageCreatedEvent(
