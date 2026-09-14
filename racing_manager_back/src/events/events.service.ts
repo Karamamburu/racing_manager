@@ -22,6 +22,7 @@ import {
 } from './parse-create-event';
 import { EventStatusCode } from './event-status';
 import { EventStatusSyncService } from './event-status-sync.service';
+import { parseEventDateRange } from './parse-event-date-range';
 import { parseUpdateEventStatusBody } from './parse-update-event-status';
 
 export type ParticipationFormatDto = {
@@ -444,10 +445,17 @@ export class EventsService {
     }));
   }
 
-  async listRecent(): Promise<RecentEventRow[]> {
+  async listRecent(
+    fromRaw?: string,
+    toRaw?: string,
+  ): Promise<RecentEventRow[]> {
     await this.eventStatusSync.syncDueStatuses();
+    const range = parseEventDateRange(fromRaw, toRaw);
     const rows = await this.store.event.findMany({
-      where: { status: { not: 'CANCELLED' } },
+      where: {
+        status: { not: 'CANCELLED' },
+        ...(range ? { eventDate: { gte: range.from, lt: range.to } } : {}),
+      },
       orderBy: [{ eventDate: 'asc' }, { createdAt: 'asc' }],
       include: {
         track: { select: { name: true } },
