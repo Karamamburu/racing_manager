@@ -1,4 +1,4 @@
-import { Controller, Get, Param, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
 import { EventsService } from './events.service';
 
 @Controller('events')
@@ -6,8 +6,8 @@ export class EventsCatalogController {
   constructor(private readonly eventsService: EventsService) {}
 
   @Get()
-  list() {
-    return this.eventsService.listRecent();
+  list(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.eventsService.listRecent(from, to);
   }
 
   @Get(':id')

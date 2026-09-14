@@ -1,14 +1,11 @@
 import { PlusOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Skeleton } from 'antd';
+import { Button } from 'antd';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { canCreateEvents } from '../../features/auth/canCreateEvents';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
-import {
-  recentEventsQueryKey,
-  useRecentEventsQuery,
-} from '../../features/events/useRecentEventsQuery';
+import { recentEventsQueryKey } from '../../features/events/useRecentEventsQuery';
 import { AppShell } from '../../shared/layout';
 import { CreateEventModal } from '../MainPage/components';
 import { EventsCalendar } from './components';
@@ -16,7 +13,6 @@ import { EventsCalendar } from './components';
 export function CalendarPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const eventsQuery = useRecentEventsQuery();
   const sessionQuery = useSessionQuery();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const canCreate = canCreateEvents(sessionQuery.data?.roles);
@@ -30,27 +26,7 @@ export function CalendarPage() {
   return (
     <>
       <AppShell title="Календарь" subtitle="Запланированные и прошедшие мероприятия" extra={extra}>
-        {eventsQuery.isLoading ? (
-          <Card>
-            <Skeleton active paragraph={{ rows: 12 }} />
-          </Card>
-        ) : eventsQuery.isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="Не удалось загрузить мероприятия"
-            action={
-              <Button size="small" type="primary" onClick={() => eventsQuery.refetch()}>
-                Повторить
-              </Button>
-            }
-          />
-        ) : (
-          <EventsCalendar
-            events={eventsQuery.data ?? []}
-            onEventOpen={(eventId) => navigate(`/events/${eventId}`)}
-          />
-        )}
+        <EventsCalendar onEventOpen={(eventId) => navigate(`/events/${eventId}`)} />
       </AppShell>
       <CreateEventModal
         open={isCreateOpen}

@@ -9,9 +9,16 @@ import type {
   SportCode,
 } from '../../shared/types/event';
 
+export type EventListRange = {
+  from: string;
+  to: string;
+};
+
 export class EventsService {
-  public async listRecent(): Promise<RecentEventRow[]> {
-    return apiClient.get<RecentEventRow[]>('/events');
+  public async listRecent(range?: EventListRange): Promise<RecentEventRow[]> {
+    return apiClient.get<RecentEventRow[]>('/events', {
+      params: range ? { from: range.from, to: range.to } : undefined,
+    });
   }
 
   public async listFormats(sport: SportCode): Promise<ParticipationFormat[]> {
