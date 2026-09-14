@@ -13,10 +13,34 @@ import { eventStatusMeta } from '../../../shared/eventStatus';
 import { formatDateTime } from '../../../shared/formatDateTime';
 import type { RecentEventRow } from '../../../shared/types/event';
 
+type CalendarMode = NonNullable<CalendarProps<Dayjs>['mode']>;
+
 type EventsCalendarProps = {
   events: RecentEventRow[];
   onEventOpen: (eventId: string) => void;
 };
+
+const MONTHS_NOMINATIVE = [
+  'январь',
+  'февраль',
+  'март',
+  'апрель',
+  'май',
+  'июнь',
+  'июль',
+  'август',
+  'сентябрь',
+  'октябрь',
+  'ноябрь',
+  'декабрь',
+] as const;
+
+function periodTitle(date: Dayjs, mode: CalendarMode): string {
+  if (mode === 'year') {
+    return `Мероприятия на ${MONTHS_NOMINATIVE[date.month()]} ${date.year()}`;
+  }
+  return `Мероприятия на ${date.format('D MMMM YYYY')}`;
+}
 
 function statusTag(status: RecentEventRow['status']) {
   const meta = eventStatusMeta(status);
@@ -25,10 +49,15 @@ function statusTag(status: RecentEventRow['status']) {
 
 export function EventsCalendar({ events, onEventOpen }: EventsCalendarProps) {
   const [value, setValue] = useState(() => dayjs());
+  const [mode, setMode] = useState<CalendarMode>('month');
   const visibleEvents = useMemo(() => calendarEvents(events), [events]);
   const eventsByDate = useMemo(() => groupEventsByDate(visibleEvents), [visibleEvents]);
   const eventsByMonth = useMemo(() => groupEventsByMonth(visibleEvents), [visibleEvents]);
-  const selectedEvents = eventsByDate.get(value.format('YYYY-MM-DD')) ?? [];
+  const dateKey = value.format('YYYY-MM-DD');
+  const monthKey = value.format('YYYY-MM');
+  const selectedDayEvents = eventsByDate.get(dateKey) ?? [];
+  const selectedMonthEvents = eventsByMonth.get(monthKey) ?? [];
+  const selectedEvents = mode === 'year' ? selectedMonthEvents : selectedDayEvents;
 
   const dateCellRender = (date: Dayjs) => {
     const items = eventsByDate.get(date.format('YYYY-MM-DD')) ?? [];
@@ -88,13 +117,21 @@ export function EventsCalendar({ events, onEventOpen }: EventsCalendarProps) {
       >
         <Calendar
           value={value}
-          onSelect={setValue}
-          onPanelChange={setValue}
+          mode={mode}
+          onSelect={(next, info) => {
+            setValue(next);
+            if (info.source === 'month') setMode('year');
+            if (info.source === 'date') setMode('month');
+          }}
+          onPanelChange={(next, nextMode) => {
+            setValue(next);
+            setMode(nextMode);
+          }}
           cellRender={cellRender}
         />
       </Card>
 
-      <Card title={`Мероприятия на ${value.format('D MMMM YYYY')}`}>
+      <Card title={periodTitle(value, mode)}>
         {selectedEvents.length ? (
           <List
             dataSource={selectedEvents}
@@ -115,7 +152,11 @@ export function EventsCalendar({ events, onEventOpen }: EventsCalendarProps) {
             )}
           />
         ) : (
-          <Empty description="В этот день нет мероприятий" />
+          <Empty
+            description={
+              mode === 'year' ? 'В этом месяце нет мероприятий' : 'В этот день нет мероприятий'
+            }
+          />
         )}
       </Card>
     </Space>

@@ -32,6 +32,10 @@ export function groupEventsByMonth(events: RecentEventRow[]): Map<string, Recent
     else grouped.set(key, [event]);
   }
 
+  for (const bucket of grouped.values()) {
+    bucket.sort((left, right) => left.eventDate.localeCompare(right.eventDate));
+  }
+
   return grouped;
 }
 
