@@ -10,12 +10,19 @@ import { RolesService } from '../auth/roles.service';
 import { ALESHKINO_TRACK_ID } from '../tracks/aleshkino';
 import { UsersService } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { ACTIVE_REGISTRATION_STATUSES, RegistrationStatusCode } from '../registrations/registration-status';
+import {
+  LISTED_REGISTRATION_STATUSES,
+  RegistrationStatusCode,
+  isRankedRegistrationStatus,
+} from '../registrations/registration-status';
 import {
   parseCreateEventBody,
   isSport,
   type ParsedCreateEvent,
 } from './parse-create-event';
+import { EventStatusCode } from './event-status';
+import { EventStatusSyncService } from './event-status-sync.service';
+import { parseUpdateEventStatusBody } from './parse-update-event-status';
 
 export type ParticipationFormatDto = {
   id: number;
@@ -250,14 +257,24 @@ function isCompleteResult(
   return registration.result.laps.length === eventLapCount;
 }
 
+function isRankedCompleteResult(
+  registration: StoredRegistration,
+  eventLapCount: number,
+): boolean {
+  return (
+    isRankedRegistrationStatus(registration.status) &&
+    isCompleteResult(registration, eventLapCount)
+  );
+}
+
 function compareRegistrationsByResult(
   a: StoredRegistration,
   b: StoredRegistration,
   eventLapCount: number,
 ): number {
-  const aComplete = isCompleteResult(a, eventLapCount);
-  const bComplete = isCompleteResult(b, eventLapCount);
-  if (aComplete && bComplete) {
+  const aRanked = isRankedCompleteResult(a, eventLapCount);
+  const bRanked = isRankedCompleteResult(b, eventLapCount);
+  if (aRanked && bRanked) {
     const aTime = a.result?.timeMilliseconds ?? 0;
     const bTime = b.result?.timeMilliseconds ?? 0;
     if (aTime !== bTime) return aTime - bTime;
@@ -266,8 +283,8 @@ function compareRegistrationsByResult(
       (b.startNumber ?? Number.POSITIVE_INFINITY)
     );
   }
-  if (aComplete) return -1;
-  if (bComplete) return 1;
+  if (aRanked) return -1;
+  if (bRanked) return 1;
   if (a.result && !b.result) return -1;
   if (!a.result && b.result) return 1;
 
@@ -337,6 +354,7 @@ export class EventsService {
     private readonly prisma: PrismaService,
     private readonly rolesService: RolesService,
     private readonly usersService: UsersService,
+    private readonly eventStatusSync: EventStatusSyncService,
   ) {
     this.store = prisma as unknown as EventsStore;
   }
@@ -427,6 +445,7 @@ export class EventsService {
   }
 
   async listRecent(): Promise<RecentEventRow[]> {
+    await this.eventStatusSync.syncDueStatuses();
     const rows = await this.store.event.findMany({
       where: { status: { not: 'CANCELLED' } },
       orderBy: [{ eventDate: 'asc' }, { createdAt: 'asc' }],
@@ -435,7 +454,7 @@ export class EventsService {
         _count: {
           select: {
             registrations: {
-              where: { status: { in: [...ACTIVE_REGISTRATION_STATUSES] } },
+              where: { status: { in: [...LISTED_REGISTRATION_STATUSES] } },
             },
           },
         },
@@ -453,7 +472,13 @@ export class EventsService {
     }));
   }
 
-  async findById(id: string): Promise<EventDetails> {
+  async findById(
+    id: string,
+    options: { syncStatuses?: boolean } = {},
+  ): Promise<EventDetails> {
+    if (options.syncStatuses !== false) {
+      await this.eventStatusSync.syncDueStatuses();
+    }
     const event = await this.store.event.findUnique({
       where: { id },
       include: {
@@ -480,7 +505,7 @@ export class EventsService {
           orderBy: { lapNumber: 'asc' },
         },
         registrations: {
-          where: { status: { in: [...ACTIVE_REGISTRATION_STATUSES] } },
+          where: { status: { in: [...LISTED_REGISTRATION_STATUSES] } },
           orderBy: { registeredAt: 'asc' },
           select: {
             id: true,
@@ -583,7 +608,7 @@ export class EventsService {
       const activeCount = await this.prisma.registration.count({
         where: {
           eventId,
-          status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
+          status: { in: [...LISTED_REGISTRATION_STATUSES] },
         },
       });
       if (activeCount > 0) {
@@ -602,7 +627,7 @@ export class EventsService {
         where: {
           eventId,
           formatId: { in: toRemove },
-          status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
+          status: { in: [...LISTED_REGISTRATION_STATUSES] },
         },
         select: { id: true },
       });
@@ -686,31 +711,64 @@ export class EventsService {
     return this.findById(eventId);
   }
 
+  async updateStatus(
+    authentikId: string | undefined,
+    eventId: string,
+    body: unknown,
+  ): Promise<EventDetails> {
+    await this.rolesService.assertAdminAccess(authentikId);
+    const status = parseUpdateEventStatusBody(body);
+
+    const event = await this.store.event.findUnique({
+      where: { id: eventId },
+      select: { id: true, createdById: true, status: true },
+    });
+    if (!event) {
+      throw new NotFoundException('Event not found.');
+    }
+    if (event.status === status) {
+      return this.findById(eventId, { syncStatuses: false });
+    }
+
+    if (status === EventStatusCode.CANCELLED) {
+      await this.applyCancel(eventId);
+    } else {
+      await this.store.event.update({
+        where: { id: eventId },
+        data: { status },
+      });
+    }
+
+    return this.findById(eventId, { syncStatuses: false });
+  }
+
   async cancel(
     authentikId: string | undefined,
     eventId: string,
   ): Promise<EventDetails> {
     await this.assertCanManageCreatedEvent(authentikId, eventId);
+    await this.applyCancel(eventId);
+    return this.findById(eventId, { syncStatuses: false });
+  }
 
+  private async applyCancel(eventId: string): Promise<void> {
     await this.store.result.deleteMany({
       where: { registration: { eventId } },
     });
     await this.store.event.update({
       where: { id: eventId },
-      data: { status: 'CANCELLED' },
+      data: { status: EventStatusCode.CANCELLED },
     });
     await this.store.registration.updateMany({
       where: {
         eventId,
-        status: { in: [...ACTIVE_REGISTRATION_STATUSES] },
+        status: { in: [...LISTED_REGISTRATION_STATUSES] },
       },
       data: {
         status: RegistrationStatusCode.CANCELLED,
         startNumber: null,
       },
     });
-
-    return this.findById(eventId);
   }
 
   private async assertCanManageCreatedEvent(
@@ -822,8 +880,8 @@ export class EventsService {
       let place = 0;
       for (const registration of sorted) {
         const finishTimeMs = registration.result?.timeMilliseconds ?? null;
-        const complete = isCompleteResult(registration, eventLapCount);
-        if (complete) place += 1;
+        const earnsPlace = isRankedCompleteResult(registration, eventLapCount);
+        if (earnsPlace) place += 1;
         ranked.push({
           id: registration.id,
           userId: registration.userId,
@@ -839,7 +897,7 @@ export class EventsService {
           team: registration.team,
           startNumber: registration.startNumber,
           finishTimeMs,
-          place: complete ? place : null,
+          place: earnsPlace ? place : null,
           format: registration.format
             ? toFormatRef(registration.format)
             : null,

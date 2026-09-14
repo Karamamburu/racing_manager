@@ -10,7 +10,7 @@ export type FeatureItem = {
 
 export type TrackEventType = 'Гонка' | 'Контрольная тренировка' | 'Тестовый старт';
 
-export type TrackEventStatus = 'DONE' | 'PLANNED';
+export type TrackEventStatus = 'DONE' | 'IN_PROGRESS' | 'PLANNED';
 
 export type TrackEventRow = {
   key: string;

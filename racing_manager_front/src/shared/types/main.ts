@@ -1,4 +1,4 @@
-export type MainEventStatus = 'PLANNED' | 'DONE';
+export type MainEventStatus = 'PLANNED' | 'IN_PROGRESS' | 'DONE';
 
 export type MainEventRow = {
   key: string;

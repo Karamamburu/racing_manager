@@ -8,6 +8,18 @@ If the database already exists, apply SQL patches from `db/migrate_*.sql`. For p
 docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_event_formats.sql
 ```
 
+For event status `IN_PROGRESS`:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_event_status.sql
+```
+
+For registration statuses `DNS`, `DNF`, `QQ`, `DSQ`:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_registration_status.sql
+```
+
 For event laps and split times:
 
 ```bash

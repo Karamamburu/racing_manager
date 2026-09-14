@@ -38,6 +38,17 @@ export class RegistrationsService {
     );
   }
 
+  public async updateStatus(
+    eventId: string,
+    registrationId: string,
+    status: string,
+  ): Promise<{ status: number; data: RegistrationResponse }> {
+    return apiClient.patchResult<RegistrationResponse>(
+      `/events/${eventId}/registrations/${registrationId}/status`,
+      { status },
+    );
+  }
+
   public async upsertResult(
     eventId: string,
     registrationId: string,

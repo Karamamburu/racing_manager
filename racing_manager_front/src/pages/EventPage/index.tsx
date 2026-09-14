@@ -3,7 +3,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import { canCreateEvents, canManageCreatedEvent } from '../../features/auth/canCreateEvents';
+import { canChangeEventStatus, canCreateEvents, canManageCreatedEvent } from '../../features/auth/canCreateEvents';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { eventsService } from '../../features/events/eventsService';
 import { recentEventsQueryKey } from '../../features/events/useRecentEventsQuery';
@@ -19,12 +19,21 @@ import { registrationsService } from '../../features/registrations/registrations
 import { FeaturesCard } from '../../shared/components';
 import { formatDateTime } from '../../shared/formatDateTime';
 import { formatFinishTime } from '../../shared/formatFinishTime';
+import { eventStatusMeta, type EventStatusCode } from '../../shared/eventStatus';
+import {
+  isActiveRegistrationStatus,
+  isRecordableRegistrationStatus,
+  registrationStatusMeta,
+  type RegistrationStatusCode,
+} from '../../shared/registrationStatus';
 import { AppShell } from '../../shared/layout';
 import type { EventFormatRef, EventLap, EventParticipant } from '../../shared/types/event';
 import type { FeatureItem } from '../../shared/types/track';
 import { EditEventModal } from './components/EditEventModal';
+import { EventStatusSelect } from './components/EventStatusSelect';
 import { FinishTimeCell } from './components/FinishTimeCell';
 import { RegisterEventModal } from './components/RegisterEventModal';
+import { RegistrationStatusSelect } from './components/RegistrationStatusSelect';
 import { StartNumberCell } from './components/StartNumberCell';
 
 const eventTypeLabels: Record<string, string> = {
@@ -37,19 +46,6 @@ const sportLabels: Record<string, string> = {
   RUN: 'Бег',
   ROLLER_SKI: 'Лыжероллеры',
   BIKE: 'Велосипед',
-};
-
-const statusLabels: Record<string, { text: string; color: string }> = {
-  PLANNED: { text: 'Запланировано', color: 'blue' },
-  DONE: { text: 'Завершено', color: 'green' },
-  CANCELLED: { text: 'Отменено', color: 'red' },
-};
-
-const registrationStatusLabels: Record<string, { text: string; color: string }> = {
-  REGISTERED: { text: 'Зарегистрирована', color: 'blue' },
-  CONFIRMED: { text: 'Подтверждена', color: 'green' },
-  CANCELLED: { text: 'Отменена', color: 'red' },
-  WITHDRAWN: { text: 'Отозвана', color: 'default' },
 };
 
 const genderLabels: Record<string, string> = {
@@ -146,10 +142,13 @@ function getParticipantColumns(options: {
   eventLaps: EventLap[];
   canAssignNumbers: boolean;
   canAssignResults: boolean;
+  canChangeStatus: boolean;
   savingNumberId: string | null;
   savingResultId: string | null;
+  savingStatusId: string | null;
   savingLap: SavingLap | null;
   onAssignNumber: (participant: EventParticipant, startNumber: number) => Promise<void>;
+  onChangeStatus: (participant: EventParticipant, status: RegistrationStatusCode) => Promise<void>;
   onAssignLap: (
     participant: EventParticipant,
     lapNumber: number,
@@ -173,7 +172,11 @@ function getParticipantColumns(options: {
     render: (_value: unknown, record) => (
       <FinishTimeCell
         value={participantLapTime(record, lap.lapNumber)}
-        canEdit={options.canAssignResults && record.startNumber != null}
+        canEdit={
+          options.canAssignResults &&
+          record.startNumber != null &&
+          isRecordableRegistrationStatus(record.status)
+        }
         saving={
           options.savingLap?.registrationId === record.id &&
           options.savingLap.lapNumber === lap.lapNumber
@@ -224,7 +227,11 @@ function getParticipantColumns(options: {
           return (
             <FinishTimeCell
               value={value}
-              canEdit={options.canAssignResults && record.startNumber != null}
+              canEdit={
+                options.canAssignResults &&
+                record.startNumber != null &&
+                isRecordableRegistrationStatus(record.status)
+              }
               saving={options.savingResultId === record.id}
               onSave={(timeMilliseconds) => options.onAssignResult(record, timeMilliseconds)}
               onInvalid={options.onInvalidResult}
@@ -281,9 +288,19 @@ function getParticipantColumns(options: {
       title: 'Статус заявки',
       dataIndex: 'status',
       key: 'status',
-      render: (value: string) => {
-        const status = registrationStatusLabels[value];
-        return <Tag color={status?.color}>{status?.text ?? value}</Tag>;
+      width: 280,
+      render: (value: string, record) => {
+        if (options.canChangeStatus) {
+          return (
+            <RegistrationStatusSelect
+              value={value}
+              loading={options.savingStatusId === record.id}
+              onChange={(status) => options.onChangeStatus(record, status)}
+            />
+          );
+        }
+        const status = registrationStatusMeta(value);
+        return <Tag color={status.color}>{status.text}</Tag>;
       },
     },
   ];
@@ -300,9 +317,11 @@ export function EventPage() {
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
   const [isCancelRegistrationOpen, setIsCancelRegistrationOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [isCancellingRegistration, setIsCancellingRegistration] = useState(false);
   const [savingStartNumberId, setSavingStartNumberId] = useState<string | null>(null);
   const [savingFinishTimeId, setSavingFinishTimeId] = useState<string | null>(null);
+  const [savingRegistrationStatusId, setSavingRegistrationStatusId] = useState<string | null>(null);
   const [savingLap, setSavingLap] = useState<SavingLap | null>(null);
 
   if (eventQuery.isLoading) {
@@ -341,8 +360,12 @@ export function EventPage() {
     status: event.status,
   });
   const canAssignNumbers =
-    canCreateEvents(session?.roles) && event.status === 'PLANNED';
+    canCreateEvents(session?.roles) &&
+    (event.status === 'PLANNED' || event.status === 'IN_PROGRESS');
   const canAssignResults =
+    canCreateEvents(session?.roles) && event.status !== 'CANCELLED';
+  const canChangeStatus = canChangeEventStatus(session?.roles);
+  const canChangeRegistrationStatus =
     canCreateEvents(session?.roles) && event.status !== 'CANCELLED';
   const myRegistration = event.registrations.find(
     (registration: EventParticipant) =>
@@ -351,8 +374,12 @@ export function EventPage() {
   const canRegister = isEventRegistrationOpen(event);
   const closedReason = registrationClosedReason(event);
   const showRegister = event.status === 'PLANNED' && !myRegistration;
-  const hasHeaderActions = showRegister || Boolean(myRegistration) || canManage;
-  const status = statusLabels[event.status] ?? { text: event.status, color: 'default' };
+  const canWithdrawOwn =
+    myRegistration != null &&
+    isActiveRegistrationStatus(myRegistration.status) &&
+    event.status === 'PLANNED';
+  const hasHeaderActions = showRegister || canWithdrawOwn || canManage;
+  const status = eventStatusMeta(event.status);
   const features: FeatureItem[] = [
     { key: 'track', title: 'Трасса', value: event.track.name },
     {
@@ -479,14 +506,60 @@ export function EventPage() {
     }
   };
 
+  const submitRegistrationStatus = async (
+    participant: EventParticipant,
+    nextStatus: RegistrationStatusCode,
+  ) => {
+    setSavingRegistrationStatusId(participant.id);
+    try {
+      await registrationsService.updateStatus(event.id, participant.id, nextStatus);
+      message.success(`Статус заявки: ${registrationStatusMeta(nextStatus).text}`);
+      await refreshEvent();
+    } catch (error) {
+      const statusCode = registrationsService.getStatus(error);
+      if (statusCode === 403) {
+        message.error(
+          'Недостаточно прав. Статус заявки может менять организатор или администратор.',
+        );
+      } else {
+        message.error(registrationsService.getErrorMessage(error));
+      }
+      throw error;
+    } finally {
+      setSavingRegistrationStatusId(null);
+    }
+  };
+
+  const assignRegistrationStatus = async (
+    participant: EventParticipant,
+    nextStatus: RegistrationStatusCode,
+  ) => {
+    if (nextStatus === 'CANCELLED') {
+      Modal.confirm({
+        title: 'Отменить заявку участника?',
+        content:
+          'Заявка получит статус «Отменена», стартовый номер будет сброшен, результат удалён.',
+        okText: 'Отменить заявку',
+        okButtonProps: { danger: true },
+        cancelText: 'Назад',
+        onOk: () => submitRegistrationStatus(participant, nextStatus),
+      });
+      return;
+    }
+    await submitRegistrationStatus(participant, nextStatus);
+  };
+
   const participantColumns = getParticipantColumns({
     eventLaps: event.laps ?? [],
     canAssignNumbers,
     canAssignResults,
+    canChangeStatus: canChangeRegistrationStatus,
     savingNumberId: savingStartNumberId,
     savingResultId: savingFinishTimeId,
+    savingStatusId: savingRegistrationStatusId,
     savingLap,
     onAssignNumber: assignStartNumber,
+    onChangeStatus: assignRegistrationStatus,
     onAssignLap: assignLapTime,
     onAssignResult: assignFinishTime,
     onInvalidResult: () => {
@@ -495,8 +568,41 @@ export function EventPage() {
   });
   const participantSections = groupParticipants(event.registrations, event.formats);
 
-  const handleCancelEvent = () => {
-    setIsCancelConfirmOpen(true);
+  const handleStatusChange = (nextStatus: EventStatusCode) => {
+    if (nextStatus === 'CANCELLED') {
+      setIsCancelConfirmOpen(true);
+      return;
+    }
+    void submitEventStatus(nextStatus);
+  };
+
+  const submitEventStatus = async (nextStatus: EventStatusCode) => {
+    setIsUpdatingStatus(true);
+    if (nextStatus === 'CANCELLED') setIsCancelling(true);
+    try {
+      await eventsService.updateEventStatus(event.id, nextStatus);
+      const labels: Record<EventStatusCode, string> = {
+        PLANNED: 'Мероприятие переведено в статус «Запланировано»',
+        IN_PROGRESS: 'Мероприятие переведено в статус «В процессе»',
+        DONE: 'Мероприятие переведено в статус «Завершено»',
+        CANCELLED: 'Мероприятие отменено',
+      };
+      message.success(labels[nextStatus]);
+      setIsCancelConfirmOpen(false);
+      refreshEvent();
+    } catch (error) {
+      const statusCode = eventsService.getStatus(error);
+      if (statusCode === 401) {
+        message.error('Неаутентифицирован. Войдите в систему ещё раз.');
+      } else if (statusCode === 403) {
+        message.error('Недостаточно прав. Статус может менять администратор или организатор.');
+      } else {
+        message.error(eventsService.getErrorMessage(error));
+      }
+    } finally {
+      setIsUpdatingStatus(false);
+      setIsCancelling(false);
+    }
   };
 
   const submitCancelRegistration = async () => {
@@ -521,24 +627,7 @@ export function EventPage() {
   };
 
   const submitCancelEvent = async () => {
-    setIsCancelling(true);
-    try {
-      await eventsService.cancelEvent(event.id);
-      message.success('Мероприятие отменено');
-      setIsCancelConfirmOpen(false);
-      refreshEvent();
-    } catch (error) {
-      const statusCode = eventsService.getStatus(error);
-      if (statusCode === 401) {
-        message.error('Неаутентифицирован. Войдите в систему ещё раз.');
-      } else if (statusCode === 403) {
-        message.error('Недостаточно прав. Отменить может только создатель-администратор.');
-      } else {
-        message.error(eventsService.getErrorMessage(error));
-      }
-    } finally {
-      setIsCancelling(false);
-    }
+    await submitEventStatus('CANCELLED');
   };
 
   return (
@@ -561,7 +650,7 @@ export function EventPage() {
                 </span>
               </Tooltip>
             ) : null}
-            {myRegistration ? (
+            {canWithdrawOwn ? (
               <Button
                 danger
                 loading={isCancellingRegistration}
@@ -571,12 +660,7 @@ export function EventPage() {
               </Button>
             ) : null}
             {canManage ? (
-              <>
-                <Button onClick={() => setIsEditOpen(true)}>Редактировать</Button>
-                <Button danger loading={isCancelling} onClick={handleCancelEvent}>
-                  Отменить мероприятие
-                </Button>
-              </>
+              <Button onClick={() => setIsEditOpen(true)}>Редактировать</Button>
             ) : null}
           </Space>
         ) : undefined
@@ -588,7 +672,15 @@ export function EventPage() {
             <Typography.Title level={2} style={{ margin: 0 }}>
               {event.name}
             </Typography.Title>
-            <Tag color={status.color}>{status.text}</Tag>
+            {canChangeStatus ? (
+              <EventStatusSelect
+                value={event.status}
+                loading={isUpdatingStatus}
+                onChange={handleStatusChange}
+              />
+            ) : (
+              <Tag color={status.color}>{status.text}</Tag>
+            )}
             {myRegistration ? <Tag color="green">Вы зарегистрированы</Tag> : null}
           </Space>
         </Card>

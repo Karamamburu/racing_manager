@@ -33,6 +33,7 @@ enum EventKind {
 
 enum EventStatus {
   PLANNED
+  IN_PROGRESS
   DONE
   CANCELLED
 
@@ -44,6 +45,10 @@ enum RegistrationStatus {
   CONFIRMED
   CANCELLED
   WITHDRAWN
+  DNS
+  DNF
+  QQ
+  DSQ
 
   @@map("registration_status")
 }

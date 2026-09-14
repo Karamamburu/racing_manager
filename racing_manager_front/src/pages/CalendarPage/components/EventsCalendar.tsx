@@ -9,6 +9,7 @@ import {
   groupEventsByDate,
   groupEventsByMonth,
 } from '../../../features/events/calendarEvents';
+import { eventStatusMeta } from '../../../shared/eventStatus';
 import { formatDateTime } from '../../../shared/formatDateTime';
 import type { RecentEventRow } from '../../../shared/types/event';
 
@@ -18,11 +19,8 @@ type EventsCalendarProps = {
 };
 
 function statusTag(status: RecentEventRow['status']) {
-  return status === 'DONE' ? (
-    <Tag color="green">Завершено</Tag>
-  ) : (
-    <Tag color="blue">Запланировано</Tag>
-  );
+  const meta = eventStatusMeta(status);
+  return <Tag color={meta.color}>{meta.text}</Tag>;
 }
 
 export function EventsCalendar({ events, onEventOpen }: EventsCalendarProps) {
@@ -38,25 +36,28 @@ export function EventsCalendar({ events, onEventOpen }: EventsCalendarProps) {
 
     return (
       <ul className="event-calendar-list">
-        {items.map((event) => (
-          <li key={event.id} title={event.name}>
-            <Badge
-              status={event.status === 'DONE' ? 'success' : 'processing'}
-              text={
-                <button
-                  type="button"
-                  className="event-calendar-item"
-                  onClick={(click) => {
-                    click.stopPropagation();
-                    onEventOpen(event.id);
-                  }}
-                >
-                  {event.name}
-                </button>
-              }
-            />
-          </li>
-        ))}
+        {items.map((event) => {
+          const meta = eventStatusMeta(event.status);
+          return (
+            <li key={event.id} title={`${event.name} · ${meta.text}`}>
+              <Badge
+                status={meta.badge}
+                text={
+                  <button
+                    type="button"
+                    className="event-calendar-item"
+                    onClick={(click) => {
+                      click.stopPropagation();
+                      onEventOpen(event.id);
+                    }}
+                  >
+                    {event.name}
+                  </button>
+                }
+              />
+            </li>
+          );
+        })}
       </ul>
     );
   };
@@ -78,8 +79,9 @@ export function EventsCalendar({ events, onEventOpen }: EventsCalendarProps) {
     <Space direction="vertical" size={24} style={{ width: '100%' }}>
       <Card
         title={
-          <Space size="middle">
+          <Space size="middle" wrap>
             <Badge status="processing" text="Запланировано" />
+            <Badge status="warning" text="В процессе" />
             <Badge status="success" text="Завершено" />
           </Space>
         }

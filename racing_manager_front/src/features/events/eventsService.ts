@@ -37,6 +37,13 @@ export class EventsService {
     return apiClient.patchResult<EventDetails>(`/admin/events/${id}`, payload);
   }
 
+  public async updateEventStatus(
+    id: string,
+    status: string,
+  ): Promise<{ status: number; data: EventDetails }> {
+    return apiClient.patchResult<EventDetails>(`/admin/events/${id}/status`, { status });
+  }
+
   public async cancelEvent(id: string): Promise<{ status: number; data: EventDetails }> {
     return apiClient.postResult<EventDetails>(`/admin/events/${id}/cancel`);
   }

@@ -14,6 +14,7 @@ import {
 import { mainSlides } from '../../features/main/mainSlides';
 import { usePlatformStatsQuery } from '../../features/main/usePlatformStatsQuery';
 import { PromoSlider } from '../../shared/components';
+import { eventStatusMeta } from '../../shared/eventStatus';
 import { formatDateTime } from '../../shared/formatDateTime';
 import { AppShell } from '../../shared/layout';
 import type { RecentEventRow } from '../../shared/types/event';
@@ -26,7 +27,10 @@ function toMainEventRow(event: RecentEventRow): MainEventRow {
     event: event.name,
     date: formatDateTime(event.eventDate),
     distanceKm: event.distanceKm,
-    status: event.status === 'DONE' ? 'DONE' : 'PLANNED',
+    status:
+      event.status === 'IN_PROGRESS' || event.status === 'DONE'
+        ? event.status
+        : 'PLANNED',
     track: event.trackName,
     registeredCount: event.registeredCount,
   };
@@ -56,8 +60,10 @@ function getEventColumns(onEventOpen: (eventId: string) => void): ColumnsType<Ma
       title: 'Статус',
       dataIndex: 'status',
       key: 'status',
-      render: (status: MainEventRow['status']) =>
-        status === 'DONE' ? <Tag color="green">Завершено</Tag> : <Tag color="blue">Запланировано</Tag>,
+      render: (status: MainEventRow['status']) => {
+        const meta = eventStatusMeta(status);
+        return <Tag color={meta.color}>{meta.text}</Tag>;
+      },
     },
     { title: 'Трасса', dataIndex: 'track', key: 'track' },
   ];

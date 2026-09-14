@@ -44,6 +44,24 @@ export class RegistrationsController {
     return this.registrationsService.cancelOwn(req.session?.userSub, eventId);
   }
 
+  @Patch(':registrationId/status')
+  @UseGuards(SessionAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLE_CODES)
+  updateStatus(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('registrationId', new ParseUUIDPipe({ version: '4' }))
+    registrationId: string,
+    @Body() body: unknown,
+  ) {
+    return this.registrationsService.updateStatus(
+      req.session?.userSub,
+      eventId,
+      registrationId,
+      body,
+    );
+  }
+
   @Patch(':registrationId')
   @UseGuards(SessionAuthGuard, RolesGuard)
   @Roles(...ADMIN_ROLE_CODES)
