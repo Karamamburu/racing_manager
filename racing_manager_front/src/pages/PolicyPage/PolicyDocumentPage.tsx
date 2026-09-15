@@ -3,6 +3,8 @@ import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../../shared/layout';
 import { CookiesPolicyContent } from './CookiesPolicyContent';
 import { findPolicyDocument } from './documents';
+import { PersonalDataConsentContent } from './PersonalDataConsentContent';
+import { PrivacyPolicyContent } from './PrivacyPolicyContent';
 
 export function PolicyDocumentPage() {
   const { slug } = useParams();
@@ -34,6 +36,8 @@ export function PolicyDocumentPage() {
     <AppShell title={document.title} subtitle="Правовой документ портала Racing Manager">
       <Card>
         {document.slug === 'cookies' ? <CookiesPolicyContent /> : null}
+        {document.slug === 'privacy' ? <PrivacyPolicyContent /> : null}
+        {document.slug === 'personal-data' ? <PersonalDataConsentContent /> : null}
         <Button type="link" onClick={() => navigate('/policy')} style={{ paddingInline: 0 }}>
           Ко всем политикам
         </Button>

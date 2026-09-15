@@ -10,7 +10,7 @@ export const policyDocuments: PolicyDocument[] = [
     slug: 'privacy',
     title: 'Политика конфиденциальности',
     description: 'Как портал собирает, хранит и обрабатывает персональные данные.',
-    published: false,
+    published: true,
   },
   {
     slug: 'cookies',
@@ -22,7 +22,7 @@ export const policyDocuments: PolicyDocument[] = [
     slug: 'personal-data',
     title: 'Согласие на обработку персональных данных',
     description: 'Условия согласия субъекта персональных данных на обработку сведений.',
-    published: false,
+    published: true,
   },
 ];
 

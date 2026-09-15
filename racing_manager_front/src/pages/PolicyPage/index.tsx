@@ -12,8 +12,8 @@ export function PolicyPage() {
     >
       <Card>
         <Typography.Paragraph>
-          Здесь публикуются правовые документы Racing Manager. Политика использования файлов cookie
-          уже доступна; остальные тексты готовятся и появятся на тех же страницах.
+          Здесь публикуются правовые документы Racing Manager: политика конфиденциальности, политика
+          использования файлов cookie и согласие на обработку персональных данных.
         </Typography.Paragraph>
         <List
           itemLayout="horizontal"

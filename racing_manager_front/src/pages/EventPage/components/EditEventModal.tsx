@@ -214,7 +214,7 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
           <Button key="cancel" onClick={handleCancel} disabled={submitting}>
             Отмена
           </Button>,
-          <Button key="submit" type="primary" loading={submitting} onClick={() => form.submit()} disabled={Boolean(sport === 'SKI' || sport === 'ROLLER_SKI') && formats.length === 0}>
+          <Button key="submit" type="primary" loading={submitting} onClick={() => form.submit()} disabled={Boolean(feedback) || (Boolean(sport === 'SKI' || sport === 'ROLLER_SKI') && formats.length === 0)}>
             Сохранить
           </Button>,
         ]}
@@ -307,6 +307,7 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
 
       <Modal
         open={Boolean(feedback)}
+        zIndex={1100}
         onCancel={closeFeedback}
         footer={
           feedback?.status === 'unauthorized'

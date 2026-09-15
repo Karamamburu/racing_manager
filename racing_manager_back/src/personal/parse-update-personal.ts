@@ -16,6 +16,7 @@ export type ParsedUpdatePersonal = {
   city: string | null;
   district: string | null;
   team: string | null;
+  personalDataConsent: true;
 };
 
 function isGender(value: string): value is GenderCode {
@@ -100,6 +101,13 @@ function parseGender(value: unknown): GenderCode | null {
   return trimmed;
 }
 
+function parsePersonalDataConsent(value: unknown): true {
+  if (value === true) return true;
+  throw new BadRequestException(
+    'personalDataConsent must be true to save profile data.',
+  );
+}
+
 export function parseUpdatePersonalBody(body: unknown): ParsedUpdatePersonal {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new BadRequestException('Request body must be a JSON object.');
@@ -125,5 +133,6 @@ export function parseUpdatePersonalBody(body: unknown): ParsedUpdatePersonal {
     city: readString(raw.city, 'city', false, MAX_PLACE_LENGTH),
     district: readString(raw.district, 'district', false, MAX_PLACE_LENGTH),
     team: readString(raw.team, 'team', false, MAX_PLACE_LENGTH),
+    personalDataConsent: parsePersonalDataConsent(raw.personalDataConsent),
   };
 }

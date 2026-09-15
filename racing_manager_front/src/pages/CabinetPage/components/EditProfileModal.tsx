@@ -4,6 +4,7 @@ import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
 import { authService } from '../../../features/auth/authService';
 import { personalService } from '../../../features/personal/personalService';
+import { PersonalDataConsentCheckbox } from '../../../shared/personalConsent/PersonalDataConsentCheckbox';
 import type { PersonalProfile, UpdatePersonalRequest } from '../../../shared/types/personal';
 
 type EditProfileFormValues = {
@@ -14,6 +15,7 @@ type EditProfileFormValues = {
   city?: string;
   district?: string;
   team?: string;
+  personalDataConsent?: boolean;
 };
 
 type FeedbackStatus = 'success' | 'unauthorized' | 'error';
@@ -47,6 +49,7 @@ function toPayload(values: EditProfileFormValues): UpdatePersonalRequest {
     city: values.city?.trim() || null,
     district: values.district?.trim() || null,
     team: values.team?.trim() || null,
+    personalDataConsent: true,
   };
 }
 
@@ -73,6 +76,7 @@ export function EditProfileModal({
       city: profile?.city ?? undefined,
       district: profile?.district ?? undefined,
       team: profile?.team ?? undefined,
+      personalDataConsent: false,
     });
   }, [form, open, profile]);
 
@@ -144,7 +148,13 @@ export function EditProfileModal({
           <Button key="cancel" onClick={handleCancel} disabled={submitting}>
             Отмена
           </Button>,
-          <Button key="submit" type="primary" loading={submitting} onClick={() => form.submit()}>
+          <Button
+            key="submit"
+            type="primary"
+            loading={submitting}
+            disabled={Boolean(feedback)}
+            onClick={() => form.submit()}
+          >
             Сохранить
           </Button>,
         ]}
@@ -194,11 +204,13 @@ export function EditProfileModal({
           <Form.Item name="team" label="Команда" rules={[{ max: 120, message: 'Не больше 120 символов' }]}>
             <Input maxLength={120} />
           </Form.Item>
+          <PersonalDataConsentCheckbox />
         </Form>
       </Modal>
 
       <Modal
         open={Boolean(feedback)}
+        zIndex={1100}
         onCancel={closeFeedback}
         footer={
           feedback?.status === 'unauthorized'

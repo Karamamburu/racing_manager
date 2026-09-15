@@ -120,7 +120,7 @@ export class UsersService {
     return this.toAppUser(updated);
   }
 
-  private toAppUser(dbUser: {
+  toAppUser(dbUser: {
     id: string;
     authentikId: string;
     userName: string;
