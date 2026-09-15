@@ -1,5 +1,5 @@
 import { FileProtectOutlined } from '@ant-design/icons';
-import { Card, List, Typography } from 'antd';
+import { Card, List, Tag, Typography } from 'antd';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../../shared/layout';
 import { policyDocuments } from './documents';
@@ -12,8 +12,8 @@ export function PolicyPage() {
     >
       <Card>
         <Typography.Paragraph>
-          Здесь будут опубликованы правовые документы Racing Manager. Тексты пока готовятся — вы
-          можете открыть карточку нужного документа, а готовая редакция появится на этой же странице.
+          Здесь публикуются правовые документы Racing Manager. Политика использования файлов cookie
+          уже доступна; остальные тексты готовятся и появятся на тех же страницах.
         </Typography.Paragraph>
         <List
           itemLayout="horizontal"
@@ -28,7 +28,14 @@ export function PolicyPage() {
             >
               <List.Item.Meta
                 avatar={<FileProtectOutlined style={{ fontSize: 20 }} />}
-                title={<Link to={`/policy/${document.slug}`}>{document.title}</Link>}
+                title={
+                  <span>
+                    <Link to={`/policy/${document.slug}`}>{document.title}</Link>{' '}
+                    <Tag color={document.published ? 'green' : 'default'}>
+                      {document.published ? 'Опубликовано' : 'Готовится'}
+                    </Tag>
+                  </span>
+                }
                 description={document.description}
               />
             </List.Item>

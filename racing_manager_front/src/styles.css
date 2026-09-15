@@ -84,6 +84,23 @@ body {
   text-align: center;
 }
 
+.policy-document {
+  max-width: 880px;
+}
+
+.policy-document .policy-clause {
+  margin-bottom: 12px;
+}
+
+.policy-document .policy-list {
+  margin: 0 0 16px;
+  padding-left: 22px;
+}
+
+.policy-document h4.ant-typography {
+  margin-top: 28px;
+}
+
 #cc-main {
   --cc-font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --cc-modal-border-radius: 10px;
