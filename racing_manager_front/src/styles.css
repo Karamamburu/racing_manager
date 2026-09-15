@@ -84,6 +84,24 @@ body {
   text-align: center;
 }
 
+#cc-main {
+  --cc-font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --cc-modal-border-radius: 10px;
+  --cc-btn-border-radius: 10px;
+  --cc-btn-primary-bg: #177ddc;
+  --cc-btn-primary-border-color: #177ddc;
+  --cc-btn-primary-hover-bg: #4096ff;
+  --cc-btn-primary-hover-border-color: #4096ff;
+  --cc-btn-secondary-bg: #fff;
+  --cc-btn-secondary-color: #374151;
+  --cc-btn-secondary-border-color: #d1d5db;
+  --cc-btn-secondary-hover-bg: #f3f4f6;
+  --cc-btn-secondary-hover-color: #111827;
+  --cc-btn-secondary-hover-border-color: #d1d5db;
+  --cc-toggle-on-bg: #177ddc;
+  --cc-link-color: #177ddc;
+}
+
 @media (max-width: 768px) {
   .app-header {
     padding: 0 16px;
