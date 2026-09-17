@@ -9,6 +9,8 @@ const SPORTS = ['RUN', 'SKI', 'ROLLER_SKI', 'BIKE'] as const;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_LAP_COUNT = 50;
 const MAX_DISTANCE_KM = 9999.99;
+const MAX_MAP_LINK_LENGTH = 4000;
+const NAKARTE_HOSTS = new Set(['nakarte.me', 'www.nakarte.me']);
 
 export type EventTypeCode = (typeof EVENT_TYPES)[number];
 export type SportCode = (typeof SPORTS)[number];
@@ -25,6 +27,7 @@ export type ParsedCreateEvent = {
   eventDate: Date;
   distanceKm: number;
   description: string | null;
+  mapLink: string | null;
   registrationOpen: Date | null;
   registrationClose: Date | null;
   formatIds: number[];
@@ -136,6 +139,30 @@ function parseLaps(value: unknown): ParsedEventLap[] {
   return laps;
 }
 
+function parseNakarteMapLink(value: unknown): string | null {
+  const raw = readString(value, 'mapLink', false);
+  if (!raw) return null;
+  if (raw.length > MAX_MAP_LINK_LENGTH) {
+    throw new BadRequestException(
+      `mapLink must be at most ${MAX_MAP_LINK_LENGTH} characters.`,
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new BadRequestException('mapLink must be a valid nakarte.me URL.');
+  }
+  if (url.protocol !== 'https:') {
+    throw new BadRequestException('mapLink must be an https URL.');
+  }
+  const host = url.hostname.toLowerCase();
+  if (!NAKARTE_HOSTS.has(host) || (url.pathname !== '/' && url.pathname !== '')) {
+    throw new BadRequestException('mapLink must be a nakarte.me URL.');
+  }
+  return raw;
+}
+
 function parseFormatIds(value: unknown): number[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) {
@@ -197,6 +224,7 @@ export function parseCreateEventBody(body: unknown): ParsedCreateEvent {
   }
 
   const description = readString(raw.description, 'description', false);
+  const mapLink = parseNakarteMapLink(raw.mapLink);
 
   const registrationOpenRaw = readString(
     raw.registrationOpen,
@@ -232,6 +260,7 @@ export function parseCreateEventBody(body: unknown): ParsedCreateEvent {
     eventDate,
     distanceKm,
     description,
+    mapLink,
     registrationOpen,
     registrationClose,
     formatIds: parseFormatIds(raw.formatIds),

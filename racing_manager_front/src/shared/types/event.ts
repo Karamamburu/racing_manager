@@ -42,6 +42,7 @@ export type CreateEventRequest = {
   eventDate: string;
   distanceKm?: number;
   description?: string;
+  mapLink?: string;
   registrationOpen?: string;
   registrationClose?: string;
   formatIds?: number[];
@@ -57,6 +58,7 @@ export type CreatedEventResponse = {
   eventDate: string;
   distanceKm: number | null;
   description: string | null;
+  mapLink: string | null;
   registrationOpen: string | null;
   registrationClose: string | null;
   status: string;
@@ -154,6 +156,7 @@ export type EventDetails = {
   eventDate: string;
   distanceKm: number | null;
   description: string | null;
+  mapLink: string | null;
   registrationOpen: string | null;
   registrationClose: string | null;
   status: string;

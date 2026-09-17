@@ -55,6 +55,7 @@ export type EventResponse = {
   eventDate: string;
   distanceKm: number | null;
   description: string | null;
+  mapLink: string | null;
   registrationOpen: string | null;
   registrationClose: string | null;
   status: string;
@@ -83,6 +84,7 @@ export type EventDetails = {
   eventDate: string;
   distanceKm: number | null;
   description: string | null;
+  mapLink: string | null;
   registrationOpen: string | null;
   registrationClose: string | null;
   status: string;
@@ -133,6 +135,7 @@ type StoredEvent = {
   eventDate: Date;
   distanceKm: DecimalValue;
   description: string | null;
+  mapLink: string | null;
   registrationOpen: Date | null;
   registrationClose: Date | null;
   status: string;
@@ -393,6 +396,7 @@ export class EventsService {
         eventDate: parsed.eventDate,
         distanceKm: parsed.distanceKm,
         description: parsed.description,
+        mapLink: parsed.mapLink,
         registrationOpen: parsed.registrationOpen,
         registrationClose: parsed.registrationClose,
         createdById: actor.id,
@@ -566,6 +570,7 @@ export class EventsService {
       eventDate: event.eventDate.toISOString(),
       distanceKm: toKm(event.distanceKm),
       description: event.description,
+      mapLink: event.mapLink,
       registrationOpen: event.registrationOpen?.toISOString() ?? null,
       registrationClose: event.registrationClose?.toISOString() ?? null,
       status: event.status,
@@ -677,6 +682,7 @@ export class EventsService {
           eventDate: parsed.eventDate,
           distanceKm: parsed.distanceKm,
           description: parsed.description,
+          mapLink: parsed.mapLink,
           registrationOpen: parsed.registrationOpen,
           registrationClose: parsed.registrationClose,
         },
@@ -857,6 +863,7 @@ export class EventsService {
       eventDate: event.eventDate.toISOString(),
       distanceKm: toKm(event.distanceKm),
       description: event.description,
+      mapLink: event.mapLink,
       registrationOpen: event.registrationOpen?.toISOString() ?? null,
       registrationClose: event.registrationClose?.toISOString() ?? null,
       status: event.status,

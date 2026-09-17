@@ -109,6 +109,7 @@ CREATE TABLE events (
   event_date TIMESTAMPTZ NOT NULL,
   distance_km NUMERIC(6, 2) CHECK (distance_km > 0),
   description TEXT,
+  map_link TEXT,
   registration_open TIMESTAMPTZ,
   registration_close TIMESTAMPTZ,
   status event_status NOT NULL DEFAULT 'PLANNED',

@@ -1,4 +1,4 @@
-import { Button, Card, Modal, Result, Skeleton, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Col, Modal, Result, Row, Skeleton, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -30,6 +30,7 @@ import { AppShell } from '../../shared/layout';
 import type { EventFormatRef, EventLap, EventParticipant } from '../../shared/types/event';
 import type { FeatureItem } from '../../shared/types/track';
 import { EditEventModal } from './components/EditEventModal';
+import { EventTrackMap } from './components/EventTrackMap';
 import { EventStatusSelect } from './components/EventStatusSelect';
 import { FinishTimeCell } from './components/FinishTimeCell';
 import { RegisterEventModal } from './components/RegisterEventModal';
@@ -687,20 +688,24 @@ export function EventPage() {
 
         <FeaturesCard title="Характеристики мероприятия" features={features} />
 
-        <Card title="Описание">
-          {event.description ? (
-            <Typography.Paragraph>{event.description}</Typography.Paragraph>
-          ) : (
-            <Typography.Text type="secondary">Описание не указано</Typography.Text>
-          )}
-          {event.track.mapLink ? (
-            <Typography.Paragraph style={{ marginBottom: 0 }}>
-              <Typography.Link href={event.track.mapLink} target="_blank" rel="noreferrer">
-                Открыть карту трассы
-              </Typography.Link>
-            </Typography.Paragraph>
+        <Row gutter={[24, 24]}>
+          <Col xs={24} xl={event.mapLink ? 12 : 24}>
+            <Card title="Описание" style={{ height: '100%' }}>
+              {event.description ? (
+                <Typography.Paragraph style={{ marginBottom: 0 }}>
+                  {event.description}
+                </Typography.Paragraph>
+              ) : (
+                <Typography.Text type="secondary">Описание не указано</Typography.Text>
+              )}
+            </Card>
+          </Col>
+          {event.mapLink ? (
+            <Col xs={24} xl={12}>
+              <EventTrackMap mapLink={event.mapLink} />
+            </Col>
           ) : null}
-        </Card>
+        </Row>
 
         <Card title={`Зарегистрированные участники (${event.registrations.length})`}>
           {participantSections.length === 0 ? (
