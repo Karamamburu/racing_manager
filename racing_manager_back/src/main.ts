@@ -8,6 +8,7 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.set('trust proxy', 1);
+  app.useBodyParser('json', { limit: '2mb' });
 
   app.use(
     session({

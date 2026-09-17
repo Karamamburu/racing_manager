@@ -108,6 +108,53 @@ body {
   margin-top: 28px;
 }
 
+.news-article-body {
+  max-width: 880px;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.news-article-body h1,
+.news-article-body h2,
+.news-article-body h3,
+.news-article-body h4,
+.news-article-body h5,
+.news-article-body h6 {
+  margin: 24px 0 12px;
+  line-height: 1.3;
+}
+
+.news-article-body p {
+  margin: 0 0 12px;
+}
+
+.news-article-body img {
+  max-width: 100%;
+  height: auto;
+}
+
+.news-article-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 16px;
+}
+
+.news-article-body td,
+.news-article-body th {
+  border: 1px solid #e5e7eb;
+  padding: 8px;
+}
+
+.news-article-body ul,
+.news-article-body ol {
+  margin: 0 0 16px;
+  padding-left: 22px;
+}
+
+.jodit-container {
+  border-radius: 10px;
+}
+
 #cc-main {
   --cc-font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --cc-modal-border-radius: 10px;

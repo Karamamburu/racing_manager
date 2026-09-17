@@ -2,6 +2,7 @@ import {
   CalendarOutlined,
   CarOutlined,
   DashboardOutlined,
+  NotificationOutlined,
   TrophyOutlined,
   UserOutlined,
 } from '@ant-design/icons';
@@ -27,6 +28,11 @@ const navItems = [
     label: <Link to="/calendar">Календарь</Link>,
   },
   {
+    key: '/news',
+    icon: <NotificationOutlined />,
+    label: <Link to="/news">Новости</Link>,
+  },
+  {
     key: '/tracks',
     icon: <CarOutlined />,
     label: <Link to="/tracks">Трассы</Link>,
@@ -39,13 +45,22 @@ const navItems = [
   },
 ];
 
+function selectedMenuKey(pathname: string): string {
+  if (pathname === '/') return '/';
+  const match = navItems.find((item) => {
+    if (item.key === '/' || item.key === 'cups') return false;
+    return pathname === item.key || pathname.startsWith(`${item.key}/`);
+  });
+  return match?.key ?? pathname;
+}
+
 export function AppSiderMenu() {
   const location = useLocation();
 
   return (
     <Sider breakpoint="lg" collapsedWidth="0" width={250}>
       <div className="app-logo">Racing Manager</div>
-      <Menu theme="dark" mode="inline" selectedKeys={[location.pathname]} items={navItems} />
+      <Menu theme="dark" mode="inline" selectedKeys={[selectedMenuKey(location.pathname)]} items={navItems} />
     </Sider>
   );
 }

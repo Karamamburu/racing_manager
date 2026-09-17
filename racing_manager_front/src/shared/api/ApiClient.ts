@@ -60,6 +60,14 @@ export class ApiClient {
     return { status: response.status, data: response.data };
   }
 
+  public async deleteResult<TResponse>(
+    url: string,
+    config?: AxiosRequestConfig,
+  ): Promise<{ status: number; data: TResponse }> {
+    const response = await this.client.delete<TResponse>(url, config);
+    return { status: response.status, data: response.data };
+  }
+
   public async request<TResponse>(
     config: AxiosRequestConfig,
   ): Promise<TResponse> {

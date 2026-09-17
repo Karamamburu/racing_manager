@@ -4,5 +4,7 @@ export { CalendarPage } from './CalendarPage/index';
 export { TracksPage } from './TracksPage/index';
 export { TrackPage } from './TrackPage/index';
 export { EventPage } from './EventPage/index';
+export { NewsPage } from './NewsPage/index';
+export { NewsArticlePage } from './NewsPage/NewsArticlePage';
 export { PolicyPage } from './PolicyPage/index';
 export { PolicyDocumentPage } from './PolicyPage/PolicyDocumentPage';

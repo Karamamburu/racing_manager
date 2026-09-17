@@ -54,13 +54,19 @@ For an optional nakarte.me track link on an event:
 docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_event_map_link.sql
 ```
 
+For track-scoped news articles:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_news.sql
+```
+
 ## Roles
 
 Participants have no rows in `user_roles`. Admin roles are granted in SQL after the person has logged in once (Authentik creates the `users` row).
 
 | Code | Meaning |
 |---|---|
-| `ADMINISTRATOR` | Full admin (track + events + registrations) |
+| `ADMINISTRATOR` | Full admin (track + events + registrations + news) |
 | `ORGANIZER` | Events and registrations on Алёшкино |
 
 Grant:
@@ -122,4 +128,25 @@ fetch('/api/admin/events', {
 `laps`: required. Numbered from 1. `events.distance_km` is the sum of lap distances.
 
 Results for an event with laps: `PUT /events/:eventId/registrations/:registrationId/result` with `{ laps: [{ lapNumber: 1, timeMilliseconds: 123000 }] }`. The finish time is the sum of recorded laps and is not set directly.
+
+## News
+
+Public catalog: `GET /news`, `GET /news/:id`. Optional `?trackId=` filter.
+
+Create / update / delete: `ADMINISTRATOR` only.
+
+```js
+fetch('/api/admin/news', {
+  method: 'POST',
+  credentials: 'include',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    trackId: '3d8f1a62-7c4e-4b91-9e2a-0b6c8d4e1f20',
+    title: 'Сезон в Алёшкино открыт',
+    body: '<h2>Старт сезона</h2><p>Контрольные тренировки продолжаются.</p>',
+  }),
+}).then((r) => r.json()).then(console.log)
+```
+
+Active tracks for the news form: `GET /tracks`.
 
