@@ -21,6 +21,7 @@ type OidcClaims = {
   first_name?: unknown;
   last_name?: unknown;
   birth_date?: unknown;
+  gender?: unknown;
   consent?: unknown;
 };
 
@@ -121,6 +122,7 @@ export class AuthService implements OnModuleInit {
     const firstName = readOptionalName(claims.first_name, claims.given_name);
     const lastName = readOptionalName(claims.last_name, claims.family_name);
     const birthDate = parseOptionalBirthDate(claims.birth_date);
+    const gender = parseOptionalGender(claims.gender);
     const consentGranted = isOidcConsentGranted(claims.consent);
     const displayName =
       [firstName, lastName].filter(Boolean).join(' ').trim() || name;
@@ -136,6 +138,7 @@ export class AuthService implements OnModuleInit {
         firstName,
         lastName,
         birthDate,
+        gender,
         consentGranted,
         requestMeta: readConsentRequestMeta(req),
       });
@@ -194,7 +197,8 @@ export class AuthService implements OnModuleInit {
       claims.consent === undefined ||
       claims.first_name === undefined ||
       claims.last_name === undefined ||
-      claims.birth_date === undefined;
+      claims.birth_date === undefined ||
+      claims.gender === undefined;
     if (!needsUserinfo || !accessToken) return claims;
     try {
       const userinfo = (await this.client.userinfo(accessToken)) as OidcClaims;
@@ -230,6 +234,13 @@ function readOptionalString(value: unknown): string | undefined {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   return trimmed.slice(0, MAX_NAME_LENGTH);
+}
+
+function parseOptionalGender(value: unknown): 'M' | 'F' | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toUpperCase();
+  if (normalized === 'M' || normalized === 'F') return normalized;
+  return undefined;
 }
 
 function parseOptionalBirthDate(value: unknown): Date | undefined {

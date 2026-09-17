@@ -1,4 +1,6 @@
-export const EVENT_TIME_ZONE = 'Europe/Moscow';
+import { MOSCOW_TIME_ZONE } from '../time/moscow-time';
+
+export const EVENT_TIME_ZONE = MOSCOW_TIME_ZONE;
 
 export const EventStatusCode = {
   PLANNED: 'PLANNED',

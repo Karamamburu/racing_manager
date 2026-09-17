@@ -1,3 +1,4 @@
+import './tz';
 import 'dotenv/config';
 import session from 'express-session';
 import { NestFactory } from '@nestjs/core';

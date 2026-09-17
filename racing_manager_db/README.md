@@ -2,6 +2,14 @@
 
 Postgres schema lives in `db/init.sql`. Docker Compose applies it only on the **first** start of an empty volume.
 
+Timestamps are stored as `TIMESTAMPTZ` and shown in `Europe/Moscow` (`UTC+3`). Set this on an existing cluster:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_moscow_timezone.sql
+```
+
+Then restart the container so new sessions pick up `timezone=Europe/Moscow`.
+
 If the database already exists, apply SQL patches from `db/migrate_*.sql`. For participation formats:
 
 ```bash

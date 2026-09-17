@@ -8,6 +8,7 @@ export class PrismaService
 {
   async onModuleInit() {
     await this.$connect();
+    await this.$executeRaw`SET TIME ZONE 'Europe/Moscow'`;
   }
 
   async onModuleDestroy() {

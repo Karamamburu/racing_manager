@@ -2,6 +2,18 @@
 -- Racing Manager DB (MVP)
 -- ========================================
 
+-- Display and interpret timestamps in Moscow time (UTC+3, no DST).
+DO $$
+BEGIN
+  EXECUTE format(
+    'ALTER DATABASE %I SET timezone TO %L',
+    current_database(),
+    'Europe/Moscow'
+  );
+END
+$$;
+SET timezone = 'Europe/Moscow';
+
 -- Extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 

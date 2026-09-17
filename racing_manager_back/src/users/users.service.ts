@@ -44,6 +44,7 @@ export class UsersService {
     firstName?: string;
     lastName?: string;
     birthDate?: Date;
+    gender?: 'M' | 'F';
     consentGranted?: boolean;
     requestMeta?: ConsentRequestMeta;
   }): Promise<{ user: AppUser; isNew: boolean }> {
@@ -56,6 +57,7 @@ export class UsersService {
     const lastName =
       profile.lastName?.trim() || this.extractLastName(profile.name);
     const birthDate = profile.birthDate;
+    const gender = profile.gender;
     const userName = this.resolveUserName(profile.username, profile.email);
 
     if (existing) {
@@ -67,6 +69,7 @@ export class UsersService {
           ...(existing.firstName ? {} : { firstName }),
           ...(existing.lastName ? {} : { lastName }),
           ...(existing.birthDate ? {} : { birthDate }),
+          ...(existing.gender ? {} : { gender }),
         },
       });
       return { user: this.toAppUser(dbUser), isNew: false };
@@ -79,6 +82,7 @@ export class UsersService {
       firstName,
       lastName,
       birthDate,
+      gender,
       consentGranted: Boolean(profile.consentGranted),
       requestMeta: profile.requestMeta,
     });
@@ -103,6 +107,7 @@ export class UsersService {
     firstName?: string;
     lastName?: string;
     birthDate?: Date;
+    gender?: 'M' | 'F';
     consentGranted: boolean;
     requestMeta?: ConsentRequestMeta;
   }) {
@@ -127,6 +132,7 @@ export class UsersService {
           firstName: input.firstName,
           lastName: input.lastName,
           birthDate: input.birthDate,
+          gender: input.gender,
         },
       });
 
