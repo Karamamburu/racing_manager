@@ -13,6 +13,10 @@ declare module 'express-session' {
       state: string;
       nonce: string;
       codeVerifier: string;
+      requestMeta?: {
+        ip: string | null;
+        userAgent: string | null;
+      };
     };
     tokens?: {
       idToken?: string;

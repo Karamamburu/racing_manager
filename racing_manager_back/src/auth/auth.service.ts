@@ -4,7 +4,10 @@ import { Client, Issuer, TokenSet, generators } from 'openid-client';
 import type { Request } from 'express';
 import type { Session, SessionData } from 'express-session';
 import { UsersService } from '../users/users.service';
-import { readConsentRequestMeta } from './consent-request-meta';
+import {
+  mergeConsentRequestMeta,
+  readConsentRequestMeta,
+} from './consent-request-meta';
 
 type RequestWithSession = Request & {
   session?: Session & Partial<SessionData>;
@@ -73,7 +76,12 @@ export class AuthService implements OnModuleInit {
     const codeVerifier = generators.codeVerifier();
     const codeChallenge = generators.codeChallenge(codeVerifier);
 
-    req.session.oidc = { state, nonce, codeVerifier };
+    req.session.oidc = {
+      state,
+      nonce,
+      codeVerifier,
+      requestMeta: readConsentRequestMeta(req),
+    };
 
     return this.client.authorizationUrl({
       scope: 'openid profile email consent',
@@ -98,7 +106,7 @@ export class AuthService implements OnModuleInit {
       );
     }
 
-    const { state, nonce, codeVerifier } = req.session.oidc;
+    const { state, nonce, codeVerifier, requestMeta } = req.session.oidc;
     const params = this.client.callbackParams(fullUrl);
     const tokenSet = await this.client.callback(this.getRedirectUri(), params, {
       state,
@@ -140,7 +148,10 @@ export class AuthService implements OnModuleInit {
         birthDate,
         gender,
         consentGranted,
-        requestMeta: readConsentRequestMeta(req),
+        requestMeta: mergeConsentRequestMeta(
+          readConsentRequestMeta(req),
+          requestMeta,
+        ),
       });
       registrationStatus = registration.isNew ? 'created' : 'updated';
 
