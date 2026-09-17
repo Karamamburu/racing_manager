@@ -53,6 +53,28 @@ enum RegistrationStatus {
   @@map("registration_status")
 }
 
+enum PersonalConsentDocumentType {
+  PRIVACY_POLICY
+  PERSONAL_DATA_CONSENT
+
+  @@map("personal_consent_document_type")
+}
+
+enum PersonalConsentAction {
+  GRANTED
+  REVOKED
+
+  @@map("personal_consent_action")
+}
+
+enum PersonalConsentSource {
+  PROFILE_UPDATE
+  REGISTRATION
+  REVOKE
+
+  @@map("personal_consent_source")
+}
+
 model User {
   id            String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   authentikId   String     @unique @map("authentik_id")
@@ -67,9 +89,10 @@ model User {
   team          String?
   createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
-  userRoles     UserRole[]
-  createdEvents Event[]
-  registrations Registration[]
+  userRoles      UserRole[]
+  createdEvents  Event[]
+  registrations  Registration[]
+  consentEvents  PersonalConsentEvent[]
 
   @@map("users")
 }
@@ -231,4 +254,37 @@ model ResultLap {
   @@index([resultId], map: "idx_result_laps_result_id")
   @@index([eventLapId], map: "idx_result_laps_event_lap_id")
   @@map("result_laps")
+}
+
+model PersonalConsentDocument {
+  id          String                       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  type        PersonalConsentDocumentType
+  version     String
+  title       String
+  text        String
+  publishedAt DateTime                     @map("published_at") @db.Timestamptz(6)
+  events      PersonalConsentEvent[]
+
+  @@unique([type, version])
+  @@map("personal_consent_documents")
+}
+
+model PersonalConsentEvent {
+  id            String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  documentId    String                    @map("document_id") @db.Uuid
+  document      PersonalConsentDocument   @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  userId        String                    @map("user_id") @db.Uuid
+  user          User                      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  action        PersonalConsentAction
+  source        PersonalConsentSource
+  userFirstName String                    @map("user_first_name")
+  userLastName  String                    @map("user_last_name")
+  userBirthDate DateTime?                 @map("user_birth_date") @db.Date
+  occurredAt    DateTime                  @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  ip            String?
+  userAgent     String?                   @map("user_agent")
+
+  @@index([userId], map: "idx_personal_consent_events_user_id")
+  @@index([documentId], map: "idx_personal_consent_events_document_id")
+  @@map("personal_consent_events")
 }

@@ -1,4 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
+import {
+  parseMoscowDateTime,
+  toMoscowDateOnly,
+} from '../time/moscow-time';
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -9,14 +13,14 @@ export type EventDateRange = {
 
 function parseBound(value: string, field: string): Date {
   if (DATE_ONLY.test(value)) {
-    const parsed = new Date(`${value}T00:00:00.000Z`);
+    const parsed = toMoscowDateOnly(value);
     if (Number.isNaN(parsed.getTime())) {
       throw new BadRequestException(`${field} is not a valid date.`);
     }
     return parsed;
   }
 
-  const parsed = new Date(value);
+  const parsed = parseMoscowDateTime(value);
   if (Number.isNaN(parsed.getTime())) {
     throw new BadRequestException(`${field} must be an ISO datetime.`);
   }

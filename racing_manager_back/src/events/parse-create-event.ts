@@ -1,4 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
+import {
+  parseMoscowDateTime,
+  toMoscowDateOnly,
+} from '../time/moscow-time';
 
 const EVENT_TYPES = ['RACE', 'TIME_TRIAL'] as const;
 const SPORTS = ['RUN', 'SKI', 'ROLLER_SKI', 'BIKE'] as const;
@@ -59,7 +63,7 @@ function parseDateOnly(value: string, field: string): Date {
   if (!DATE_ONLY.test(value)) {
     throw new BadRequestException(`${field} must be YYYY-MM-DD.`);
   }
-  const parsed = new Date(`${value}T00:00:00.000Z`);
+  const parsed = toMoscowDateOnly(value);
   if (Number.isNaN(parsed.getTime())) {
     throw new BadRequestException(`${field} is not a valid date.`);
   }
@@ -67,7 +71,7 @@ function parseDateOnly(value: string, field: string): Date {
 }
 
 function parseDateTime(value: string, field: string): Date {
-  const parsed = new Date(value);
+  const parsed = parseMoscowDateTime(value);
   if (Number.isNaN(parsed.getTime())) {
     throw new BadRequestException(`${field} must be an ISO datetime.`);
   }

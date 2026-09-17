@@ -194,7 +194,7 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
           <Button key="cancel" onClick={handleCancel} disabled={submitting}>
             Отмена
           </Button>,
-          <Button key="submit" type="primary" loading={submitting} onClick={() => form.submit()} disabled={Boolean(sport === 'SKI' || sport === 'ROLLER_SKI') && formats.length === 0}>
+          <Button key="submit" type="primary" loading={submitting} onClick={() => form.submit()} disabled={Boolean(feedback) || (Boolean(sport === 'SKI' || sport === 'ROLLER_SKI') && formats.length === 0)}>
             Создать
           </Button>,
         ]}
@@ -292,6 +292,7 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
 
       <Modal
         open={Boolean(feedback)}
+        zIndex={1100}
         onCancel={closeFeedback}
         footer={
           feedback?.status === 'unauthorized'

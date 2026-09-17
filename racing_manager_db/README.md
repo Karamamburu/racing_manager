@@ -2,6 +2,14 @@
 
 Postgres schema lives in `db/init.sql`. Docker Compose applies it only on the **first** start of an empty volume.
 
+Timestamps are stored as `TIMESTAMPTZ` and shown in `Europe/Moscow` (`UTC+3`). Set this on an existing cluster:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_moscow_timezone.sql
+```
+
+Then restart the container so new sessions pick up `timezone=Europe/Moscow`.
+
 If the database already exists, apply SQL patches from `db/migrate_*.sql`. For participation formats:
 
 ```bash
@@ -24,6 +32,13 @@ For event laps and split times:
 
 ```bash
 docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_laps.sql
+```
+
+For personal data consent documents and grant/revoke events:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_personal_consent.sql
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_personal_data_consent_document.sql
 ```
 
 For one active guest registration per person (name + birth year) on an event. Logged-in users are unique by `user_id` only.

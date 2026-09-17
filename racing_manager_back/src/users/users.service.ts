@@ -1,4 +1,9 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import type { ConsentRequestMeta } from '../auth/consent-request-meta';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type OwnProfileUpdate = {
@@ -36,39 +41,53 @@ export class UsersService {
     username?: string;
     email?: string;
     name?: string;
+    firstName?: string;
+    lastName?: string;
+    birthDate?: Date;
+    gender?: 'M' | 'F';
+    consentGranted?: boolean;
+    requestMeta?: ConsentRequestMeta;
   }): Promise<{ user: AppUser; isNew: boolean }> {
     const existing = await this.prisma.user.findUnique({
       where: { authentikId: profile.sub },
     });
 
-    const firstName = this.extractFirstName(profile.name);
-    const lastName = this.extractLastName(profile.name);
+    const firstName =
+      profile.firstName?.trim() || this.extractFirstName(profile.name);
+    const lastName =
+      profile.lastName?.trim() || this.extractLastName(profile.name);
+    const birthDate = profile.birthDate;
+    const gender = profile.gender;
     const userName = this.resolveUserName(profile.username, profile.email);
 
-    const dbUser = existing
-      ? await this.prisma.user.update({
-          where: { authentikId: profile.sub },
-          data: {
-            userName,
-            email: profile.email,
-            ...(existing.firstName ? {} : { firstName }),
-            ...(existing.lastName ? {} : { lastName }),
-          },
-        })
-      : await this.prisma.user.create({
-          data: {
-            authentikId: profile.sub,
-            userName,
-            email: profile.email,
-            firstName,
-            lastName,
-          },
-        });
+    if (existing) {
+      const dbUser = await this.prisma.user.update({
+        where: { authentikId: profile.sub },
+        data: {
+          userName,
+          email: profile.email,
+          ...(existing.firstName ? {} : { firstName }),
+          ...(existing.lastName ? {} : { lastName }),
+          ...(existing.birthDate ? {} : { birthDate }),
+          ...(existing.gender ? {} : { gender }),
+        },
+      });
+      return { user: this.toAppUser(dbUser), isNew: false };
+    }
 
-    return {
-      user: this.toAppUser(dbUser),
-      isNew: !existing,
-    };
+    const dbUser = await this.createUserWithRegistrationConsent({
+      authentikId: profile.sub,
+      userName,
+      email: profile.email,
+      firstName,
+      lastName,
+      birthDate,
+      gender,
+      consentGranted: Boolean(profile.consentGranted),
+      requestMeta: profile.requestMeta,
+    });
+
+    return { user: this.toAppUser(dbUser), isNew: true };
   }
 
   async upsertFromOidcProfile(profile: {
@@ -79,6 +98,62 @@ export class UsersService {
   }): Promise<AppUser> {
     const { user } = await this.registerFromOidcProfile(profile);
     return user;
+  }
+
+  private async createUserWithRegistrationConsent(input: {
+    authentikId: string;
+    userName: string;
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    birthDate?: Date;
+    gender?: 'M' | 'F';
+    consentGranted: boolean;
+    requestMeta?: ConsentRequestMeta;
+  }) {
+    const document = input.consentGranted
+      ? await this.prisma.personalConsentDocument.findFirst({
+          where: { type: 'PERSONAL_DATA_CONSENT' },
+          orderBy: { publishedAt: 'desc' },
+        })
+      : null;
+    if (input.consentGranted && !document) {
+      throw new ServiceUnavailableException(
+        'Personal data consent document is not published.',
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          authentikId: input.authentikId,
+          userName: input.userName,
+          email: input.email,
+          firstName: input.firstName,
+          lastName: input.lastName,
+          birthDate: input.birthDate,
+          gender: input.gender,
+        },
+      });
+
+      if (document) {
+        await tx.personalConsentEvent.create({
+          data: {
+            documentId: document.id,
+            userId: user.id,
+            action: 'GRANTED',
+            source: 'REGISTRATION',
+            userFirstName: input.firstName ?? '',
+            userLastName: input.lastName ?? '',
+            userBirthDate: input.birthDate ?? null,
+            ip: input.requestMeta?.ip ?? null,
+            userAgent: input.requestMeta?.userAgent ?? null,
+          },
+        });
+      }
+
+      return user;
+    });
   }
 
   async findBySub(sub: string): Promise<AppUser | null> {
@@ -120,7 +195,7 @@ export class UsersService {
     return this.toAppUser(updated);
   }
 
-  private toAppUser(dbUser: {
+  toAppUser(dbUser: {
     id: string;
     authentikId: string;
     userName: string;
