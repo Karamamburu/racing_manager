@@ -5,6 +5,19 @@ import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
 import { RolesService } from './roles.service';
 
+function clearLocalhostCookie(
+  res: Response,
+  name: string,
+  httpOnly: boolean,
+) {
+  res.clearCookie(name, {
+    path: '/',
+    httpOnly,
+    sameSite: 'lax',
+    secure: false,
+  });
+}
+
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -57,13 +70,23 @@ export class AuthController {
 
   @Get('logout')
   logout(@Req() req: Request, @Res() res: Response) {
-    const url = this.authService.getEndSessionUrl(req);
+    const postLogoutRedirectUri = this.authService.getPostLogoutRedirectUri();
+
+    const finish = () => {
+      clearLocalhostCookie(res, 'connect.sid', true);
+      clearLocalhostCookie(res, 'authentik_session', true);
+      clearLocalhostCookie(res, 'authentik_csrf', false);
+    };
 
     const session = req.session as Session | undefined;
-    session?.destroy(() => undefined);
-    res.clearCookie('connect.sid');
+    if (!session) {
+      finish();
+      return res.redirect(postLogoutRedirectUri);
+    }
 
-    if (url) return res.redirect(url);
-    return res.status(204).send();
+    session.destroy(() => {
+      finish();
+      return res.redirect(postLogoutRedirectUri);
+    });
   }
 }

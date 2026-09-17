@@ -169,35 +169,11 @@ export class AuthService implements OnModuleInit {
     return { tokenSet, user, registrationStatus };
   }
 
-  getEndSessionUrl(req: RequestWithSession): string | null {
-    const endSessionEndpoint = this.client.issuer.metadata.end_session_endpoint;
-    if (typeof endSessionEndpoint !== 'string' || !endSessionEndpoint) {
-      return null;
-    }
-
-    const postLogoutRedirectUri =
+  getPostLogoutRedirectUri(): string {
+    return (
       this.config.get<string>('POST_LOGOUT_REDIRECT_URI') ??
-      'http://localhost:4000/';
-
-    const idTokenHint = (() => {
-      const sessionUnknown: unknown = req.session;
-      if (!sessionUnknown || typeof sessionUnknown !== 'object') {
-        return undefined;
-      }
-
-      const tokensUnknown = (sessionUnknown as Record<string, unknown>).tokens;
-      if (!tokensUnknown || typeof tokensUnknown !== 'object') {
-        return undefined;
-      }
-
-      const idTokenUnknown = (tokensUnknown as Record<string, unknown>).idToken;
-      return typeof idTokenUnknown === 'string' ? idTokenUnknown : undefined;
-    })();
-
-    const url = new URL(endSessionEndpoint);
-    if (idTokenHint) url.searchParams.set('id_token_hint', idTokenHint);
-    url.searchParams.set('post_logout_redirect_uri', postLogoutRedirectUri);
-    return url.toString();
+      'http://localhost:5173/'
+    );
   }
 
   private async readOidcClaims(
