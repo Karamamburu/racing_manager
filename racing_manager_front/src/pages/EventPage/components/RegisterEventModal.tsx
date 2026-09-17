@@ -8,7 +8,6 @@ import { personalQueryKey, usePersonalQuery } from '../../../features/auth/usePe
 import { useSessionQuery } from '../../../features/auth/useSessionQuery';
 import { personalService } from '../../../features/personal/personalService';
 import { registrationsService } from '../../../features/registrations/registrationsService';
-import { PersonalDataConsentCheckbox } from '../../../shared/personalConsent/PersonalDataConsentCheckbox';
 import type { CreateRegistrationRequest, EventFormatRef, GenderCode } from '../../../shared/types/event';
 import type { PersonalProfile, PersonalResponse, UpdatePersonalRequest } from '../../../shared/types/personal';
 
@@ -126,7 +125,6 @@ function toProfileUpdate(
     city: extra.city?.trim() || profile?.city || null,
     district: extra.district?.trim() || profile?.district || null,
     team: extra.team?.trim() || profile?.team || null,
-    personalDataConsent: true,
   };
 }
 
@@ -150,8 +148,6 @@ export function RegisterEventModal({
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [supplements, setSupplements] = useState<CreateRegistrationRequest | null>(null);
   const [profileBirthDate, setProfileBirthDate] = useState<Dayjs | null>(null);
-  const [profileConsent, setProfileConsent] = useState(false);
-  const [profileConsentError, setProfileConsentError] = useState(false);
   const locks = fieldLocks(isAuthenticated && personalQuery.isSuccess, profile);
   const profileComplete = locks.firstName && locks.lastName && locks.gender && locks.birthYear;
 
@@ -175,8 +171,6 @@ export function RegisterEventModal({
     setDidRegister(false);
     setSupplements(null);
     setProfileBirthDate(null);
-    setProfileConsent(false);
-    setProfileConsentError(false);
   };
 
   const handleCancel = () => {
@@ -247,10 +241,6 @@ export function RegisterEventModal({
 
   const saveSupplementsToProfile = async () => {
     if (!supplements) return;
-    if (!profileConsent) {
-      setProfileConsentError(true);
-      return;
-    }
     const birthDate = profileBirthDate ? profileBirthDate.format('YYYY-MM-DD') : null;
     const payload = toProfileUpdate(profile, supplements, birthDate);
     if (!payload) {
@@ -467,20 +457,6 @@ export function RegisterEventModal({
                       />
                     </>
                   ) : null}
-                  <div style={{ marginTop: 16 }}>
-                    <PersonalDataConsentCheckbox
-                      checked={profileConsent}
-                      onChange={(checked) => {
-                        setProfileConsent(checked);
-                        if (checked) setProfileConsentError(false);
-                      }}
-                    />
-                    {profileConsentError ? (
-                      <Typography.Text type="danger">
-                        Подтвердите согласие на обработку персональных данных
-                      </Typography.Text>
-                    ) : null}
-                  </div>
                 </div>
               ) : (
                 feedback.subtitle

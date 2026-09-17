@@ -41,5 +41,4 @@ export type UpdatePersonalRequest = {
   city?: string | null;
   district?: string | null;
   team?: string | null;
-  personalDataConsent: true;
 };

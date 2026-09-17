@@ -4,6 +4,7 @@ import { Client, Issuer, TokenSet, generators } from 'openid-client';
 import type { Request } from 'express';
 import type { Session, SessionData } from 'express-session';
 import { UsersService } from '../users/users.service';
+import { readConsentRequestMeta } from './consent-request-meta';
 
 type RequestWithSession = Request & {
   session?: Session & Partial<SessionData>;
@@ -15,6 +16,7 @@ type OidcClaims = {
   username?: unknown;
   email?: unknown;
   name?: unknown;
+  consent?: unknown;
 };
 
 type UsersServicePort = Pick<UsersService, 'registerFromOidcProfile'>;
@@ -68,7 +70,7 @@ export class AuthService implements OnModuleInit {
     req.session.oidc = { state, nonce, codeVerifier };
 
     return this.client.authorizationUrl({
-      scope: 'openid profile email',
+      scope: 'openid profile email consent',
       state,
       nonce,
       code_challenge: codeChallenge,
@@ -108,6 +110,9 @@ export class AuthService implements OnModuleInit {
           : undefined;
     const email = typeof claims.email === 'string' ? claims.email : undefined;
     const name = typeof claims.name === 'string' ? claims.name : undefined;
+    const consentGranted = isOidcConsentGranted(
+      await this.readConsentClaim(claims, tokenSet.access_token),
+    );
 
     let user: SessionUser | null = null;
     let registrationStatus: 'created' | 'updated' | 'skipped' = 'skipped';
@@ -117,6 +122,8 @@ export class AuthService implements OnModuleInit {
         username,
         email,
         name,
+        consentGranted,
+        requestMeta: readConsentRequestMeta(req),
       });
       registrationStatus = registration.isNew ? 'created' : 'updated';
 
@@ -165,10 +172,42 @@ export class AuthService implements OnModuleInit {
     return url.toString();
   }
 
+  private async readConsentClaim(
+    claims: OidcClaims,
+    accessToken: string | undefined,
+  ): Promise<unknown> {
+    if (claims.consent !== undefined) return claims.consent;
+    if (!accessToken) return undefined;
+    try {
+      const userinfo = (await this.client.userinfo(accessToken)) as OidcClaims;
+      return userinfo.consent;
+    } catch {
+      return undefined;
+    }
+  }
+
   private getRedirectUri(): string {
     return (
       this.config.get<string>('AUTH_CALLBACK_URL') ??
       'http://localhost:4000/auth/callback'
     );
   }
+}
+
+function isOidcConsentGranted(value: unknown): boolean {
+  if (value === true || value === 1) return true;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return false;
+    if (
+      normalized === 'false' ||
+      normalized === '0' ||
+      normalized === 'no' ||
+      normalized === 'off'
+    ) {
+      return false;
+    }
+    return true;
+  }
+  return false;
 }

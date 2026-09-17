@@ -1,7 +1,6 @@
 import { Body, Controller, Get, Patch, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
-import { readConsentRequestMeta } from './consent-request-meta';
 import { PersonalService } from './personal.service';
 
 @Controller('personal')
@@ -23,7 +22,6 @@ export class PersonalController {
       req.session?.userSub,
       req.session?.user,
       body,
-      readConsentRequestMeta(req),
     );
 
     if (req.session?.user && result.user.name) {

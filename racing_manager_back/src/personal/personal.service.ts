@@ -1,6 +1,5 @@
 import {
   Injectable,
-  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import type { SessionUser } from '../auth/session';
@@ -15,7 +14,6 @@ import {
   type PersonalStats,
   type StatsRegistration,
 } from './compute-personal-stats';
-import type { ConsentRequestMeta } from './consent-request-meta';
 import { parseUpdatePersonalBody } from './parse-update-personal';
 
 export type PersonalProfile = {
@@ -91,74 +89,15 @@ export class PersonalService {
     authentikId: string | undefined,
     sessionUser: SessionUser | undefined,
     body: unknown,
-    requestMeta: ConsentRequestMeta,
   ): Promise<PersonalResponse> {
     const sub = this.requireAuthentikId(authentikId);
     const parsed = parseUpdatePersonalBody(body);
-    const updated = await this.saveProfileWithConsent(sub, parsed, requestMeta);
+    const updated = await this.usersService.updateOwnProfile(sub, parsed);
     const [roles, stats] = await Promise.all([
       this.rolesService.findCodesByAuthentikId(sub),
       this.getStats(updated.id),
     ]);
     return this.toResponse(sub, sessionUser, updated, roles, stats);
-  }
-
-  private async saveProfileWithConsent(
-    authentikId: string,
-    parsed: ReturnType<typeof parseUpdatePersonalBody>,
-    requestMeta: ConsentRequestMeta,
-  ): Promise<AppUser> {
-    const document = await this.prisma.personalConsentDocument.findFirst({
-      where: { type: 'PERSONAL_DATA_CONSENT' },
-      orderBy: { publishedAt: 'desc' },
-    });
-    if (!document) {
-      throw new ServiceUnavailableException(
-        'Personal data consent document is not published.',
-      );
-    }
-
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const existing = await tx.user.findUnique({
-        where: { authentikId },
-      });
-      if (!existing) {
-        throw new UnauthorizedException(
-          'Not authenticated. Start with GET /auth/login.',
-        );
-      }
-
-      const user = await tx.user.update({
-        where: { authentikId },
-        data: {
-          firstName: parsed.firstName,
-          lastName: parsed.lastName,
-          gender: parsed.gender,
-          birthDate: parsed.birthDate,
-          city: parsed.city,
-          district: parsed.district,
-          team: parsed.team,
-        },
-      });
-
-      await tx.personalConsentEvent.create({
-        data: {
-          documentId: document.id,
-          userId: user.id,
-          action: 'GRANTED',
-          source: 'PROFILE_UPDATE',
-          userFirstName: parsed.firstName,
-          userLastName: parsed.lastName,
-          userBirthDate: parsed.birthDate,
-          ip: requestMeta.ip,
-          userAgent: requestMeta.userAgent,
-        },
-      });
-
-      return user;
-    });
-
-    return this.usersService.toAppUser(updated);
   }
 
   private requireAuthentikId(authentikId: string | undefined): string {
