@@ -41,6 +41,9 @@ export class UsersService {
     username?: string;
     email?: string;
     name?: string;
+    firstName?: string;
+    lastName?: string;
+    birthDate?: Date;
     consentGranted?: boolean;
     requestMeta?: ConsentRequestMeta;
   }): Promise<{ user: AppUser; isNew: boolean }> {
@@ -48,8 +51,11 @@ export class UsersService {
       where: { authentikId: profile.sub },
     });
 
-    const firstName = this.extractFirstName(profile.name);
-    const lastName = this.extractLastName(profile.name);
+    const firstName =
+      profile.firstName?.trim() || this.extractFirstName(profile.name);
+    const lastName =
+      profile.lastName?.trim() || this.extractLastName(profile.name);
+    const birthDate = profile.birthDate;
     const userName = this.resolveUserName(profile.username, profile.email);
 
     if (existing) {
@@ -60,6 +66,7 @@ export class UsersService {
           email: profile.email,
           ...(existing.firstName ? {} : { firstName }),
           ...(existing.lastName ? {} : { lastName }),
+          ...(existing.birthDate ? {} : { birthDate }),
         },
       });
       return { user: this.toAppUser(dbUser), isNew: false };
@@ -71,6 +78,7 @@ export class UsersService {
       email: profile.email,
       firstName,
       lastName,
+      birthDate,
       consentGranted: Boolean(profile.consentGranted),
       requestMeta: profile.requestMeta,
     });
@@ -94,6 +102,7 @@ export class UsersService {
     email?: string;
     firstName?: string;
     lastName?: string;
+    birthDate?: Date;
     consentGranted: boolean;
     requestMeta?: ConsentRequestMeta;
   }) {
@@ -117,6 +126,7 @@ export class UsersService {
           email: input.email,
           firstName: input.firstName,
           lastName: input.lastName,
+          birthDate: input.birthDate,
         },
       });
 
@@ -129,7 +139,7 @@ export class UsersService {
             source: 'REGISTRATION',
             userFirstName: input.firstName ?? '',
             userLastName: input.lastName ?? '',
-            userBirthDate: null,
+            userBirthDate: input.birthDate ?? null,
             ip: input.requestMeta?.ip ?? null,
             userAgent: input.requestMeta?.userAgent ?? null,
           },
