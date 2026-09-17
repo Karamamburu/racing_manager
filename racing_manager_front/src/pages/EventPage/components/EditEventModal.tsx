@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { authService } from '../../../features/auth/authService';
 import { eventsService } from '../../../features/events/eventsService';
 import { EventLapsFormItems } from '../../../features/events/EventLapsFormItems';
+import { EventMapLinkFormItem } from '../../../features/events/EventMapLinkFormItem';
 import { buildEventLapsPayload } from '../../../features/events/eventLaps';
 import { dateTimePickerProps } from '../../../shared/formatDateTime';
 import type {
@@ -23,6 +24,7 @@ type EditEventFormValues = {
   lapCount: number;
   lapDistanceKm: number;
   description?: string;
+  mapLink?: string;
   registrationOpen?: Dayjs | null;
   registrationClose?: Dayjs | null;
   formatIds?: number[];
@@ -66,6 +68,7 @@ function toPayload(values: EditEventFormValues): CreateEventRequest {
     distanceKm: Number((values.lapCount * values.lapDistanceKm).toFixed(2)),
   };
   if (values.description?.trim()) payload.description = values.description.trim();
+  if (values.mapLink?.trim()) payload.mapLink = values.mapLink.trim();
   if (values.registrationOpen) {
     payload.registrationOpen = values.registrationOpen.toDate().toISOString();
   }
@@ -100,6 +103,7 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
           ? Number((event.distanceKm / event.laps.length).toFixed(2))
           : event.distanceKm ?? undefined),
       description: event.description ?? undefined,
+      mapLink: event.mapLink ?? undefined,
       registrationOpen: event.registrationOpen ? dayjs(event.registrationOpen) : null,
       registrationClose: event.registrationClose ? dayjs(event.registrationClose) : null,
       formatIds: event.formats.map((format) => format.id),
@@ -277,6 +281,8 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
           <Form.Item name="description" label="Описание">
             <Input.TextArea rows={3} />
           </Form.Item>
+
+          <EventMapLinkFormItem />
 
           <Form.Item name="registrationOpen" label="Начало выдачи номеров">
             <DatePicker {...dateTimePickerProps} />

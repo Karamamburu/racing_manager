@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { authService } from '../../../features/auth/authService';
 import { eventsService } from '../../../features/events/eventsService';
 import { EventLapsFormItems } from '../../../features/events/EventLapsFormItems';
+import { EventMapLinkFormItem } from '../../../features/events/EventMapLinkFormItem';
 import { buildEventLapsPayload } from '../../../features/events/eventLaps';
 import { dateTimePickerProps } from '../../../shared/formatDateTime';
 import type {
@@ -21,6 +22,7 @@ type CreateEventFormValues = {
   lapCount: number;
   lapDistanceKm: number;
   description?: string;
+  mapLink?: string;
   registrationOpen?: Dayjs | null;
   registrationClose?: Dayjs | null;
   formatIds?: number[];
@@ -124,6 +126,7 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
       distanceKm: Number((values.lapCount * values.lapDistanceKm).toFixed(2)),
     };
     if (values.description?.trim()) payload.description = values.description.trim();
+    if (values.mapLink?.trim()) payload.mapLink = values.mapLink.trim();
     if (values.registrationOpen) {
       payload.registrationOpen = values.registrationOpen.toDate().toISOString();
     }
@@ -262,6 +265,8 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
           <Form.Item name="description" label="Описание">
             <Input.TextArea rows={3} placeholder="Необязательно" />
           </Form.Item>
+
+          <EventMapLinkFormItem />
 
           <Form.Item name="registrationOpen" label="Начало выдачи номеров">
             <DatePicker {...dateTimePickerProps} />

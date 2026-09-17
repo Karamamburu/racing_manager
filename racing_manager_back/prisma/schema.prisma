@@ -141,6 +141,7 @@ model Event {
   eventDate          DateTime    @map("event_date") @db.Timestamptz(6)
   distanceKm         Decimal?    @map("distance_km") @db.Decimal(6, 2)
   description        String?
+  mapLink            String?     @map("map_link")
   registrationOpen   DateTime?   @map("registration_open") @db.Timestamptz(6)
   registrationClose  DateTime?   @map("registration_close") @db.Timestamptz(6)
   status             EventStatus @default(PLANNED)
