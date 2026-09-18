@@ -245,6 +245,22 @@ CREATE TABLE personal_consent_events (
 );
 
 -- ========================================
+-- NEWS
+-- Track-scoped articles. body is sanitized HTML from the admin editor.
+-- ========================================
+CREATE TABLE news (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  track_id UUID NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  cover_image_url TEXT,
+  published_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ========================================
 -- INDEXES
 -- ========================================
 CREATE INDEX idx_users_authentik_id ON users(authentik_id);
@@ -264,6 +280,8 @@ CREATE INDEX idx_registrations_status ON registrations(status);
 CREATE INDEX idx_registrations_format_id ON registrations(format_id);
 CREATE INDEX idx_personal_consent_events_user_id ON personal_consent_events(user_id);
 CREATE INDEX idx_personal_consent_events_document_id ON personal_consent_events(document_id);
+CREATE INDEX idx_news_track_id ON news(track_id);
+CREATE INDEX idx_news_published_at ON news(published_at DESC);
 CREATE UNIQUE INDEX idx_registrations_event_user_active
   ON registrations (event_id, user_id)
   WHERE user_id IS NOT NULL

@@ -91,6 +91,7 @@ model User {
   updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
   userRoles      UserRole[]
   createdEvents  Event[]
+  createdNews    News[]
   registrations  Registration[]
   consentEvents  PersonalConsentEvent[]
 
@@ -127,6 +128,7 @@ model Track {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
   events       Event[]
+  news         News[]
 
   @@map("tracks")
 }
@@ -288,4 +290,22 @@ model PersonalConsentEvent {
   @@index([userId], map: "idx_personal_consent_events_user_id")
   @@index([documentId], map: "idx_personal_consent_events_document_id")
   @@map("personal_consent_events")
+}
+
+model News {
+  id            String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  trackId       String   @map("track_id") @db.Uuid
+  track         Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  title         String
+  body          String
+  coverImageUrl String?  @map("cover_image_url")
+  publishedAt   DateTime @default(now()) @map("published_at") @db.Timestamptz(6)
+  createdById   String?  @map("created_by") @db.Uuid
+  createdBy     User?    @relation(fields: [createdById], references: [id])
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([trackId], map: "idx_news_track_id")
+  @@index([publishedAt], map: "idx_news_published_at")
+  @@map("news")
 }

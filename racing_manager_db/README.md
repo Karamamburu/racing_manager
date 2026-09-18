@@ -2,6 +2,26 @@
 
 Postgres schema lives in `db/init.sql`. Docker Compose applies it only on the **first** start of an empty volume.
 
+Local object storage is MinIO (S3-compatible). The API listens on `localhost:9100` so it does not clash with Authentik on `9000`. Console: `http://localhost:9101`.
+
+```bash
+docker compose up -d
+```
+
+To switch the backend to a Russian cloud S3 later, keep the same env names in `racing_manager_back/.env` and point them at the provider. News HTML stores `/media/...` paths, so existing articles stay valid.
+
+```
+S3_ENDPOINT=https://storage.yandexcloud.net
+S3_REGION=ru-central1
+S3_BUCKET=your-bucket
+S3_ACCESS_KEY=
+S3_SECRET_KEY=
+S3_FORCE_PATH_STYLE=true
+S3_PUBLIC_BASE_URL=https://storage.yandexcloud.net/your-bucket
+S3_CREATE_BUCKET=false
+S3_PUBLIC_READ=false
+```
+
 Timestamps are stored as `TIMESTAMPTZ` and shown in `Europe/Moscow` (`UTC+3`). Set this on an existing cluster:
 
 ```bash
@@ -54,13 +74,25 @@ For an optional nakarte.me track link on an event:
 docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_event_map_link.sql
 ```
 
+For track-scoped news articles:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_news.sql
+```
+
+For an optional cover image next to the news title:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_news_cover.sql
+```
+
 ## Roles
 
 Participants have no rows in `user_roles`. Admin roles are granted in SQL after the person has logged in once (Authentik creates the `users` row).
 
 | Code | Meaning |
 |---|---|
-| `ADMINISTRATOR` | Full admin (track + events + registrations) |
+| `ADMINISTRATOR` | Full admin (track + events + registrations + news) |
 | `ORGANIZER` | Events and registrations on Алёшкино |
 
 Grant:
@@ -122,4 +154,26 @@ fetch('/api/admin/events', {
 `laps`: required. Numbered from 1. `events.distance_km` is the sum of lap distances.
 
 Results for an event with laps: `PUT /events/:eventId/registrations/:registrationId/result` with `{ laps: [{ lapNumber: 1, timeMilliseconds: 123000 }] }`. The finish time is the sum of recorded laps and is not set directly.
+
+## News
+
+Public catalog: `GET /news`, `GET /news/:id`. Optional `?trackId=` filter.
+
+Create / update / delete: `ADMINISTRATOR` only. Optional `coverImageUrl` is a `/media/news/...` image shown to the left of the title in the list and the article. Images, videos and documents (`pdf`, `doc`, `docx`, `xls`, `xlsx`) from the editor go to S3 via `POST /admin/news/media`. Macro-enabled Office files are rejected. The editor inserts a stable `/media/...` URL. `GET /media/*` redirects to the configured S3 public URL.
+
+```js
+fetch('/api/admin/news', {
+  method: 'POST',
+  credentials: 'include',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    trackId: '3d8f1a62-7c4e-4b91-9e2a-0b6c8d4e1f20',
+    title: 'Сезон в Алёшкино открыт',
+    coverImageUrl: '/media/news/2026/09/3d8f1a62-7c4e-4b91-9e2a-0b6c8d4e1f20.jpg',
+    body: '<h2>Старт сезона</h2><p>Контрольные тренировки продолжаются.</p>',
+  }),
+}).then((r) => r.json()).then(console.log)
+```
+
+Active tracks for the news form: `GET /tracks`.
 
