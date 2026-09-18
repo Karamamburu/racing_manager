@@ -7,6 +7,7 @@ import {
 import { RoleCode } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
 import { TracksService } from '../tracks/tracks.service';
 import { UsersService } from '../users/users.service';
 import {
@@ -14,6 +15,10 @@ import {
   parseOptionalTrackId,
   parseUpdateNewsBody,
 } from './parse-news';
+import {
+  parseUploadedNewsMedia,
+  type UploadedMediaFile,
+} from './parse-news-media';
 import { newsHtmlToPlainText } from './sanitize-news-html';
 
 const EXCERPT_LENGTH = 240;
@@ -67,7 +72,24 @@ export class NewsService {
     private readonly rolesService: RolesService,
     private readonly usersService: UsersService,
     private readonly tracksService: TracksService,
+    private readonly storage: StorageService,
   ) {}
+
+  async uploadMedia(
+    authentikId: string | undefined,
+    file: UploadedMediaFile | undefined,
+  ) {
+    await this.rolesService.assertHasAnyRole(authentikId, [
+      RoleCode.ADMINISTRATOR,
+    ]);
+    const parsed = parseUploadedNewsMedia(file, this.storage.maxUploadBytes);
+    return this.storage.upload({
+      prefix: 'news',
+      buffer: parsed.buffer,
+      contentType: parsed.contentType,
+      extension: parsed.extension,
+    });
+  }
 
   async list(trackIdRaw?: string): Promise<NewsListItem[]> {
     const trackId = parseOptionalTrackId(trackIdRaw);

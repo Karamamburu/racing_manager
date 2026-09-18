@@ -2,6 +2,26 @@
 
 Postgres schema lives in `db/init.sql`. Docker Compose applies it only on the **first** start of an empty volume.
 
+Local object storage is MinIO (S3-compatible). The API listens on `localhost:9100` so it does not clash with Authentik on `9000`. Console: `http://localhost:9101`.
+
+```bash
+docker compose up -d
+```
+
+To switch the backend to a Russian cloud S3 later, keep the same env names in `racing_manager_back/.env` and point them at the provider. News HTML stores `/media/...` paths, so existing articles stay valid.
+
+```
+S3_ENDPOINT=https://storage.yandexcloud.net
+S3_REGION=ru-central1
+S3_BUCKET=your-bucket
+S3_ACCESS_KEY=
+S3_SECRET_KEY=
+S3_FORCE_PATH_STYLE=true
+S3_PUBLIC_BASE_URL=https://storage.yandexcloud.net/your-bucket
+S3_CREATE_BUCKET=false
+S3_PUBLIC_READ=false
+```
+
 Timestamps are stored as `TIMESTAMPTZ` and shown in `Europe/Moscow` (`UTC+3`). Set this on an existing cluster:
 
 ```bash
@@ -133,7 +153,7 @@ Results for an event with laps: `PUT /events/:eventId/registrations/:registratio
 
 Public catalog: `GET /news`, `GET /news/:id`. Optional `?trackId=` filter.
 
-Create / update / delete: `ADMINISTRATOR` only.
+Create / update / delete: `ADMINISTRATOR` only. Images and videos from the editor go to S3 via `POST /admin/news/media` (`multipart/form-data` field `file`). The editor inserts a stable `/media/...` URL. `GET /media/*` redirects to the configured S3 public URL.
 
 ```js
 fetch('/api/admin/news', {

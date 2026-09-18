@@ -38,6 +38,11 @@ function readString(
   return trimmed;
 }
 
+function htmlHasContent(html: string): boolean {
+  if (newsHtmlToPlainText(html)) return true;
+  return /<(img|video)\b/i.test(html);
+}
+
 function parseTrackId(value: unknown, required: boolean): string | null {
   const raw = readString(value, 'trackId', required);
   if (!raw) return null;
@@ -72,9 +77,9 @@ function parseBody(value: unknown, required: boolean): string | null {
     );
   }
   const body = sanitizeNewsHtml(value);
-  if (!newsHtmlToPlainText(body)) {
+  if (!htmlHasContent(body)) {
     if (required) {
-      throw new BadRequestException('body must contain text.');
+      throw new BadRequestException('body must contain text or media.');
     }
     return null;
   }

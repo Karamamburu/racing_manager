@@ -30,6 +30,16 @@ export class NewsService {
     return apiClient.deleteResult(`/admin/news/${id}`);
   }
 
+  public async uploadMedia(
+    file: File,
+  ): Promise<{ url: string; contentType: string; key: string; size: number }> {
+    const data = new FormData();
+    data.append('file', file);
+    return apiClient.post('/admin/news/media', data, {
+      timeout: 120_000,
+    });
+  }
+
   public getStatus(error: unknown): number | undefined {
     if (error instanceof AxiosError) return error.response?.status;
     return undefined;

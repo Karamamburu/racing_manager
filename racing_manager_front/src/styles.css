@@ -128,9 +128,18 @@ body {
   margin: 0 0 12px;
 }
 
-.news-article-body img {
+.news-article-body img,
+.news-article-body video,
+.jodit-wysiwyg img,
+.jodit-wysiwyg video {
   max-width: 100%;
   height: auto;
+}
+
+.news-article-body video,
+.jodit-wysiwyg video {
+  display: block;
+  margin: 12px 0;
 }
 
 .news-article-body table {

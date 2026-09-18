@@ -29,6 +29,8 @@ const ALLOWED_TAGS = [
   'li',
   'a',
   'img',
+  'video',
+  'source',
   'figure',
   'figcaption',
   'table',
@@ -44,13 +46,36 @@ const ALLOWED_TAGS = [
 ];
 
 const STYLE_PATTERN = [/.+/];
+const APP_MEDIA_ORIGIN = 'https://media.invalid';
+
+function withAbsoluteMediaUrls(html: string): string {
+  return html.replace(
+    /(\bsrc\s*=\s*["'])(\/media\/)/gi,
+    `$1${APP_MEDIA_ORIGIN}$2`,
+  );
+}
+
+function withAppMediaUrls(html: string): string {
+  return html.replaceAll(`${APP_MEDIA_ORIGIN}/media/`, '/media/');
+}
 
 export function sanitizeNewsHtml(html: string): string {
-  return sanitizeHtml(html, {
+  return withAppMediaUrls(
+    sanitizeHtml(withAbsoluteMediaUrls(html), {
     allowedTags: ALLOWED_TAGS,
     allowedAttributes: {
       a: ['href', 'name', 'target', 'rel', 'title'],
       img: ['src', 'alt', 'title', 'width', 'height'],
+      video: [
+        'src',
+        'controls',
+        'width',
+        'height',
+        'poster',
+        'preload',
+        'playsinline',
+      ],
+      source: ['src', 'type'],
       td: ['colspan', 'rowspan', 'align'],
       th: ['colspan', 'rowspan', 'align'],
       col: ['span', 'width'],
@@ -85,6 +110,8 @@ export function sanitizeNewsHtml(html: string): string {
     allowedSchemes: ['http', 'https', 'mailto'],
     allowedSchemesByTag: {
       img: ['http', 'https'],
+      video: ['http', 'https'],
+      source: ['http', 'https'],
     },
     allowProtocolRelative: false,
     transformTags: {
@@ -96,7 +123,8 @@ export function sanitizeNewsHtml(html: string): string {
         },
       }),
     },
-  }).trim();
+    }).trim(),
+  );
 }
 
 export function newsHtmlToPlainText(html: string): string {
