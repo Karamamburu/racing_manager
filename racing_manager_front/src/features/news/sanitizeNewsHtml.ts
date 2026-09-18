@@ -15,6 +15,7 @@ export function sanitizeNewsHtml(html: string): string {
       'preload',
       'poster',
       'type',
+      'download',
     ],
   });
 }

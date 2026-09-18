@@ -153,7 +153,7 @@ Results for an event with laps: `PUT /events/:eventId/registrations/:registratio
 
 Public catalog: `GET /news`, `GET /news/:id`. Optional `?trackId=` filter.
 
-Create / update / delete: `ADMINISTRATOR` only. Images and videos from the editor go to S3 via `POST /admin/news/media` (`multipart/form-data` field `file`). The editor inserts a stable `/media/...` URL. `GET /media/*` redirects to the configured S3 public URL.
+Create / update / delete: `ADMINISTRATOR` only. Images, videos and documents (`pdf`, `doc`, `docx`, `xls`, `xlsx`) from the editor go to S3 via `POST /admin/news/media`. Macro-enabled Office files are rejected. The editor inserts a stable `/media/...` URL. `GET /media/*` redirects to the configured S3 public URL.
 
 ```js
 fetch('/api/admin/news', {

@@ -50,7 +50,7 @@ const APP_MEDIA_ORIGIN = 'https://media.invalid';
 
 function withAbsoluteMediaUrls(html: string): string {
   return html.replace(
-    /(\bsrc\s*=\s*["'])(\/media\/)/gi,
+    /(\b(?:src|href)\s*=\s*["'])(\/media\/)/gi,
     `$1${APP_MEDIA_ORIGIN}$2`,
   );
 }
@@ -64,7 +64,7 @@ export function sanitizeNewsHtml(html: string): string {
     sanitizeHtml(withAbsoluteMediaUrls(html), {
     allowedTags: ALLOWED_TAGS,
     allowedAttributes: {
-      a: ['href', 'name', 'target', 'rel', 'title'],
+      a: ['href', 'name', 'target', 'rel', 'title', 'download'],
       img: ['src', 'alt', 'title', 'width', 'height'],
       video: [
         'src',

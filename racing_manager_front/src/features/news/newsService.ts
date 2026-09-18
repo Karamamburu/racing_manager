@@ -32,7 +32,13 @@ export class NewsService {
 
   public async uploadMedia(
     file: File,
-  ): Promise<{ url: string; contentType: string; key: string; size: number }> {
+  ): Promise<{
+    url: string;
+    contentType: string;
+    key: string;
+    size: number;
+    originalName: string | null;
+  }> {
     const data = new FormData();
     data.append('file', file);
     return apiClient.post('/admin/news/media', data, {

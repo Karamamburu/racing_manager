@@ -88,6 +88,7 @@ export class NewsService {
       buffer: parsed.buffer,
       contentType: parsed.contentType,
       extension: parsed.extension,
+      originalName: parsed.originalName,
     });
   }
 

@@ -16,18 +16,20 @@ import {
 import { randomUUID } from 'node:crypto';
 import { loadS3StorageConfig, type S3StorageConfig } from './storage.config';
 
-export type StoredObject = {
-  key: string;
-  url: string;
-  contentType: string;
-  size: number;
-};
-
 export type UploadObjectInput = {
   prefix: string;
   buffer: Buffer;
   contentType: string;
   extension: string;
+  originalName?: string;
+};
+
+export type StoredObject = {
+  key: string;
+  url: string;
+  contentType: string;
+  size: number;
+  originalName: string | null;
 };
 
 const MEDIA_KEY_PATTERN =
@@ -94,6 +96,15 @@ export class StorageService implements OnModuleInit {
     const month = String(now.getUTCMonth() + 1).padStart(2, '0');
     const key = `${input.prefix}/${year}/${month}/${randomUUID()}${input.extension}`;
 
+    const inline =
+      input.contentType.startsWith('image/') ||
+      input.contentType.startsWith('video/');
+    const downloadName = input.originalName?.replace(/[\r\n"]/g, '') || 'file';
+    const asciiName = downloadName.replace(/[^\x20-\x7e]/g, '_') || 'file';
+    const contentDisposition = inline
+      ? null
+      : `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`;
+
     try {
       await this.client.send(
         new PutObjectCommand({
@@ -102,6 +113,9 @@ export class StorageService implements OnModuleInit {
           Body: input.buffer,
           ContentType: input.contentType,
           CacheControl: 'public, max-age=31536000, immutable',
+          ...(contentDisposition
+            ? { ContentDisposition: contentDisposition }
+            : {}),
         }),
       );
     } catch (error) {
@@ -114,6 +128,7 @@ export class StorageService implements OnModuleInit {
       url: this.toAppUrl(key),
       contentType: input.contentType,
       size: input.buffer.length,
+      originalName: input.originalName ?? null,
     };
   }
 
