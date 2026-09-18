@@ -235,7 +235,7 @@ export function NewsEditorPage() {
             <Form.Item
               name="coverImageUrl"
               label="Заглавная картинка"
-              extra="Необязательно. Показывается слева от заголовка в списке и в самой новости."
+              extra="Опционально"
             >
               <NewsCoverImageField />
             </Form.Item>

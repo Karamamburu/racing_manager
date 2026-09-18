@@ -51,8 +51,6 @@ const BUTTONS = [
   '|',
   'link',
   'image',
-  'uploadVideo',
-  'uploadFile',
   'table',
   'hr',
   '|',
