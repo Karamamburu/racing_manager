@@ -42,6 +42,8 @@ export function dueEventStatus(
   const today = toEventIsoDate(now);
   const start = toEventIsoDate(eventDate);
   if (start < today) return EventStatusCode.DONE;
-  if (start === today) return EventStatusCode.IN_PROGRESS;
+  if (start === today && eventDate.getTime() <= now.getTime()) {
+    return EventStatusCode.IN_PROGRESS;
+  }
   return EventStatusCode.PLANNED;
 }
