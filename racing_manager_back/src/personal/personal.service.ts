@@ -10,6 +10,7 @@ import { UsersService, type AppUser } from '../users/users.service';
 import {
   computePersonalStats,
   EMPTY_PERSONAL_STATS,
+  hasFrozenPlace,
   isCompleteStatsResult,
   type PersonalStats,
   type StatsRegistration,
@@ -59,6 +60,7 @@ const statsRegistrationSelect = {
   result: {
     select: {
       timeMilliseconds: true,
+      place: true,
       _count: { select: { laps: true } },
     },
   },
@@ -120,15 +122,18 @@ export class PersonalService {
       select: statsRegistrationSelect,
     });
     const own = ownRows.map(toStatsRegistration);
-    const finishEventIds = [
+    const liveEventIds = [
       ...new Set(
-        own.filter(isCompleteStatsResult).map((row) => row.eventId),
+        own
+          .filter(isCompleteStatsResult)
+          .filter((row) => !hasFrozenPlace(row))
+          .map((row) => row.eventId),
       ),
     ];
-    const competitorRows = finishEventIds.length
+    const competitorRows = liveEventIds.length
       ? await this.prisma.registration.findMany({
           where: {
-            eventId: { in: finishEventIds },
+            eventId: { in: liveEventIds },
             status: { in: [...LISTED_REGISTRATION_STATUSES] },
           },
           select: statsRegistrationSelect,
@@ -190,7 +195,11 @@ function toStatsRegistration(row: {
   startNumber: number | null;
   status: string;
   event: { status: string; eventDate: Date; _count: { laps: number } };
-  result: { timeMilliseconds: number; _count: { laps: number } } | null;
+  result: {
+    timeMilliseconds: number;
+    place: number | null;
+    _count: { laps: number };
+  } | null;
 }): StatsRegistration {
   return {
     id: row.id,
@@ -208,6 +217,7 @@ function toStatsRegistration(row: {
       ? {
           timeMilliseconds: row.result.timeMilliseconds,
           lapCount: row.result._count.laps,
+          place: row.result.place,
         }
       : null,
   };

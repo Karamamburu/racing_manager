@@ -13,17 +13,25 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   LISTED_REGISTRATION_STATUSES,
   RegistrationStatusCode,
-  isRankedRegistrationStatus,
 } from '../registrations/registration-status';
 import {
   parseCreateEventBody,
   isSport,
   type ParsedCreateEvent,
 } from './parse-create-event';
-import { EventStatusCode } from './event-status';
+import {
+  EventStatusCode,
+  PAST_COMPLETED_EVENT_LOCKED_MESSAGE,
+  isPastCompletedEvent,
+} from './event-status';
 import { EventStatusSyncService } from './event-status-sync.service';
+import { freezeEventPlaces } from './freeze-event-places';
 import { parseEventDateRange } from './parse-event-date-range';
 import { parseUpdateEventStatusBody } from './parse-update-event-status';
+import {
+  hasStoredPlaces,
+  rankRegistrations,
+} from './rank-registrations';
 
 export type ParticipationFormatDto = {
   id: number;
@@ -197,6 +205,7 @@ type StoredRegistration = {
   registeredAt: Date;
   result: {
     timeMilliseconds: number;
+    place: number | null;
     laps: StoredResultLap[];
   } | null;
 };
@@ -251,54 +260,6 @@ type EventsStore = {
     deleteMany: (args: { where: object }) => Promise<unknown>;
   };
 };
-
-function isCompleteResult(
-  registration: StoredRegistration,
-  eventLapCount: number,
-): boolean {
-  if (!registration.result) return false;
-  if (eventLapCount === 0) return true;
-  return registration.result.laps.length === eventLapCount;
-}
-
-function isRankedCompleteResult(
-  registration: StoredRegistration,
-  eventLapCount: number,
-): boolean {
-  return (
-    isRankedRegistrationStatus(registration.status) &&
-    isCompleteResult(registration, eventLapCount)
-  );
-}
-
-function compareRegistrationsByResult(
-  a: StoredRegistration,
-  b: StoredRegistration,
-  eventLapCount: number,
-): number {
-  const aRanked = isRankedCompleteResult(a, eventLapCount);
-  const bRanked = isRankedCompleteResult(b, eventLapCount);
-  if (aRanked && bRanked) {
-    const aTime = a.result?.timeMilliseconds ?? 0;
-    const bTime = b.result?.timeMilliseconds ?? 0;
-    if (aTime !== bTime) return aTime - bTime;
-    return (
-      (a.startNumber ?? Number.POSITIVE_INFINITY) -
-      (b.startNumber ?? Number.POSITIVE_INFINITY)
-    );
-  }
-  if (aRanked) return -1;
-  if (bRanked) return 1;
-  if (a.result && !b.result) return -1;
-  if (!a.result && b.result) return 1;
-
-  const aNumber = a.startNumber;
-  const bNumber = b.startNumber;
-  if (aNumber !== null && bNumber !== null) return aNumber - bNumber;
-  if (aNumber !== null) return -1;
-  if (bNumber !== null) return 1;
-  return a.registeredAt.getTime() - b.registeredAt.getTime();
-}
 
 function toKm(value: DecimalValue): number | null {
   return value === null ? null : Number(value.toString());
@@ -545,6 +506,7 @@ export class EventsService {
             result: {
               select: {
                 timeMilliseconds: true,
+                place: true,
                 laps: {
                   select: {
                     timeMilliseconds: true,
@@ -592,6 +554,7 @@ export class EventsService {
       registrations: this.toRankedParticipants(
         event.registrations,
         event.laps.length,
+        event.status,
       ),
     };
   }
@@ -733,9 +696,9 @@ export class EventsService {
     await this.rolesService.assertAdminAccess(authentikId);
     const status = parseUpdateEventStatusBody(body);
 
-    const event = await this.store.event.findUnique({
+    const event = await this.prisma.event.findUnique({
       where: { id: eventId },
-      select: { id: true, createdById: true, status: true },
+      select: { id: true, status: true, eventDate: true },
     });
     if (!event) {
       throw new NotFoundException('Event not found.');
@@ -743,9 +706,20 @@ export class EventsService {
     if (event.status === status) {
       return this.findById(eventId, { syncStatuses: false });
     }
+    if (isPastCompletedEvent(event.status, event.eventDate)) {
+      throw new BadRequestException(PAST_COMPLETED_EVENT_LOCKED_MESSAGE);
+    }
 
     if (status === EventStatusCode.CANCELLED) {
       await this.applyCancel(eventId);
+    } else if (status === EventStatusCode.DONE) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.event.update({
+          where: { id: eventId },
+          data: { status },
+        });
+        await freezeEventPlaces(tx, eventId);
+      });
     } else {
       await this.store.event.update({
         where: { id: eventId },
@@ -878,52 +852,35 @@ export class EventsService {
   private toRankedParticipants(
     registrations: StoredRegistration[],
     eventLapCount: number,
+    eventStatus: string,
   ): EventParticipant[] {
-    const groups = new Map<string, StoredRegistration[]>();
-    for (const registration of registrations) {
-      const key = `${registration.formatId ?? 'none'}:${registration.gender}`;
-      const group = groups.get(key);
-      if (group) group.push(registration);
-      else groups.set(key, [registration]);
-    }
-
-    const ranked: EventParticipant[] = [];
-    for (const group of groups.values()) {
-      const sorted = [...group].sort((a, b) =>
-        compareRegistrationsByResult(a, b, eventLapCount),
-      );
-      let place = 0;
-      for (const registration of sorted) {
-        const finishTimeMs = registration.result?.timeMilliseconds ?? null;
-        const earnsPlace = isRankedCompleteResult(registration, eventLapCount);
-        if (earnsPlace) place += 1;
-        ranked.push({
-          id: registration.id,
-          userId: registration.userId,
-          fullName: this.formatPersonName(
-            registration.firstName,
-            registration.lastName,
-            'Участник',
-          ),
-          birthYear: registration.birthYear,
-          gender: registration.gender,
-          city: registration.city,
-          district: registration.district,
-          team: registration.team,
-          startNumber: registration.startNumber,
-          finishTimeMs,
-          place: earnsPlace ? place : null,
-          format: registration.format
-            ? toFormatRef(registration.format)
-            : null,
-          laps: mapParticipantLaps(registration.result?.laps),
-          status: registration.status,
-          note: registration.note,
-          registeredAt: registration.registeredAt.toISOString(),
-        });
-      }
-    }
-    return ranked;
+    const useStoredPlaces = hasStoredPlaces(eventStatus, registrations);
+    return rankRegistrations(
+      registrations,
+      eventLapCount,
+      useStoredPlaces,
+    ).map(({ registration, place }) => ({
+      id: registration.id,
+      userId: registration.userId,
+      fullName: this.formatPersonName(
+        registration.firstName,
+        registration.lastName,
+        'Участник',
+      ),
+      birthYear: registration.birthYear,
+      gender: registration.gender,
+      city: registration.city,
+      district: registration.district,
+      team: registration.team,
+      startNumber: registration.startNumber,
+      finishTimeMs: registration.result?.timeMilliseconds ?? null,
+      place,
+      format: registration.format ? toFormatRef(registration.format) : null,
+      laps: mapParticipantLaps(registration.result?.laps),
+      status: registration.status,
+      note: registration.note,
+      registeredAt: registration.registeredAt.toISOString(),
+    }));
   }
 
   private formatPersonName(

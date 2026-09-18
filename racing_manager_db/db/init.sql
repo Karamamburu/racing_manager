@@ -141,7 +141,8 @@ CREATE TABLE event_laps (
 -- Catalog of start styles / equipment classes per sport.
 -- RUN and BIKE have no rows: ranking is by gender only.
 -- An event enables a subset; the rider picks one at registration.
--- Place is derived per (format, gender), not overall.
+-- Place is ranked per (format, gender), not overall.
+-- Live while the event is open; written to results.place at DONE.
 -- ========================================
 CREATE TABLE participation_formats (
   id SERIAL PRIMARY KEY,
@@ -188,15 +189,18 @@ CREATE TABLE registrations (
 -- ========================================
 -- RESULTS
 -- One finish time per registration. time_milliseconds is the sum
--- of result_laps for events that have laps. Place is derived by
--- sorting complete finish times ascending (fastest first) within
--- each (format_id, gender) classification. A start number must
--- be assigned before a result can be recorded.
+-- of result_laps for events that have laps. Place is computed live
+-- by sorting complete finish times ascending (fastest first) within
+-- each (format_id, gender) classification while the event is open.
+-- When the event becomes DONE, that place is written here and kept
+-- until the next transition into DONE. A start number must be
+-- assigned before a result can be recorded.
 -- ========================================
 CREATE TABLE results (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   registration_id UUID NOT NULL UNIQUE REFERENCES registrations(id) ON DELETE CASCADE,
   time_milliseconds INT NOT NULL CHECK (time_milliseconds > 0),
+  place INT CHECK (place IS NULL OR place > 0),
   recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

@@ -5,6 +5,10 @@ import {
 } from '@nestjs/common';
 import { ADMIN_ROLE_CODES } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
+import {
+  PAST_COMPLETED_EVENT_LOCKED_MESSAGE,
+  isPastCompletedEvent,
+} from '../events/event-status';
 import { PrismaService } from '../prisma/prisma.service';
 import { isRecordableRegistrationStatus } from '../registrations/registration-status';
 import { parseUpsertResultBody } from './parse-upsert-result';
@@ -38,6 +42,7 @@ type StoredResult = {
 type EventForResult = {
   id: string;
   status: string;
+  eventDate: Date;
   laps: { id: string; lapNumber: number }[];
 };
 
@@ -125,6 +130,7 @@ export class ResultsService {
       select: {
         id: true,
         status: true,
+        eventDate: true,
         laps: {
           select: { id: true, lapNumber: true },
           orderBy: { lapNumber: 'asc' },
@@ -138,6 +144,9 @@ export class ResultsService {
       throw new BadRequestException(
         'Cannot record results for a cancelled event.',
       );
+    }
+    if (isPastCompletedEvent(event.status, event.eventDate)) {
+      throw new BadRequestException(PAST_COMPLETED_EVENT_LOCKED_MESSAGE);
     }
     return event;
   }

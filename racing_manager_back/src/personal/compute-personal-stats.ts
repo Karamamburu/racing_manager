@@ -29,6 +29,7 @@ export type StatsRegistration = {
   result: {
     timeMilliseconds: number;
     lapCount: number;
+    place: number | null;
   } | null;
 };
 
@@ -37,6 +38,10 @@ export function isCompleteStatsResult(row: StatsRegistration): boolean {
   if (!row.result) return false;
   if (row.event.lapCount === 0) return true;
   return row.result.lapCount === row.event.lapCount;
+}
+
+export function hasFrozenPlace(row: StatsRegistration): boolean {
+  return row.event.status === 'DONE' && row.result?.place != null;
 }
 
 export function computePersonalStats(
@@ -62,9 +67,14 @@ export function computePersonalStats(
   let wins = 0;
   let podiums = 0;
   for (const row of completeOwn) {
-    const group = byClass.get(classKey(row)) ?? [row];
-    const sorted = [...group].sort(compareCompleteResults);
-    const place = sorted.findIndex((item) => item.id === row.id) + 1;
+    let place: number;
+    if (hasFrozenPlace(row) && row.result?.place != null) {
+      place = row.result.place;
+    } else {
+      const group = byClass.get(classKey(row)) ?? [row];
+      const sorted = [...group].sort(compareCompleteResults);
+      place = sorted.findIndex((item) => item.id === row.id) + 1;
+    }
     if (place <= 0) continue;
     if (place === 1) wins += 1;
     if (place <= 3) podiums += 1;

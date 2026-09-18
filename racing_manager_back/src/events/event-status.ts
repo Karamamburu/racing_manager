@@ -47,3 +47,17 @@ export function dueEventStatus(
   }
   return EventStatusCode.PLANNED;
 }
+
+export const PAST_COMPLETED_EVENT_LOCKED_MESSAGE =
+  'Нельзя изменить статус и данные завершённых в прошлом мероприятий.';
+
+export function isPastCompletedEvent(
+  status: string,
+  eventDate: Date,
+  now = new Date(),
+): boolean {
+  return (
+    status === EventStatusCode.DONE &&
+    dueEventStatus(eventDate, now) === EventStatusCode.DONE
+  );
+}
