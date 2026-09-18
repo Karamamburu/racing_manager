@@ -15,6 +15,7 @@ export type NewsListItem = {
   id: string;
   title: string;
   excerpt: string;
+  coverImageUrl: string | null;
   publishedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -30,4 +31,5 @@ export type SaveNewsRequest = {
   trackId: string;
   title: string;
   body: string;
+  coverImageUrl: string | null;
 };

@@ -80,6 +80,12 @@ For track-scoped news articles:
 docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_news.sql
 ```
 
+For an optional cover image next to the news title:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_news_cover.sql
+```
+
 ## Roles
 
 Participants have no rows in `user_roles`. Admin roles are granted in SQL after the person has logged in once (Authentik creates the `users` row).
@@ -153,7 +159,7 @@ Results for an event with laps: `PUT /events/:eventId/registrations/:registratio
 
 Public catalog: `GET /news`, `GET /news/:id`. Optional `?trackId=` filter.
 
-Create / update / delete: `ADMINISTRATOR` only. Images, videos and documents (`pdf`, `doc`, `docx`, `xls`, `xlsx`) from the editor go to S3 via `POST /admin/news/media`. Macro-enabled Office files are rejected. The editor inserts a stable `/media/...` URL. `GET /media/*` redirects to the configured S3 public URL.
+Create / update / delete: `ADMINISTRATOR` only. Optional `coverImageUrl` is a `/media/news/...` image shown to the left of the title in the list and the article. Images, videos and documents (`pdf`, `doc`, `docx`, `xls`, `xlsx`) from the editor go to S3 via `POST /admin/news/media`. Macro-enabled Office files are rejected. The editor inserts a stable `/media/...` URL. `GET /media/*` redirects to the configured S3 public URL.
 
 ```js
 fetch('/api/admin/news', {
@@ -163,6 +169,7 @@ fetch('/api/admin/news', {
   body: JSON.stringify({
     trackId: '3d8f1a62-7c4e-4b91-9e2a-0b6c8d4e1f20',
     title: 'Сезон в Алёшкино открыт',
+    coverImageUrl: '/media/news/2026/09/3d8f1a62-7c4e-4b91-9e2a-0b6c8d4e1f20.jpg',
     body: '<h2>Старт сезона</h2><p>Контрольные тренировки продолжаются.</p>',
   }),
 }).then((r) => r.json()).then(console.log)

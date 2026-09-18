@@ -127,11 +127,21 @@ export function sanitizeNewsHtml(html: string): string {
   );
 }
 
+const BLOCK_CLOSE_TAG =
+  /<\/(?:p|div|h[1-6]|li|blockquote|pre|tr|figcaption|dt|dd)>/gi;
+const LINE_BREAK_TAG = /<br\s*\/?>/gi;
+
 export function newsHtmlToPlainText(html: string): string {
-  return sanitizeHtml(html, {
+  const withBreaks = html
+    .replace(LINE_BREAK_TAG, '\n')
+    .replace(BLOCK_CLOSE_TAG, '\n');
+
+  return sanitizeHtml(withBreaks, {
     allowedTags: [],
     allowedAttributes: {},
   })
-    .replace(/\s+/g, ' ')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{2,}/g, '\n')
     .trim();
 }

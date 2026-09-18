@@ -1,4 +1,4 @@
-import { NotificationOutlined, PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Empty, List, Select, Skeleton, Space, Tag, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -8,6 +8,26 @@ import { useNewsListQuery } from '../../features/news/useNewsListQuery';
 import { useCatalogTracksQuery } from '../../features/tracks/useCatalogTracksQuery';
 import { formatDateTime } from '../../shared/formatDateTime';
 import { AppShell } from '../../shared/layout';
+import { NewsHeadline } from './components/NewsHeadline';
+
+function NewsListExcerpt({ text }: { text: string }) {
+  const lines = (text || ' ').split('\n');
+
+  return (
+    <Typography.Paragraph
+      type="secondary"
+      ellipsis={{ rows: 2 }}
+      style={{ marginTop: 6, marginBottom: 0 }}
+    >
+      {lines.map((line, index) => (
+        <span key={index}>
+          {index > 0 ? <br /> : null}
+          {line}
+        </span>
+      ))}
+    </Typography.Paragraph>
+  );
+}
 
 export function NewsPage() {
   const navigate = useNavigate();
@@ -83,19 +103,26 @@ export function NewsPage() {
                     </Link>,
                   ]}
                 >
-                  <List.Item.Meta
-                    avatar={<NotificationOutlined style={{ fontSize: 20 }} />}
+                  <NewsHeadline
+                    size="list"
+                    coverImageUrl={item.coverImageUrl}
+                    coverAlt={item.title}
+                    coverTo={`/news/${item.id}`}
                     title={
                       <Space wrap size={8}>
                         <Link to={`/news/${item.id}`}>{item.title}</Link>
                         <Tag>{item.track.name}</Tag>
                       </Space>
                     }
-                    description={formatDateTime(item.publishedAt)}
+                    description={
+                      <>
+                        <Typography.Text type="secondary">
+                          {formatDateTime(item.publishedAt)}
+                        </Typography.Text>
+                        <NewsListExcerpt text={item.excerpt} />
+                      </>
+                    }
                   />
-                  <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                    {item.excerpt || ' '}
-                  </Typography.Paragraph>
                 </List.Item>
               )}
             />

@@ -3,6 +3,8 @@ import { newsHtmlToPlainText, sanitizeNewsHtml } from './sanitize-news-html';
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const COVER_IMAGE_URL =
+  /^\/media\/news\/\d{4}\/\d{2}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|jpeg|png|gif|webp)$/i;
 const MAX_TITLE_LENGTH = 200;
 const MAX_BODY_LENGTH = 200_000;
 
@@ -10,12 +12,14 @@ export type ParsedCreateNews = {
   trackId: string;
   title: string;
   body: string;
+  coverImageUrl: string | null;
 };
 
 export type ParsedUpdateNews = {
   trackId?: string;
   title?: string;
   body?: string;
+  coverImageUrl?: string | null;
 };
 
 function readString(
@@ -63,6 +67,21 @@ function parseTitle(value: unknown, required: boolean): string | null {
   return title;
 }
 
+function parseCoverImageUrl(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') {
+    throw new BadRequestException('coverImageUrl must be a string or null.');
+  }
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (!COVER_IMAGE_URL.test(trimmed)) {
+    throw new BadRequestException(
+      'coverImageUrl must be an uploaded news image.',
+    );
+  }
+  return trimmed;
+}
+
 function parseBody(value: unknown, required: boolean): string | null {
   if (value === undefined || value === null) {
     if (required) throw new BadRequestException('body is required.');
@@ -97,7 +116,12 @@ export function parseCreateNewsBody(body: unknown): ParsedCreateNews {
   if (!trackId || !title || !html) {
     throw new BadRequestException('trackId, title and body are required.');
   }
-  return { trackId, title, body: html };
+  return {
+    trackId,
+    title,
+    body: html,
+    coverImageUrl: parseCoverImageUrl(raw.coverImageUrl),
+  };
 }
 
 export function parseUpdateNewsBody(body: unknown): ParsedUpdateNews {
@@ -118,9 +142,17 @@ export function parseUpdateNewsBody(body: unknown): ParsedUpdateNews {
     const html = parseBody(raw.body, true);
     if (html) parsed.body = html;
   }
-  if (!parsed.trackId && !parsed.title && !parsed.body) {
+  if (Object.prototype.hasOwnProperty.call(raw, 'coverImageUrl')) {
+    parsed.coverImageUrl = parseCoverImageUrl(raw.coverImageUrl);
+  }
+  if (
+    !parsed.trackId &&
+    !parsed.title &&
+    !parsed.body &&
+    !Object.prototype.hasOwnProperty.call(parsed, 'coverImageUrl')
+  ) {
     throw new BadRequestException(
-      'At least one of trackId, title or body is required.',
+      'At least one of trackId, title, body or coverImageUrl is required.',
     );
   }
   return parsed;

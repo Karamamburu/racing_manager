@@ -253,6 +253,7 @@ CREATE TABLE news (
   track_id UUID NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   body TEXT NOT NULL,
+  cover_image_url TEXT,
   published_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_by UUID REFERENCES users(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

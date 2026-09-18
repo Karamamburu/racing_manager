@@ -38,6 +38,7 @@ export type NewsListItem = {
   id: string;
   title: string;
   excerpt: string;
+  coverImageUrl: string | null;
   publishedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -53,6 +54,7 @@ type StoredNews = {
   id: string;
   title: string;
   body: string;
+  coverImageUrl: string | null;
   publishedAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -142,6 +144,7 @@ export class NewsService {
         trackId: parsed.trackId,
         title: parsed.title,
         body: parsed.body,
+        coverImageUrl: parsed.coverImageUrl,
         createdById: actor.id,
       },
       include: {
@@ -186,6 +189,9 @@ export class NewsService {
         ...(parsed.trackId ? { trackId: parsed.trackId } : {}),
         ...(parsed.title ? { title: parsed.title } : {}),
         ...(parsed.body ? { body: parsed.body } : {}),
+        ...(parsed.coverImageUrl !== undefined
+          ? { coverImageUrl: parsed.coverImageUrl }
+          : {}),
       },
       include: {
         track: {
@@ -244,6 +250,7 @@ export class NewsService {
       id: row.id,
       title: row.title,
       excerpt: this.toExcerpt(row.body),
+      coverImageUrl: row.coverImageUrl,
       publishedAt: row.publishedAt.toISOString(),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),

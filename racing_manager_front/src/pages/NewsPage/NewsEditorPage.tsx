@@ -12,11 +12,13 @@ import { newsListQueryKey } from '../../features/news/useNewsListQuery';
 import { useCatalogTracksQuery } from '../../features/tracks/useCatalogTracksQuery';
 import { AppShell } from '../../shared/layout';
 import { NewsHtmlEditor } from './components/NewsHtmlEditor';
+import { NewsCoverImageField } from './components/NewsCoverImageField';
 
 type NewsEditorFormValues = {
   trackId: string;
   title: string;
   body: string;
+  coverImageUrl: string | null;
 };
 
 type FeedbackStatus = 'unauthorized' | 'forbidden' | 'error';
@@ -47,6 +49,7 @@ export function NewsEditorPage() {
       trackId: articleQuery.data.track.id,
       title: articleQuery.data.title,
       body: articleQuery.data.body,
+      coverImageUrl: articleQuery.data.coverImageUrl,
     });
   }, [articleQuery.data, form, isEdit]);
 
@@ -64,6 +67,7 @@ export function NewsEditorPage() {
       trackId: values.trackId,
       title: values.title.trim(),
       body: values.body,
+      coverImageUrl: values.coverImageUrl ?? null,
     };
     try {
       const result = isEdit && id
@@ -200,8 +204,9 @@ export function NewsEditorPage() {
                     trackId: articleQuery.data.track.id,
                     title: articleQuery.data.title,
                     body: articleQuery.data.body,
+                    coverImageUrl: articleQuery.data.coverImageUrl,
                   }
-                : undefined
+                : { coverImageUrl: null }
             }
           >
             <Form.Item
@@ -225,6 +230,14 @@ export function NewsEditorPage() {
               rules={[{ required: true, message: 'Укажите заголовок' }]}
             >
               <Input placeholder="Сезон в Алёшкино открыт" maxLength={200} />
+            </Form.Item>
+
+            <Form.Item
+              name="coverImageUrl"
+              label="Заглавная картинка"
+              extra="Необязательно. Показывается слева от заголовка в списке и в самой новости."
+            >
+              <NewsCoverImageField />
             </Form.Item>
 
             <Form.Item

@@ -9,6 +9,7 @@ import { newsService } from '../../features/news/newsService';
 import { formatDateTime } from '../../shared/formatDateTime';
 import { AppShell } from '../../shared/layout';
 import { NewsArticleBody } from './components/NewsArticleBody';
+import { NewsHeadline } from './components/NewsHeadline';
 
 export function NewsArticlePage() {
   const { id } = useParams();
@@ -79,15 +80,23 @@ export function NewsArticlePage() {
   ) : undefined;
 
   return (
-    <AppShell title={article.title} subtitle={article.track.name} extra={extra}>
+    <AppShell title="Новость" subtitle={article.track.name} extra={extra}>
       <Card>
-        <Space wrap size={8} style={{ marginBottom: 12 }}>
-          <Tag>{article.track.name}</Tag>
-          <Typography.Text type="secondary">{formatDateTime(article.publishedAt)}</Typography.Text>
-          {article.createdBy ? (
-            <Typography.Text type="secondary">Автор: {article.createdBy.name}</Typography.Text>
-          ) : null}
-        </Space>
+        <NewsHeadline
+          size="article"
+          coverImageUrl={article.coverImageUrl}
+          coverAlt={article.title}
+          title={article.title}
+          description={
+            <Space wrap size={8}>
+              <Tag>{article.track.name}</Tag>
+              <Typography.Text type="secondary">{formatDateTime(article.publishedAt)}</Typography.Text>
+              {article.createdBy ? (
+                <Typography.Text type="secondary">Автор: {article.createdBy.name}</Typography.Text>
+              ) : null}
+            </Space>
+          }
+        />
         <NewsArticleBody html={article.body} />
         <Button type="link" onClick={() => navigate('/news')} style={{ paddingInline: 0, marginTop: 16 }}>
           Ко всем новостям
