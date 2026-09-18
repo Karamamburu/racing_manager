@@ -1,3 +1,5 @@
+import { toLocalIsoDate } from './formatDateTime';
+
 export const EventStatusCode = {
   PLANNED: 'PLANNED',
   IN_PROGRESS: 'IN_PROGRESS',
@@ -35,4 +37,16 @@ export function isEventStatus(value: string): value is EventStatusCode {
 export function eventStatusMeta(status: string): EventStatusMeta {
   if (isEventStatus(status)) return EVENT_STATUS_META[status];
   return { text: status, color: 'default', badge: 'default' };
+}
+
+export const PAST_COMPLETED_EVENT_LOCKED_MESSAGE =
+  'Нельзя изменить статус и данные завершённых в прошлом мероприятий.';
+
+export function isPastCompletedEvent(
+  event: { status: string; eventDate: string },
+  now = new Date(),
+): boolean {
+  if (event.status !== EventStatusCode.DONE) return false;
+  const today = now.toLocaleDateString('en-CA');
+  return toLocalIsoDate(event.eventDate) < today;
 }

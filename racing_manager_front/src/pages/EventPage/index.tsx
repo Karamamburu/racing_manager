@@ -19,7 +19,7 @@ import { registrationsService } from '../../features/registrations/registrations
 import { FeaturesCard } from '../../shared/components';
 import { formatDateTime } from '../../shared/formatDateTime';
 import { formatFinishTime } from '../../shared/formatFinishTime';
-import { eventStatusMeta, type EventStatusCode } from '../../shared/eventStatus';
+import { eventStatusMeta, isPastCompletedEvent, PAST_COMPLETED_EVENT_LOCKED_MESSAGE, type EventStatusCode } from '../../shared/eventStatus';
 import {
   isActiveRegistrationStatus,
   isRecordableRegistrationStatus,
@@ -360,14 +360,19 @@ export function EventPage() {
     createdById: event.createdBy?.id,
     status: event.status,
   });
+  const pastCompleted = isPastCompletedEvent(event);
   const canAssignNumbers =
     canCreateEvents(session?.roles) &&
     (event.status === 'PLANNED' || event.status === 'IN_PROGRESS');
   const canAssignResults =
-    canCreateEvents(session?.roles) && event.status !== 'CANCELLED';
+    canCreateEvents(session?.roles) &&
+    event.status !== 'CANCELLED' &&
+    !pastCompleted;
   const canChangeStatus = canChangeEventStatus(session?.roles);
   const canChangeRegistrationStatus =
-    canCreateEvents(session?.roles) && event.status !== 'CANCELLED';
+    canCreateEvents(session?.roles) &&
+    event.status !== 'CANCELLED' &&
+    !pastCompleted;
   const myRegistration = event.registrations.find(
     (registration: EventParticipant) =>
       Boolean(registration.userId) && registration.userId === session?.userId,
@@ -651,6 +656,10 @@ export function EventPage() {
               <EventStatusSelect
                 value={event.status}
                 loading={isUpdatingStatus}
+                disabled={pastCompleted}
+                disabledReason={
+                  pastCompleted ? PAST_COMPLETED_EVENT_LOCKED_MESSAGE : undefined
+                }
                 onChange={handleStatusChange}
               />
             ) : (

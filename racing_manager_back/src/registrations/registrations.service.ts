@@ -11,6 +11,10 @@ import { UsersService, type AppUser } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventStatusSyncService } from '../events/event-status-sync.service';
 import {
+  PAST_COMPLETED_EVENT_LOCKED_MESSAGE,
+  isPastCompletedEvent,
+} from '../events/event-status';
+import {
   mergeRegistrationFields,
   parseCreateRegistrationBody,
   type ParsedCreateRegistration,
@@ -397,6 +401,9 @@ export class RegistrationsService {
       throw new BadRequestException(
         'Cannot change registrations for a cancelled event.',
       );
+    }
+    if (isPastCompletedEvent(event.status, event.eventDate)) {
+      throw new BadRequestException(PAST_COMPLETED_EVENT_LOCKED_MESSAGE);
     }
     return event;
   }

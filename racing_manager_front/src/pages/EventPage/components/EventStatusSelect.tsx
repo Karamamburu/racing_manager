@@ -1,4 +1,4 @@
-import { Select, Tag } from 'antd';
+import { Select, Tag, Tooltip } from 'antd';
 import {
   EVENT_STATUSES,
   EVENT_STATUS_META,
@@ -10,6 +10,7 @@ type EventStatusSelectProps = {
   value: string;
   loading?: boolean;
   disabled?: boolean;
+  disabledReason?: string;
   onChange: (status: EventStatusCode) => void;
 };
 
@@ -26,9 +27,10 @@ export function EventStatusSelect({
   value,
   loading,
   disabled,
+  disabledReason,
   onChange,
 }: EventStatusSelectProps) {
-  return (
+  const select = (
     <Select
       value={isEventStatus(value) ? value : undefined}
       loading={loading}
@@ -38,5 +40,11 @@ export function EventStatusSelect({
       placeholder={isEventStatus(value) ? EVENT_STATUS_META[value].text : value}
       onChange={onChange}
     />
+  );
+  if (!disabled || !disabledReason) return select;
+  return (
+    <Tooltip title={disabledReason}>
+      <span style={{ display: 'inline-block' }}>{select}</span>
+    </Tooltip>
   );
 }

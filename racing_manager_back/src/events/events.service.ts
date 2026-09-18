@@ -19,7 +19,11 @@ import {
   isSport,
   type ParsedCreateEvent,
 } from './parse-create-event';
-import { EventStatusCode } from './event-status';
+import {
+  EventStatusCode,
+  PAST_COMPLETED_EVENT_LOCKED_MESSAGE,
+  isPastCompletedEvent,
+} from './event-status';
 import { EventStatusSyncService } from './event-status-sync.service';
 import { freezeEventPlaces } from './freeze-event-places';
 import { parseEventDateRange } from './parse-event-date-range';
@@ -692,15 +696,18 @@ export class EventsService {
     await this.rolesService.assertAdminAccess(authentikId);
     const status = parseUpdateEventStatusBody(body);
 
-    const event = await this.store.event.findUnique({
+    const event = await this.prisma.event.findUnique({
       where: { id: eventId },
-      select: { id: true, createdById: true, status: true },
+      select: { id: true, status: true, eventDate: true },
     });
     if (!event) {
       throw new NotFoundException('Event not found.');
     }
     if (event.status === status) {
       return this.findById(eventId, { syncStatuses: false });
+    }
+    if (isPastCompletedEvent(event.status, event.eventDate)) {
+      throw new BadRequestException(PAST_COMPLETED_EVENT_LOCKED_MESSAGE);
     }
 
     if (status === EventStatusCode.CANCELLED) {
