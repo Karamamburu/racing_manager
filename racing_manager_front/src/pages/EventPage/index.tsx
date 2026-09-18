@@ -1,4 +1,4 @@
-import { Button, Card, Col, Modal, Result, Row, Skeleton, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Col, Divider, Modal, Result, Row, Skeleton, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -383,50 +383,24 @@ export function EventPage() {
   const status = eventStatusMeta(event.status);
   const features: FeatureItem[] = [
     { key: 'track', title: 'Трасса', value: event.track.name },
+    { key: 'eventDate', title: 'Дата проведения', value: formatDateTime(event.eventDate) },
     {
       key: 'eventType',
       title: 'Тип мероприятия',
       value: eventTypeLabels[event.eventType] ?? event.eventType,
-    },
-    { key: 'sport', title: 'Дисциплина', value: sportLabels[event.sport] ?? event.sport },
-    { key: 'eventDate', title: 'Дата проведения', value: formatDateTime(event.eventDate) },
-    {
-      key: 'distanceKm',
-      title: 'Дистанция',
-      value: event.distanceKm === null ? '—' : `${event.distanceKm} км`,
-    },
-    {
-      key: 'laps',
-      title: 'Круги',
-      value: formatEventLaps(event.laps ?? []),
-    },
-    {
-      key: 'formats',
-      title: 'Форматы участия',
-      value:
-        event.formats.length > 0 ? (
-          <Space size={[4, 8]} wrap>
-            {event.formats.map((format: EventFormatRef) => (
-              <Tag key={format.id}>{format.name}</Tag>
-            ))}
-          </Space>
-        ) : (
-          '—'
-        ),
     },
     {
       key: 'registrationOpen',
       title: 'Начало выдачи номеров',
       value: formatDateTime(event.registrationOpen),
     },
+    { key: 'sport', title: 'Дисциплина', value: sportLabels[event.sport] ?? event.sport },
     {
       key: 'registrationClose',
       title: 'Окончание выдачи номеров',
       value: formatDateTime(event.registrationClose),
     },
-    { key: 'createdBy', title: 'Создал', value: event.createdBy?.name ?? '—' },
   ];
-
   const refreshEvent = async () => {
     if (!event.id) return;
     await queryClient.invalidateQueries({ queryKey: eventDetailsQueryKey(event.id) });
@@ -686,13 +660,41 @@ export function EventPage() {
           </Space>
         </Card>
 
-        <FeaturesCard title="Характеристики мероприятия" features={features} />
+        <FeaturesCard
+          title="Характеристики мероприятия"
+          features={features}
+          column={2}
+          extra={
+            <Typography.Text type="secondary">
+              Создал: {event.createdBy?.name ?? '—'}
+            </Typography.Text>
+          }
+        />
 
         <Row gutter={[24, 24]}>
           <Col xs={24} xl={event.mapLink ? 12 : 24}>
             <Card title="Описание" style={{ height: '100%' }}>
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Typography.Text>
+                  <Typography.Text type="secondary">Круги: </Typography.Text>
+                  {formatEventLaps(event.laps ?? [])}
+                </Typography.Text>
+                <Typography.Text>
+                  <Typography.Text type="secondary">Дистанция: </Typography.Text>
+                  {event.distanceKm === null ? '—' : `${event.distanceKm} км`}
+                </Typography.Text>
+                <Space wrap size={[4, 8]} align="center">
+                  <Typography.Text type="secondary">Форматы участия:</Typography.Text>
+                  {event.formats.length > 0
+                    ? event.formats.map((format: EventFormatRef) => (
+                        <Tag key={format.id}>{format.name}</Tag>
+                      ))
+                    : '—'}
+                </Space>
+              </Space>
+              <Divider style={{ margin: '12px 0 16px' }} />
               {event.description ? (
-                <Typography.Paragraph style={{ marginBottom: 0 }}>
+                <Typography.Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
                   {event.description}
                 </Typography.Paragraph>
               ) : (
