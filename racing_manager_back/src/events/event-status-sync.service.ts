@@ -5,6 +5,7 @@ import {
   EventStatusCode,
   dueEventStatus,
 } from './event-status';
+import { freezeEventPlaces } from './freeze-event-places';
 
 const SYNC_INTERVAL_MS = 60_000;
 
@@ -53,10 +54,15 @@ export class EventStatusSyncService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (doneIds.length > 0) {
-        await this.prisma.event.updateMany({
-          where: { id: { in: doneIds } },
-          data: { status: EventStatusCode.DONE },
-        });
+        for (const id of doneIds) {
+          await this.prisma.$transaction(async (tx) => {
+            await tx.event.update({
+              where: { id },
+              data: { status: EventStatusCode.DONE },
+            });
+            await freezeEventPlaces(tx, id);
+          });
+        }
       }
       if (inProgressIds.length > 0) {
         await this.prisma.event.updateMany({

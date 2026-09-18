@@ -236,6 +236,7 @@ model Result {
   registrationId   String       @unique @map("registration_id") @db.Uuid
   registration     Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
   timeMilliseconds Int          @map("time_milliseconds")
+  place            Int?
   recordedAt       DateTime     @default(now()) @map("recorded_at") @db.Timestamptz(6)
   updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
   laps             ResultLap[]

@@ -86,6 +86,12 @@ For an optional cover image next to the news title:
 docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_news_cover.sql
 ```
 
+For a frozen classification place on results (written when an event becomes DONE):
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_result_place.sql
+```
+
 ## Roles
 
 Participants have no rows in `user_roles`. Admin roles are granted in SQL after the person has logged in once (Authentik creates the `users` row).
