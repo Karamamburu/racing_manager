@@ -5,7 +5,7 @@ import { knockout24Format } from '../../src/presets';
 
 const terminal = {
   heats: { type: 'NONE' as const },
-  ranking: { type: 'BY_TIME' as const },
+  ranking: { type: 'BY_PLACE' as const },
   advancement: { type: 'NONE' as const },
 };
 
@@ -25,7 +25,7 @@ describe('validateFormat', () => {
           id: 'prologue',
           kind: 'PROLOGUE',
           heats: { type: 'NONE' },
-          ranking: { type: 'BY_TIME' },
+          ranking: { type: 'BY_PLACE' },
           advancement: {
             type: 'ROUTES',
             routes: [{ cut: { type: 'TOP_N', n: 10 }, toStageId: 'missing' }],
@@ -43,7 +43,7 @@ describe('validateFormat', () => {
           id: 'a',
           kind: 'CUSTOM',
           heats: { type: 'NONE' },
-          ranking: { type: 'BY_TIME' },
+          ranking: { type: 'BY_PLACE' },
           advancement: {
             type: 'ROUTES',
             routes: [{ cut: { type: 'TOP_N', n: 1 }, toStageId: 'b' }],

@@ -67,13 +67,9 @@ function parseParticipantResult(value: unknown, path: string): ParticipantResult
     participantId: readString(raw.participantId, `${path}.participantId`) as string,
     status: parseResultStatus(raw.status, `${path}.status`),
   };
-  const time = readInteger(raw.timeMilliseconds, `${path}.timeMilliseconds`, false);
-  if (time !== undefined) {
-    result.timeMilliseconds = time;
-  }
-  const place = readInteger(raw.placeInHeat, `${path}.placeInHeat`, false);
+  const place = readInteger(raw.place, `${path}.place`, false);
   if (place !== undefined) {
-    result.placeInHeat = place;
+    result.place = place;
   }
   return result;
 }

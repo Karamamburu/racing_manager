@@ -49,8 +49,7 @@ describe('persistence mappers', () => {
               participant: { externalId: 'p1', seed: 1 },
               result: {
                 status: 'OK',
-                timeMilliseconds: 12000,
-                placeInHeat: 1,
+                place: 1,
               },
             },
             {
@@ -68,8 +67,7 @@ describe('persistence mappers', () => {
           {
             participantId: 'p1',
             status: 'OK',
-            timeMilliseconds: 12000,
-            placeInHeat: 1,
+            place: 1,
           },
         ],
       },
@@ -106,8 +104,7 @@ describe('persistence mappers', () => {
                   participant: { externalId: 'p1', seed: 1 },
                   result: {
                     status: 'OK',
-                    timeMilliseconds: 9000,
-                    placeInHeat: 1,
+                    place: 1,
                   },
                 },
               ],
@@ -119,6 +116,6 @@ describe('persistence mappers', () => {
     });
 
     expect(view.participants[0].id).toBe('p1');
-    expect(view.stages[0].heats[0].slots[0].result?.timeMilliseconds).toBe(9000);
+    expect(view.stages[0].heats[0].slots[0].result?.place).toBe(1);
   });
 });

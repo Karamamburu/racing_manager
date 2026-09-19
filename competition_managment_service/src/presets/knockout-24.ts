@@ -9,7 +9,7 @@ export const knockout24Format: CompetitionFormat = {
       kind: 'PROLOGUE',
       label: 'Prologue',
       heats: { type: 'NONE' },
-      ranking: { type: 'BY_TIME' },
+      ranking: { type: 'BY_PLACE' },
       advancement: {
         type: 'ROUTES',
         routes: [
@@ -31,7 +31,7 @@ export const knockout24Format: CompetitionFormat = {
         remainder: 'BALANCED',
         seeding: { type: 'SNAKE' },
       },
-      ranking: { type: 'BY_TIME' },
+      ranking: { type: 'BY_PLACE' },
       advancement: {
         type: 'ROUTES',
         routes: [
@@ -53,7 +53,7 @@ export const knockout24Format: CompetitionFormat = {
         remainder: 'BALANCED',
         seeding: { type: 'SNAKE' },
       },
-      ranking: { type: 'BY_TIME' },
+      ranking: { type: 'BY_PLACE' },
       advancement: {
         type: 'ROUTES',
         routes: [
@@ -78,7 +78,7 @@ export const knockout24Format: CompetitionFormat = {
         remainder: 'BALANCED',
         seeding: { type: 'BY_OVERALL_RANK' },
       },
-      ranking: { type: 'BY_TIME' },
+      ranking: { type: 'BY_PLACE' },
       advancement: { type: 'NONE' },
     },
     {
@@ -91,7 +91,7 @@ export const knockout24Format: CompetitionFormat = {
         remainder: 'BALANCED',
         seeding: { type: 'BY_OVERALL_RANK' },
       },
-      ranking: { type: 'BY_TIME' },
+      ranking: { type: 'BY_PLACE' },
       advancement: { type: 'NONE' },
     },
   ],

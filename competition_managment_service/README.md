@@ -28,7 +28,14 @@ npm run start:dev
 - `POST /v1/competitions` — `{ name?, presetId? | format, participants }`
 - `GET /v1/competitions/:id`
 - `POST /v1/competitions/:id/stages/:stageId/start-lists` — optional `{ manualHeats }`
-- `PUT /v1/competitions/:id/stages/:stageId/results` — `{ heatResults }`
+- `PUT /v1/competitions/:id/stages/:stageId/results` — `{ heatResults }` with `{ participantId, status, place }` (place is required for `OK`; the caller owns times)
+
+If the volume already exists from an earlier schema:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_place_only.sql
+npx prisma generate
+```
 - `POST /v1/competitions/:id/stages/:stageId/advance`
 
 Example (after `docker compose up -d`):

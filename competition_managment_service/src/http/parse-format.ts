@@ -78,12 +78,12 @@ function parseHeatLayout(value: unknown, path: string): HeatLayout {
 function parseRankingRule(value: unknown, path: string): RankingRule {
   const raw = readObject(value, path);
   const type = readString(raw.type, `${path}.type`);
-  if (type === 'BY_TIME' || type === 'BY_HEAT_PLACE_THEN_TIME') {
+  if (type === 'BY_PLACE') {
     return { type };
   }
   throw new DomainError(
     ErrorCodes.FORMAT_INVALID,
-    `${path}.type must be BY_TIME or BY_HEAT_PLACE_THEN_TIME.`,
+    `${path}.type must be BY_PLACE.`,
     `${path}.type`,
   );
 }

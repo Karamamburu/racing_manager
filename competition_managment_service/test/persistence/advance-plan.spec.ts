@@ -8,7 +8,7 @@ const miniFormat: CompetitionFormat = {
       id: 'prologue',
       kind: 'PROLOGUE',
       heats: { type: 'NONE' },
-      ranking: { type: 'BY_TIME' },
+      ranking: { type: 'BY_PLACE' },
       advancement: {
         type: 'ROUTES',
         routes: [
@@ -23,7 +23,7 @@ const miniFormat: CompetitionFormat = {
       id: 'qf',
       kind: 'QUARTERFINAL',
       heats: { type: 'NONE' },
-      ranking: { type: 'BY_TIME' },
+      ranking: { type: 'BY_PLACE' },
       advancement: { type: 'NONE' },
     },
   ],
@@ -47,7 +47,7 @@ describe('advancePersistencePlan', () => {
           results: participants.map((participant) => ({
             participantId: participant.id,
             status: 'OK' as const,
-            timeMilliseconds: participant.seed * 1000,
+            place: participant.seed,
           })),
         },
       ],

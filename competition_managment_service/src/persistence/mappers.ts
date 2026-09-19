@@ -19,8 +19,7 @@ export type ParticipantRow = {
 
 export type StoredHeatResult = {
   status: string;
-  timeMilliseconds: number | null;
-  placeInHeat: number | null;
+  place: number | null;
 };
 
 export type StoredHeatSlot = {
@@ -65,10 +64,7 @@ export function toHeatResults(heats: StoredHeat[]): HeatResult[] {
         return {
           participantId: slot.participant.externalId,
           status: toResultStatus(result.status),
-          ...(result.timeMilliseconds != null
-            ? { timeMilliseconds: result.timeMilliseconds }
-            : {}),
-          ...(result.placeInHeat != null ? { placeInHeat: result.placeInHeat } : {}),
+          ...(result.place != null ? { place: result.place } : {}),
         };
       }),
   }));
@@ -96,8 +92,7 @@ export function rankingToResponse(entry: RankedEntry) {
     rank: entry.rank,
     heatNumber: entry.heatNumber,
     status: entry.status,
-    timeMilliseconds: entry.timeMilliseconds,
-    placeInHeat: entry.placeInHeat,
+    place: entry.place,
   };
 }
 
@@ -124,8 +119,7 @@ type CompetitionView = {
       rank: number;
       heatNumber: number;
       status: string;
-      timeMilliseconds: number | null;
-      placeInHeat: number | null;
+      place: number | null;
       participant: ParticipantRow;
     }>;
   }>;
@@ -163,8 +157,7 @@ export function toCompetitionResponse(row: CompetitionView) {
           result: slot.result
             ? {
                 status: toResultStatus(slot.result.status),
-                timeMilliseconds: slot.result.timeMilliseconds,
-                placeInHeat: slot.result.placeInHeat,
+                place: slot.result.place,
               }
             : null,
         })),
@@ -174,8 +167,7 @@ export function toCompetitionResponse(row: CompetitionView) {
         rank: entry.rank,
         heatNumber: entry.heatNumber,
         status: toResultStatus(entry.status),
-        timeMilliseconds: entry.timeMilliseconds,
-        placeInHeat: entry.placeInHeat,
+        place: entry.place,
       })),
     })),
     createdAt: row.createdAt,

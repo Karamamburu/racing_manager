@@ -69,10 +69,10 @@ function validateHeatLayout(heats: HeatLayout, path: string): void {
 }
 
 function validateRankingRule(ranking: RankingRule, path: string): void {
-  if (ranking.type !== 'BY_TIME' && ranking.type !== 'BY_HEAT_PLACE_THEN_TIME') {
+  if (ranking.type !== 'BY_PLACE') {
     throw new DomainError(
       ErrorCodes.FORMAT_INVALID,
-      'ranking.type must be BY_TIME or BY_HEAT_PLACE_THEN_TIME.',
+      'ranking.type must be BY_PLACE.',
       `${path}.type`,
     );
   }

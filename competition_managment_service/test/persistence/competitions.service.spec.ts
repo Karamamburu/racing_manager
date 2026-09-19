@@ -8,7 +8,7 @@ const miniFormat: CompetitionFormat = {
       id: 'prologue',
       kind: 'PROLOGUE',
       heats: { type: 'NONE' },
-      ranking: { type: 'BY_TIME' },
+      ranking: { type: 'BY_PLACE' },
       advancement: {
         type: 'ROUTES',
         routes: [
@@ -23,7 +23,7 @@ const miniFormat: CompetitionFormat = {
       id: 'qf',
       kind: 'QUARTERFINAL',
       heats: { type: 'NONE' },
-      ranking: { type: 'BY_TIME' },
+      ranking: { type: 'BY_PLACE' },
       advancement: { type: 'NONE' },
     },
   ],
@@ -92,8 +92,7 @@ describe('CompetitionsService.advanceStage', () => {
                   id: `result-${row.externalId}`,
                   heatSlotId: `slot-${row.externalId}`,
                   status: 'OK',
-                  timeMilliseconds: row.seed * 1000,
-                  placeInHeat: index + 1,
+                  place: row.seed,
                 },
               })),
             },

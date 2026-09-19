@@ -17,7 +17,7 @@ export function advanceStage(input: AdvanceStageInput): AdvanceStageResult {
   validateFormat(input.format);
   const stage = findStage(input.format, input.stageId);
   const participants = normalizeParticipants(input.participants);
-  const ranking = rankStage(participants, input.heatResults, stage.ranking);
+  const ranking = rankStage(participants, input.heatResults);
   const advanced = applyAdvancement(stage, ranking, participants.length);
 
   const routes = advanced.routes.map((route) => {

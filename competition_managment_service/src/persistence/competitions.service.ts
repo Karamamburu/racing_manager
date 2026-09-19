@@ -215,13 +215,11 @@ export class CompetitionsService {
             create: {
               heatSlotId: slotId,
               status: result.status,
-              timeMilliseconds: result.timeMilliseconds ?? null,
-              placeInHeat: result.placeInHeat ?? null,
+              place: result.place ?? null,
             },
             update: {
               status: result.status,
-              timeMilliseconds: result.timeMilliseconds ?? null,
-              placeInHeat: result.placeInHeat ?? null,
+              place: result.place ?? null,
             },
           });
         }
@@ -288,8 +286,7 @@ export class CompetitionsService {
           rank: entry.rank,
           heatNumber: entry.heatNumber,
           status: entry.status,
-          timeMilliseconds: entry.timeMilliseconds,
-          placeInHeat: entry.placeInHeat,
+          place: entry.place,
         })),
       });
 

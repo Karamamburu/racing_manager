@@ -109,8 +109,7 @@ CREATE TABLE heat_results (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   heat_slot_id UUID NOT NULL UNIQUE REFERENCES heat_slots(id) ON DELETE CASCADE,
   status result_status NOT NULL,
-  time_milliseconds INT,
-  place_in_heat INT
+  place INT
 );
 
 CREATE TABLE stage_rankings (
@@ -120,8 +119,7 @@ CREATE TABLE stage_rankings (
   rank INT NOT NULL,
   heat_number INT NOT NULL,
   status result_status NOT NULL,
-  time_milliseconds INT,
-  place_in_heat INT,
+  place INT,
   UNIQUE (stage_run_id, participant_id),
   UNIQUE (stage_run_id, rank)
 );
@@ -145,7 +143,7 @@ VALUES (
         "kind": "PROLOGUE",
         "label": "Prologue",
         "heats": { "type": "NONE" },
-        "ranking": { "type": "BY_TIME" },
+        "ranking": { "type": "BY_PLACE" },
         "advancement": {
           "type": "ROUTES",
           "routes": [
@@ -167,7 +165,7 @@ VALUES (
           "remainder": "BALANCED",
           "seeding": { "type": "SNAKE" }
         },
-        "ranking": { "type": "BY_TIME" },
+        "ranking": { "type": "BY_PLACE" },
         "advancement": {
           "type": "ROUTES",
           "routes": [
@@ -189,7 +187,7 @@ VALUES (
           "remainder": "BALANCED",
           "seeding": { "type": "SNAKE" }
         },
-        "ranking": { "type": "BY_TIME" },
+        "ranking": { "type": "BY_PLACE" },
         "advancement": {
           "type": "ROUTES",
           "routes": [
@@ -214,7 +212,7 @@ VALUES (
           "remainder": "BALANCED",
           "seeding": { "type": "BY_OVERALL_RANK" }
         },
-        "ranking": { "type": "BY_TIME" },
+        "ranking": { "type": "BY_PLACE" },
         "advancement": { "type": "NONE" }
       },
       {
@@ -227,7 +225,7 @@ VALUES (
           "remainder": "BALANCED",
           "seeding": { "type": "BY_OVERALL_RANK" }
         },
-        "ranking": { "type": "BY_TIME" },
+        "ranking": { "type": "BY_PLACE" },
         "advancement": { "type": "NONE" }
       }
     ]

@@ -158,8 +158,7 @@ model HeatResult {
   heatSlotId       String       @unique @map("heat_slot_id") @db.Uuid
   heatSlot         HeatSlot     @relation(fields: [heatSlotId], references: [id], onDelete: Cascade)
   status           ResultStatus
-  timeMilliseconds Int?         @map("time_milliseconds")
-  placeInHeat      Int?         @map("place_in_heat")
+  place            Int?
 
   @@map("heat_results")
 }
@@ -173,8 +172,7 @@ model StageRanking {
   rank             Int
   heatNumber       Int                    @map("heat_number")
   status           ResultStatus
-  timeMilliseconds Int?                   @map("time_milliseconds")
-  placeInHeat      Int?                   @map("place_in_heat")
+  place            Int?
 
   @@unique([stageRunId, participantId])
   @@unique([stageRunId, rank])

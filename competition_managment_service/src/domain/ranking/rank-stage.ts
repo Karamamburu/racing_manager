@@ -3,7 +3,6 @@ import {
   HeatResult,
   Participant,
   RankedEntry,
-  RankingRule,
   ResultStatus,
 } from '../types';
 
@@ -11,87 +10,30 @@ type PreparedResult = {
   participant: Participant;
   heatNumber: number;
   status: ResultStatus;
-  timeMilliseconds: number | null;
-  placeInHeat: number | null;
+  place: number | null;
 };
 
 function isOk(status: ResultStatus): boolean {
   return status === 'OK';
 }
 
-function compareByTime(a: PreparedResult, b: PreparedResult): number {
+function compareByPlace(a: PreparedResult, b: PreparedResult): number {
   const aOk = isOk(a.status);
   const bOk = isOk(b.status);
   if (aOk !== bOk) {
     return aOk ? -1 : 1;
   }
   if (aOk) {
-    const aHasTime = a.timeMilliseconds != null;
-    const bHasTime = b.timeMilliseconds != null;
-    if (aHasTime && bHasTime && a.timeMilliseconds !== b.timeMilliseconds) {
-      return (a.timeMilliseconds as number) - (b.timeMilliseconds as number);
+    const aPlace = a.place;
+    const bPlace = b.place;
+    if (aPlace != null && bPlace != null && aPlace !== bPlace) {
+      return aPlace - bPlace;
     }
-    if (aHasTime !== bHasTime) {
-      return aHasTime ? -1 : 1;
-    }
-  }
-  return a.participant.seed - b.participant.seed;
-}
-
-function compareByHeatPlaceThenTime(a: PreparedResult, b: PreparedResult): number {
-  const aOk = isOk(a.status);
-  const bOk = isOk(b.status);
-  if (aOk !== bOk) {
-    return aOk ? -1 : 1;
-  }
-  if (aOk) {
-    const aHasPlace = a.placeInHeat != null;
-    const bHasPlace = b.placeInHeat != null;
-    if (aHasPlace && bHasPlace && a.placeInHeat !== b.placeInHeat) {
-      return (a.placeInHeat as number) - (b.placeInHeat as number);
-    }
-    if (aHasPlace !== bHasPlace) {
-      return aHasPlace ? -1 : 1;
-    }
-    const aHasTime = a.timeMilliseconds != null;
-    const bHasTime = b.timeMilliseconds != null;
-    if (aHasTime && bHasTime && a.timeMilliseconds !== b.timeMilliseconds) {
-      return (a.timeMilliseconds as number) - (b.timeMilliseconds as number);
-    }
-    if (aHasTime !== bHasTime) {
-      return aHasTime ? -1 : 1;
+    if ((aPlace == null) !== (bPlace == null)) {
+      return aPlace != null ? -1 : 1;
     }
   }
   return a.participant.seed - b.participant.seed;
-}
-
-function derivePlaces(entries: PreparedResult[]): void {
-  const byHeat = new Map<number, PreparedResult[]>();
-  for (const entry of entries) {
-    const bucket = byHeat.get(entry.heatNumber) ?? [];
-    bucket.push(entry);
-    byHeat.set(entry.heatNumber, bucket);
-  }
-
-  for (const heatEntries of byHeat.values()) {
-    const okEntries = heatEntries.filter((entry) => isOk(entry.status));
-    const missingPlace = okEntries.some((entry) => entry.placeInHeat == null);
-    const providedPlace = okEntries.some((entry) => entry.placeInHeat != null);
-    if (providedPlace && missingPlace) {
-      throw new DomainError(
-        ErrorCodes.RESULT_INVALID,
-        'placeInHeat must be provided for every OK result in a heat, or omitted for all of them.',
-        'heatResults',
-      );
-    }
-    if (!missingPlace) {
-      continue;
-    }
-    const ordered = [...okEntries].sort(compareByTime);
-    ordered.forEach((entry, index) => {
-      entry.placeInHeat = index + 1;
-    });
-  }
 }
 
 export function collectResults(
@@ -156,31 +98,26 @@ export function collectResults(
       }
       seen.add(result.participantId);
 
-      if (result.timeMilliseconds != null) {
-        if (!Number.isInteger(result.timeMilliseconds) || result.timeMilliseconds <= 0) {
-          throw new DomainError(
-            ErrorCodes.RESULT_INVALID,
-            'timeMilliseconds must be an integer > 0.',
-            `${resultPath}.timeMilliseconds`,
-          );
-        }
+      if (result.place != null && (!Number.isInteger(result.place) || result.place < 1)) {
+        throw new DomainError(
+          ErrorCodes.RESULT_INVALID,
+          'place must be an integer >= 1.',
+          `${resultPath}.place`,
+        );
       }
-      if (result.placeInHeat != null) {
-        if (!Number.isInteger(result.placeInHeat) || result.placeInHeat < 1) {
-          throw new DomainError(
-            ErrorCodes.RESULT_INVALID,
-            'placeInHeat must be an integer >= 1.',
-            `${resultPath}.placeInHeat`,
-          );
-        }
+      if (isOk(result.status) && result.place == null) {
+        throw new DomainError(
+          ErrorCodes.RESULT_INVALID,
+          'place is required when status is OK.',
+          `${resultPath}.place`,
+        );
       }
 
       prepared.push({
         participant,
         heatNumber: heat.heatNumber,
         status: result.status,
-        timeMilliseconds: result.timeMilliseconds ?? null,
-        placeInHeat: result.placeInHeat ?? null,
+        place: result.place ?? null,
       });
     }
   }
@@ -200,21 +137,13 @@ export function collectResults(
 export function rankStage(
   participants: Participant[],
   heatResults: HeatResult[],
-  ranking: RankingRule,
 ): RankedEntry[] {
   const prepared = collectResults(participants, heatResults);
-  derivePlaces(prepared);
-  const compare =
-    ranking.type === 'BY_HEAT_PLACE_THEN_TIME'
-      ? compareByHeatPlaceThenTime
-      : compareByTime;
-  const ordered = [...prepared].sort(compare);
-  return ordered.map((entry, index) => ({
+  return [...prepared].sort(compareByPlace).map((entry, index) => ({
     participant: entry.participant,
     heatNumber: entry.heatNumber,
     status: entry.status,
-    timeMilliseconds: entry.timeMilliseconds,
-    placeInHeat: entry.placeInHeat,
+    place: entry.place,
     rank: index + 1,
   }));
 }

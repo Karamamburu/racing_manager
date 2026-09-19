@@ -9,18 +9,21 @@ import {
 import { knockout24Format } from '../../src/presets';
 import { heatSeeds, makeParticipants } from './helpers';
 
-function timedHeat(
+function placedHeat(
   heatNumber: number,
   participants: Participant[],
   statusById: Record<string, ResultStatus> = {},
 ): HeatResult {
   return {
     heatNumber,
-    results: participants.map((participant) => ({
-      participantId: participant.id,
-      status: statusById[participant.id] ?? 'OK',
-      timeMilliseconds: participant.seed * 1000,
-    })),
+    results: participants.map((participant) => {
+      const status = statusById[participant.id] ?? 'OK';
+      return {
+        participantId: participant.id,
+        status,
+        ...(status === 'OK' ? { place: participant.seed } : {}),
+      };
+    }),
   };
 }
 
@@ -31,7 +34,7 @@ describe('advanceStage', () => {
       format: knockout24Format,
       stageId: 'prologue',
       participants,
-      heatResults: [timedHeat(1, participants)],
+      heatResults: [placedHeat(1, participants)],
     });
 
     const qualified = result.routes[0];
@@ -57,11 +60,11 @@ describe('advanceStage', () => {
       format: knockout24Format,
       stageId: 'prologue',
       participants: makeParticipants(48),
-      heatResults: [timedHeat(1, makeParticipants(48))],
+      heatResults: [placedHeat(1, makeParticipants(48))],
     }).routes[0].startLists;
 
     const heatResults: HeatResult[] = (startLists?.heats ?? []).map((heat) =>
-      timedHeat(
+      placedHeat(
         heat.heatNumber,
         heat.slots.map((slot) => slot.participant),
       ),
@@ -84,8 +87,8 @@ describe('advanceStage', () => {
   it('splits a 12-athlete semifinal into Final A and Final B', () => {
     const participants = makeParticipants(12);
     const heatResults: HeatResult[] = [
-      timedHeat(1, participants.slice(0, 6)),
-      timedHeat(2, participants.slice(6)),
+      placedHeat(1, participants.slice(0, 6)),
+      placedHeat(2, participants.slice(6)),
     ];
 
     const result = advanceStage({
@@ -114,7 +117,7 @@ describe('advanceStage', () => {
       format: knockout24Format,
       stageId: 'prologue',
       participants,
-      heatResults: [timedHeat(1, participants, { p1: 'DNF' })],
+      heatResults: [placedHeat(1, participants, { p1: 'DNF' })],
     });
 
     const qualifiedIds = result.routes[0].participants.map((item) => item.id);
@@ -137,7 +140,7 @@ describe('advanceStage', () => {
             remainder: 'BALANCED',
             seeding: { type: 'SNAKE' },
           },
-          ranking: { type: 'BY_TIME' },
+          ranking: { type: 'BY_PLACE' },
           advancement: {
             type: 'ROUTES',
             routes: [{ cut: { type: 'TOP_PER_HEAT', n: 2 }, toStageId: 'sf' }],
@@ -147,7 +150,7 @@ describe('advanceStage', () => {
           id: 'sf',
           kind: 'SEMIFINAL',
           heats: { type: 'NONE' },
-          ranking: { type: 'BY_TIME' },
+          ranking: { type: 'BY_PLACE' },
           advancement: { type: 'NONE' },
         },
       ],
@@ -155,10 +158,10 @@ describe('advanceStage', () => {
 
     const participants = makeParticipants(24);
     const heatResults: HeatResult[] = [
-      timedHeat(1, [participants[0], participants[7], participants[8], participants[15], participants[16], participants[23]]),
-      timedHeat(2, [participants[1], participants[6], participants[9], participants[14], participants[17], participants[22]]),
-      timedHeat(3, [participants[2], participants[5], participants[10], participants[13], participants[18], participants[21]]),
-      timedHeat(4, [participants[3], participants[4], participants[11], participants[12], participants[19], participants[20]]),
+      placedHeat(1, [participants[0], participants[7], participants[8], participants[15], participants[16], participants[23]]),
+      placedHeat(2, [participants[1], participants[6], participants[9], participants[14], participants[17], participants[22]]),
+      placedHeat(3, [participants[2], participants[5], participants[10], participants[13], participants[18], participants[21]]),
+      placedHeat(4, [participants[3], participants[4], participants[11], participants[12], participants[19], participants[20]]),
     ];
 
     const result = advanceStage({
@@ -190,7 +193,7 @@ describe('advanceStage', () => {
         heatResults: [
           {
             heatNumber: 1,
-            results: [{ participantId: 'p1', status: 'OK', timeMilliseconds: 1000 }],
+            results: [{ participantId: 'p1', status: 'OK', place: 1 }],
           },
         ],
       }),

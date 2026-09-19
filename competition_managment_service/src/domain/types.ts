@@ -22,9 +22,8 @@ export type Participant = {
 
 export type ParticipantResult = {
   participantId: string;
-  timeMilliseconds?: number;
-  placeInHeat?: number;
   status: ResultStatus;
+  place?: number;
 };
 
 export type HeatResult = {
@@ -48,9 +47,7 @@ export type HeatLayout =
       seeding: SeedingRule;
     };
 
-export type RankingRule =
-  | { type: 'BY_TIME' }
-  | { type: 'BY_HEAT_PLACE_THEN_TIME' };
+export type RankingRule = { type: 'BY_PLACE' };
 
 export type AdvancementCut =
   | { type: 'TOP_PERCENT'; percent: number }
@@ -105,8 +102,7 @@ export type RankedEntry = {
   participant: Participant;
   heatNumber: number;
   status: ResultStatus;
-  timeMilliseconds: number | null;
-  placeInHeat: number | null;
+  place: number | null;
   rank: number;
 };
 
