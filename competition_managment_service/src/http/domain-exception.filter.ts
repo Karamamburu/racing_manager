@@ -5,6 +5,7 @@ import { DomainError, ErrorCodes } from '../domain/errors';
 const NOT_FOUND_CODES = new Set<string>([
   ErrorCodes.PRESET_NOT_FOUND,
   ErrorCodes.STAGE_NOT_FOUND,
+  ErrorCodes.COMPETITION_NOT_FOUND,
 ]);
 
 @Catch(DomainError)
