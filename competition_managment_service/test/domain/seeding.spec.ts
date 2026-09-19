@@ -66,6 +66,16 @@ describe('seeding', () => {
     expect(groups[3]).toEqual([19, 20, 21, 22, 23]);
   });
 
+  it('clamps heatCount when the field is smaller than the template', () => {
+    const heats = assignHeats(makeParticipants(2), {
+      type: 'HEATS',
+      heatCount: 4,
+      remainder: 'BALANCED',
+      seeding: { type: 'BY_OVERALL_RANK' },
+    });
+    expect(heats).toHaveLength(2);
+  });
+
   it('MANUAL assigns provided slots and rejects gaps', () => {
     const participants = makeParticipants(4);
     const heats = assignHeats(

@@ -192,11 +192,11 @@ VALUES (
           "type": "ROUTES",
           "routes": [
             {
-              "cut": { "type": "RANK_RANGE", "from": 1, "to": 6 },
+              "cut": { "type": "FIRST_HALF" },
               "toStageId": "final_a"
             },
             {
-              "cut": { "type": "RANK_RANGE", "from": 7, "to": 12 },
+              "cut": { "type": "SECOND_HALF" },
               "toStageId": "final_b"
             }
           ]

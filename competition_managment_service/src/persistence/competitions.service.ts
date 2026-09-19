@@ -6,6 +6,7 @@ import { DomainError, ErrorCodes } from '../domain/errors';
 import { normalizeParticipants } from '../domain/participants';
 import { validateFormat } from '../domain/validate-format';
 import {
+  AdvancementRoute,
   CompetitionFormat,
   HeatResult,
   ManualHeatAssignment,
@@ -21,7 +22,7 @@ import {
   toHeatResults,
 } from './mappers';
 import { PrismaService } from './prisma.service';
-import { sourceStageIds, terminalStageIds } from './stage-graph';
+import { sourceStageIds } from './stage-graph';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -229,7 +230,11 @@ export class CompetitionsService {
     return this.getById(competition.id);
   }
 
-  async advanceStage(competitionId: string, stageId: string) {
+  async advanceStage(
+    competitionId: string,
+    stageId: string,
+    routes?: AdvancementRoute[],
+  ) {
     const competition = await this.load(competitionId);
     this.assertMutable(competition);
     const format = toFormat(competition.formatSnapshot);
@@ -259,6 +264,7 @@ export class CompetitionsService {
       stageId,
       participants: toDomainParticipants(entries.map((entry) => entry.participant)),
       heatResults: toHeatResults(stageRun.heats),
+      routes,
     });
     const plan = advancePersistencePlan(result);
     const byExternal = this.participantIds(competition);
@@ -325,15 +331,24 @@ export class CompetitionsService {
         competition.stageRuns.map((run) => [run.stageId, run.status]),
       );
       statusByStage.set(stageId, 'COMPLETED');
+      const stagesWithPeople = new Set(
+        competition.stageEntries.map((entry) => entry.stageId),
+      );
       for (const route of plan.routes) {
+        if (route.participants.length > 0) {
+          stagesWithPeople.add(route.toStageId);
+        }
         if (route.startLists) {
           statusByStage.set(route.toStageId, 'SEEDED');
         }
       }
-      const terminalsDone = terminalStageIds(format).every(
-        (id) => statusByStage.get(id) === 'COMPLETED',
-      );
-      if (terminalsDone) {
+      const stillOpen = [...statusByStage.entries()].some(([id, status]) => {
+        if (status === 'SEEDED') {
+          return true;
+        }
+        return status === 'PENDING' && stagesWithPeople.has(id);
+      });
+      if (!stillOpen) {
         await tx.competition.update({
           where: { id: competition.id },
           data: { status: 'DONE' },

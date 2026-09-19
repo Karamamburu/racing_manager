@@ -28,4 +28,24 @@ describe('buildStartLists', () => {
       [4, 5, 12, 13, 20, 21],
     ]);
   });
+
+  it('sizes QF heats to a 20-athlete field', () => {
+    const result = buildStartLists({
+      format: knockout24Format,
+      stageId: 'qf',
+      participants: makeParticipants(20),
+    });
+    expect(result.heats).toHaveLength(4);
+    expect(result.heats.map((heat) => heat.slots.length)).toEqual([5, 5, 5, 5]);
+  });
+
+  it('uses fewer QF heats when only 10 athletes remain', () => {
+    const result = buildStartLists({
+      format: knockout24Format,
+      stageId: 'qf',
+      participants: makeParticipants(10),
+    });
+    expect(result.heats).toHaveLength(2);
+    expect(result.heats.map((heat) => heat.slots.length)).toEqual([5, 5]);
+  });
 });

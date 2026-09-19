@@ -58,11 +58,11 @@ export const knockout24Format: CompetitionFormat = {
         type: 'ROUTES',
         routes: [
           {
-            cut: { type: 'RANK_RANGE', from: 1, to: 6 },
+            cut: { type: 'FIRST_HALF' },
             toStageId: 'final_a',
           },
           {
-            cut: { type: 'RANK_RANGE', from: 7, to: 12 },
+            cut: { type: 'SECOND_HALF' },
             toStageId: 'final_b',
           },
         ],
@@ -108,7 +108,7 @@ export const knockout24Preset: CompetitionPreset = {
   id: KNOCKOUT_24_PRESET_ID,
   label: 'Knockout 24',
   description:
-    'Prologue (top 50%) → 4×6 quarterfinals (snake, top half) → 2×6 semifinals split into Final A and Final B.',
+    'Flexible knockout: prologue, then optional 1/4 and 1/2 (heats sized to the field), split into Final A / Final B. The judge can override how many advance and to which stage.',
   format: knockout24Format,
 };
 

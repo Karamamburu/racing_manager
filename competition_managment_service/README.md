@@ -28,15 +28,29 @@ npm run start:dev
 - `POST /v1/competitions` — `{ name?, presetId? | format, participants }`
 - `GET /v1/competitions/:id`
 - `POST /v1/competitions/:id/stages/:stageId/start-lists` — optional `{ manualHeats }`
-- `PUT /v1/competitions/:id/stages/:stageId/results` — `{ heatResults }` with `{ participantId, status, place }` (place is required for `OK`; the caller owns times)
+- `POST /v1/competitions/:id/stages/:stageId/advance` — optional `{ routes }` so the judge can choose how many advance and to which stage (for example skip 1/4 and send 12 straight to 1/2)
+
+Heats follow the field: `heatSize` is a cap, the number of heats is `ceil(n / heatSize)` (and never more than `n`). A template of 4×6 still works for 20 people (4 heats of 5) or 10 (2 heats of 5).
+
+Judge override example after a 20-person prologue:
+
+```json
+{
+  "routes": [
+    { "cut": { "type": "TOP_N", "n": 12 }, "toStageId": "sf" }
+  ]
+}
+```
+
+If `routes` is omitted, the format default is used (knockout-24: top 50% into 1/4).
 
 If the volume already exists from an earlier schema:
 
 ```bash
 docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_place_only.sql
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_flexible_field.sql
 npx prisma generate
 ```
-- `POST /v1/competitions/:id/stages/:stageId/advance`
 
 Example (after `docker compose up -d`):
 

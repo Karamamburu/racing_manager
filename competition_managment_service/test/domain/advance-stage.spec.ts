@@ -199,4 +199,63 @@ describe('advanceStage', () => {
       }),
     ).toThrow(DomainError);
   });
+
+  it('takes 10 of 20 from prologue by the default 50% cut and sizes QF heats', () => {
+    const participants = makeParticipants(20);
+    const result = advanceStage({
+      format: knockout24Format,
+      stageId: 'prologue',
+      participants,
+      heatResults: [placedHeat(1, participants)],
+    });
+
+    expect(result.routes[0].toStageId).toBe('qf');
+    expect(result.routes[0].participants).toHaveLength(10);
+    expect(result.routes[0].startLists?.heats).toHaveLength(2);
+  });
+
+  it('lets the judge skip the quarterfinals after a short prologue', () => {
+    const participants = makeParticipants(20);
+    const result = advanceStage({
+      format: knockout24Format,
+      stageId: 'prologue',
+      participants,
+      heatResults: [placedHeat(1, participants)],
+      routes: [{ cut: { type: 'TOP_N', n: 12 }, toStageId: 'sf' }],
+    });
+
+    expect(result.routes[0].toStageId).toBe('sf');
+    expect(result.routes[0].participants.map((item) => item.id)).toEqual(
+      makeParticipants(12).map((item) => item.id),
+    );
+    expect(result.routes[0].startLists?.heats).toHaveLength(2);
+  });
+
+  it('splits a 10-athlete semifinal into Final A and Final B by halves', () => {
+    const participants = makeParticipants(10);
+    const result = advanceStage({
+      format: knockout24Format,
+      stageId: 'sf',
+      participants,
+      heatResults: [
+        placedHeat(1, participants.slice(0, 5)),
+        placedHeat(2, participants.slice(5)),
+      ],
+    });
+
+    expect(result.routes[0].participants.map((item) => item.id)).toEqual([
+      'p1',
+      'p2',
+      'p3',
+      'p4',
+      'p5',
+    ]);
+    expect(result.routes[1].participants.map((item) => item.id)).toEqual([
+      'p6',
+      'p7',
+      'p8',
+      'p9',
+      'p10',
+    ]);
+  });
 });

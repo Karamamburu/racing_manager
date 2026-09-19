@@ -54,7 +54,9 @@ export type AdvancementCut =
   | { type: 'TOP_FRACTION'; numerator: number; denominator: number }
   | { type: 'TOP_N'; n: number }
   | { type: 'RANK_RANGE'; from: number; to: number }
-  | { type: 'TOP_PER_HEAT'; n: number };
+  | { type: 'TOP_PER_HEAT'; n: number }
+  | { type: 'FIRST_HALF' }
+  | { type: 'SECOND_HALF' };
 
 export type AdvancementRoute = {
   cut: AdvancementCut;
@@ -131,4 +133,5 @@ export type AdvanceStageInput = {
   stageId: string;
   participants: Participant[];
   heatResults: HeatResult[];
+  routes?: AdvancementRoute[];
 };

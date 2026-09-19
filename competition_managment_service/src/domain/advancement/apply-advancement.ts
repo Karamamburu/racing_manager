@@ -1,6 +1,6 @@
 import { DomainError, ErrorCodes } from '../errors';
 import { isEligible } from '../ranking/rank-stage';
-import { AdvancementCut, RankedEntry, StageSpec } from '../types';
+import { AdvancementCut, AdvancementRoute, RankedEntry } from '../types';
 
 function sliceTop(eligible: RankedEntry[], count: number): RankedEntry[] {
   if (count <= 0) {
@@ -26,6 +26,10 @@ function applyCut(
       return sliceTop(eligible, cut.n);
     case 'RANK_RANGE':
       return eligible.slice(cut.from - 1, cut.to);
+    case 'FIRST_HALF':
+      return sliceTop(eligible, Math.ceil(fieldSize / 2));
+    case 'SECOND_HALF':
+      return eligible.slice(Math.ceil(fieldSize / 2));
     case 'TOP_PER_HEAT': {
       const byHeat = new Map<number, RankedEntry[]>();
       for (const entry of eligible) {
@@ -56,21 +60,21 @@ export type RoutedEntries = {
 };
 
 export function applyAdvancement(
-  stage: StageSpec,
+  routes: AdvancementRoute[],
   ranking: RankedEntry[],
   fieldSize: number,
 ): { routes: RoutedEntries[]; eliminated: RankedEntry[] } {
   const eligible = ranking.filter(isEligible);
 
-  if (stage.advancement.type === 'NONE') {
+  if (routes.length === 0) {
     return { routes: [], eliminated: ranking };
   }
 
   const taken = new Set<string>();
-  const routes: RoutedEntries[] = [];
+  const routed: RoutedEntries[] = [];
 
-  for (let index = 0; index < stage.advancement.routes.length; index += 1) {
-    const route = stage.advancement.routes[index];
+  for (let index = 0; index < routes.length; index += 1) {
+    const route = routes[index];
     const entries = applyCut(route.cut, eligible, fieldSize);
     for (const entry of entries) {
       if (taken.has(entry.participant.id)) {
@@ -82,9 +86,9 @@ export function applyAdvancement(
       }
       taken.add(entry.participant.id);
     }
-    routes.push({ toStageId: route.toStageId, entries });
+    routed.push({ toStageId: route.toStageId, entries });
   }
 
   const eliminated = ranking.filter((entry) => !taken.has(entry.participant.id));
-  return { routes, eliminated };
+  return { routes: routed, eliminated };
 }

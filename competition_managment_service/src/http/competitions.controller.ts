@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { CompetitionsService } from '../persistence/competitions.service';
 import {
   parseCreateCompetitionBody,
+  parsePersistedAdvanceBody,
   parseSeedStageBody,
   parseStageResultsBody,
 } from './parse-competition-bodies';
@@ -41,7 +42,12 @@ export class CompetitionsController {
   }
 
   @Post(':id/stages/:stageId/advance')
-  advance(@Param('id') id: string, @Param('stageId') stageId: string) {
-    return this.competitions.advanceStage(id, stageId);
+  advance(
+    @Param('id') id: string,
+    @Param('stageId') stageId: string,
+    @Body() body: unknown,
+  ) {
+    const parsed = parsePersistedAdvanceBody(body);
+    return this.competitions.advanceStage(id, stageId, parsed.routes);
   }
 }

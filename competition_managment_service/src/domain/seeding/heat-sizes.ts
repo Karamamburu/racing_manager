@@ -20,45 +20,12 @@ export function resolveHeatCount(
     );
   }
 
-  if (heatCount != null && heatSize != null) {
-    if (heatCount > participantCount) {
-      throw new DomainError(
-        ErrorCodes.SEEDING_INVALID,
-        `heatCount (${heatCount}) cannot exceed participant count (${participantCount}).`,
-        `${path}.heatCount`,
-      );
-    }
-    if (heatCount * heatSize < participantCount) {
-      throw new DomainError(
-        ErrorCodes.SEEDING_INVALID,
-        `heatCount * heatSize (${heatCount * heatSize}) is less than participant count (${participantCount}).`,
-        path,
-      );
-    }
-    const maxSize = Math.ceil(participantCount / heatCount);
-    if (maxSize > heatSize) {
-      throw new DomainError(
-        ErrorCodes.SEEDING_INVALID,
-        `Balanced heats of ${heatCount} would have size ${maxSize}, exceeding heatSize ${heatSize}.`,
-        path,
-      );
-    }
-    return heatCount;
+  if (heatSize != null) {
+    return Math.min(participantCount, Math.max(1, Math.ceil(participantCount / heatSize)));
   }
 
   if (heatCount != null) {
-    if (heatCount > participantCount) {
-      throw new DomainError(
-        ErrorCodes.SEEDING_INVALID,
-        `heatCount (${heatCount}) cannot exceed participant count (${participantCount}).`,
-        `${path}.heatCount`,
-      );
-    }
-    return heatCount;
-  }
-
-  if (heatSize != null) {
-    return Math.ceil(participantCount / heatSize);
+    return Math.min(heatCount, participantCount);
   }
 
   throw new DomainError(

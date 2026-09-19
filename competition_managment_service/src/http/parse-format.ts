@@ -113,6 +113,10 @@ function parseCut(value: unknown, path: string): AdvancementCut {
       };
     case 'TOP_PER_HEAT':
       return { type: 'TOP_PER_HEAT', n: readInteger(raw.n, `${path}.n`) as number };
+    case 'FIRST_HALF':
+      return { type: 'FIRST_HALF' };
+    case 'SECOND_HALF':
+      return { type: 'SECOND_HALF' };
     default:
       throw new DomainError(
         ErrorCodes.FORMAT_INVALID,
@@ -135,16 +139,19 @@ function parseAdvancement(value: unknown, path: string): Advancement {
       `${path}.type`,
     );
   }
-  const routesRaw = readArray(raw.routes, `${path}.routes`);
-  const routes: AdvancementRoute[] = routesRaw.map((item, index) => {
-    const routePath = `${path}.routes[${index}]`;
+  return { type: 'ROUTES', routes: parseRoutes(raw.routes, `${path}.routes`) };
+}
+
+export function parseRoutes(value: unknown, path: string): AdvancementRoute[] {
+  const items = readArray(value, path);
+  return items.map((item, index) => {
+    const routePath = `${path}[${index}]`;
     const route = readObject(item, routePath);
     return {
       cut: parseCut(route.cut, `${routePath}.cut`),
       toStageId: readString(route.toStageId, `${routePath}.toStageId`) as string,
     };
   });
-  return { type: 'ROUTES', routes };
 }
 
 function parseStage(value: unknown, path: string): StageSpec {

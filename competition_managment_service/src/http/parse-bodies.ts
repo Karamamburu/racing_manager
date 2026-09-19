@@ -5,7 +5,7 @@ import {
   Participant,
   ParticipantResult,
 } from '../domain/types';
-import { parseFormat, parseResultStatus } from './parse-format';
+import { parseFormat, parseResultStatus, parseRoutes } from './parse-format';
 import {
   isRecord,
   readArray,
@@ -126,5 +126,6 @@ export function parseAdvanceBody(body: unknown) {
     stageId: readString(body.stageId, 'stageId') as string,
     participants: parseParticipants(body.participants),
     heatResults: parseHeatResults(body.heatResults),
+    routes: body.routes === undefined ? undefined : parseRoutes(body.routes, 'routes'),
   };
 }

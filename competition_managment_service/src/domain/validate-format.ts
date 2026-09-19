@@ -153,6 +153,9 @@ function validateCut(cut: AdvancementCut, path: string): void {
         );
       }
       return;
+    case 'FIRST_HALF':
+    case 'SECOND_HALF':
+      return;
     default:
       throw new DomainError(
         ErrorCodes.FORMAT_INVALID,
