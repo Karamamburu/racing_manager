@@ -54,6 +54,19 @@ export class ClassCompetitionsService {
     return result.data;
   }
 
+  public async setStageQualification(
+    eventId: string,
+    classCompetitionId: string,
+    stageId: string,
+    body: { registrationId: string; status: string },
+  ): Promise<ClassCompetitionView> {
+    const result = await apiClient.patchResult<ClassCompetitionView>(
+      `/events/${eventId}/class-competitions/${classCompetitionId}/stages/${stageId}/qualification`,
+      body,
+    );
+    return result.data;
+  }
+
   public async recordHeatTimes(
     eventId: string,
     classCompetitionId: string,

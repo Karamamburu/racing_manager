@@ -80,6 +80,25 @@ export class ClassCompetitionsController {
     return this.classCompetitions.reassignHeats(req.session?.userSub, eventId, id, stageId, body);
   }
 
+  @Patch(':id/stages/:stageId/qualification')
+  @UseGuards(SessionAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLE_CODES)
+  setStageQualification(
+    @Req() req: Request,
+    @Param('eventId', eventIdPipe) eventId: string,
+    @Param('id', classIdPipe) id: string,
+    @Param('stageId') stageId: string,
+    @Body() body: unknown,
+  ) {
+    return this.classCompetitions.setStageQualification(
+      req.session?.userSub,
+      eventId,
+      id,
+      stageId,
+      body,
+    );
+  }
+
   @Put(':id/stages/:stageId/heat-times')
   @UseGuards(SessionAuthGuard, RolesGuard)
   @Roles(...ADMIN_ROLE_CODES)

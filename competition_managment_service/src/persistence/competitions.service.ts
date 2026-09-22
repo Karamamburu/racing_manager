@@ -5,6 +5,7 @@ import { buildStartLists } from '../domain/build-start-lists';
 import { assignManualHeats } from '../domain/seeding/manual';
 import { DomainError, ErrorCodes } from '../domain/errors';
 import { normalizeParticipants } from '../domain/participants';
+import { rankStage } from '../domain/ranking/rank-stage';
 import {
   AddStageOp,
   PatchHeatsOp,
@@ -32,6 +33,17 @@ import {
 } from './mappers';
 import { PrismaService } from './prisma.service';
 import { sourceStageIds } from './stage-graph';
+
+function advancementKept(
+  stage: CompetitionFormat['stages'][number],
+  nextById: Map<string, CompetitionFormat['stages'][number]>,
+): CompetitionFormat['stages'][number]['advancement'] {
+  if (stage.advancement.type !== 'ROUTES') return stage.advancement;
+  const routes = stage.advancement.routes.filter((route) => nextById.has(route.toStageId));
+  if (routes.length === stage.advancement.routes.length) return stage.advancement;
+  if (routes.length === 0) return { type: 'NONE' };
+  return { type: 'ROUTES', routes };
+}
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -404,6 +416,128 @@ export class CompetitionsService {
     return this.getById(competition.id);
   }
 
+  async completeStage(competitionId: string, stageId: string) {
+    const competition = await this.load(competitionId);
+    this.assertMutable(competition);
+    const format = toFormat(competition.formatSnapshot);
+    const stageRun = this.requireStageRun(competition, stageId);
+    if (stageRun.status !== 'SEEDED') {
+      throw new DomainError(
+        ErrorCodes.STAGE_NOT_READY,
+        `Stage "${stageId}" must be SEEDED to complete.`,
+        'stageId',
+      );
+    }
+    const missing = stageRun.heats.flatMap((heat) =>
+      heat.slots.filter((slot) => slot.result == null),
+    );
+    if (missing.length > 0) {
+      throw new DomainError(
+        ErrorCodes.STAGE_NOT_READY,
+        'All heat results must be recorded before completing the stage.',
+        'heatResults',
+      );
+    }
+
+    const entries = this.entriesForStage(competition, stageId);
+    const ranking = rankStage(
+      toDomainParticipants(entries.map((entry) => entry.participant)),
+      toHeatResults(stageRun.heats),
+    );
+    const byExternal = this.participantIds(competition);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.stageRanking.deleteMany({ where: { stageRunId: stageRun.id } });
+      await tx.stageRanking.createMany({
+        data: ranking.map((entry) => ({
+          stageRunId: stageRun.id,
+          participantId: this.requireParticipantId(byExternal, entry.participant.id),
+          rank: entry.rank,
+          heatNumber: entry.heatNumber,
+          status: entry.status,
+          place: entry.place,
+        })),
+      });
+      await tx.stageRun.update({
+        where: { id: stageRun.id },
+        data: { status: 'COMPLETED' },
+      });
+
+      const statusByStage = new Map(
+        competition.stageRuns.map((run) => [run.stageId, run.status]),
+      );
+      statusByStage.set(stageId, 'COMPLETED');
+      const allDone = format.stages.every((stage) => statusByStage.get(stage.id) === 'COMPLETED');
+      if (allDone) {
+        await tx.competition.update({
+          where: { id: competition.id },
+          data: { status: 'DONE' },
+        });
+      }
+    });
+
+    return this.getById(competition.id);
+  }
+
+  async setStageField(competitionId: string, stageId: string, externalIds: string[]) {
+    const competition = await this.load(competitionId);
+    this.assertMutable(competition);
+    const stageRun = this.requireStageRun(competition, stageId);
+    if (stageRun.status !== 'PENDING') {
+      throw new DomainError(
+        ErrorCodes.STAGE_NOT_READY,
+        `Stage "${stageId}" must be PENDING to choose its field.`,
+        'stageId',
+      );
+    }
+    if (stageRun.heats.length > 0) {
+      throw new DomainError(
+        ErrorCodes.STAGE_NOT_READY,
+        `Stage "${stageId}" already has heats.`,
+        'stageId',
+      );
+    }
+    const uniqueIds = [...new Set(externalIds)];
+    if (uniqueIds.length === 0) {
+      throw new DomainError(
+        ErrorCodes.PARTICIPANT_INVALID,
+        'participantIds must contain at least one participant.',
+        'participantIds',
+      );
+    }
+    const byExternal = new Map(
+      competition.participants.map((row) => [row.externalId, row]),
+    );
+    const participants = uniqueIds.map((externalId) => {
+      const row = byExternal.get(externalId);
+      if (!row) {
+        throw new DomainError(
+          ErrorCodes.PARTICIPANT_INVALID,
+          `Unknown participant "${externalId}".`,
+          'participantIds',
+        );
+      }
+      return row;
+    });
+    participants.sort((a, b) => a.seed - b.seed);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.stageEntry.deleteMany({
+        where: { competitionId: competition.id, stageId },
+      });
+      await tx.stageEntry.createMany({
+        data: participants.map((participant) => ({
+          competitionId: competition.id,
+          stageId,
+          participantId: participant.id,
+          seed: participant.seed,
+        })),
+      });
+    });
+
+    return this.getById(competition.id);
+  }
+
   async advanceStage(
     competitionId: string,
     stageId: string,
@@ -702,7 +836,7 @@ export class CompetitionsService {
         if (
           run.status === 'COMPLETED' &&
           currentStage &&
-          JSON.stringify(currentStage.advancement) !==
+          JSON.stringify(advancementKept(currentStage, nextById)) !==
             JSON.stringify(nextStage.advancement)
         ) {
           throw new DomainError(

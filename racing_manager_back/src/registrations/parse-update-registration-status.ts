@@ -17,7 +17,7 @@ export function parseUpdateRegistrationStatusBody(
   const normalized = status.trim().toUpperCase();
   if (!isManageableRegistrationStatus(normalized)) {
     throw new BadRequestException(
-      'status must be REGISTERED, CONFIRMED, DNS, DNF, QQ, DSQ or CANCELLED.',
+      'status must be REGISTERED, CONFIRMED, DNS, DNF, QQ, NQ, DSQ or CANCELLED.',
     );
   }
   return normalized;

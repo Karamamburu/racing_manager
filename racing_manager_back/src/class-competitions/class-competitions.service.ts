@@ -4,7 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ClassCompetitionStatus, ClassHeatResultStatus, Prisma } from '../../generated/prisma';
+import {
+  ClassCompetitionStatus,
+  ClassHeatResultStatus,
+  Prisma,
+  RegistrationStatus,
+} from '../../generated/prisma';
 import { ADMIN_ROLE_CODES } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
 import {
@@ -12,9 +17,13 @@ import {
   isPastCompletedEvent,
 } from '../events/event-status';
 import { PrismaService } from '../prisma/prisma.service';
-import { ACTIVE_REGISTRATION_STATUSES } from '../registrations/registration-status';
+import {
+  ACTIVE_REGISTRATION_STATUSES,
+  RegistrationStatusCode,
+} from '../registrations/registration-status';
 import { classifyBracket, lastOkTimes } from './classify-bracket';
 import { CmsClient } from './cms.client';
+import { qualificationForHeat } from './qualify-heat';
 import { CmsCompetition, CmsStageSpec } from './cms.types';
 import {
   ParsedHeatTimes,
@@ -22,6 +31,7 @@ import {
   parseHeatAssignmentBody,
   parseHeatTimesBody,
   parsePlanChangeBody,
+  parseStageQualificationBody,
 } from './parse-class-competition';
 import { buildAddStageOp } from './stage-templates';
 
@@ -40,6 +50,7 @@ type StoredRegistration = {
   startNumber: number | null;
   gender: string;
   formatId: number | null;
+  status: string;
 };
 
 type StoredHeatTime = {
@@ -48,6 +59,7 @@ type StoredHeatTime = {
   registrationId: string;
   timeMilliseconds: number | null;
   status: ClassHeatResultStatus;
+  qualificationStatus: RegistrationStatus | null;
 };
 
 type StoredClassCompetition = {
@@ -78,6 +90,7 @@ const classCompetitionInclude = {
       registrationId: true,
       timeMilliseconds: true,
       status: true,
+      qualificationStatus: true,
     },
   },
 } satisfies Prisma.ClassCompetitionInclude;
@@ -88,11 +101,13 @@ export type ClassCompetitionView = {
   formatId: number | null;
   gender: string;
   status: ClassCompetitionStatus;
-  stages: Array<{
+    stages: Array<{
     stageId: string;
     kind: string;
     label: string | null;
     status: string;
+    sourceStageId: string | null;
+    qualifierStatus: 'QQ' | 'NQ' | null;
     heats: Array<{
       heatNumber: number;
       slots: Array<{
@@ -101,6 +116,7 @@ export type ClassCompetitionView = {
         firstName: string;
         lastName: string;
         startNumber: number | null;
+        registrationStatus: string;
         timeMilliseconds: number | null;
         resultStatus: string | null;
       }>;
@@ -140,7 +156,7 @@ export class ClassCompetitionsService {
     const views: ClassCompetitionView[] = [];
     for (const row of rows) {
       const cms = await this.cms.getCompetition(row.cmsCompetitionId);
-      views.push(this.toView(row, cms, registrations));
+      views.push(await this.present(row, cms, registrations));
     }
     return views;
   }
@@ -203,7 +219,7 @@ export class ClassCompetitionsService {
         },
         include: classCompetitionInclude,
       });
-      return this.toView(created, cms, registrations);
+      return this.present(created, cms, registrations);
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ConflictException('Для этой категории многоэтапная гонка уже создана.');
@@ -234,7 +250,7 @@ export class ClassCompetitionsService {
           },
     );
     await this.persistOutcome(row.id, next);
-    return this.toView(await this.reload(row.id), next, await this.loadRegistrations(eventId));
+    return this.present(await this.reload(row.id), next, await this.loadRegistrations(eventId));
   }
 
   async seedStage(
@@ -246,9 +262,25 @@ export class ClassCompetitionsService {
     await this.rolesService.assertHasAnyRole(authentikId, ADMIN_ROLE_CODES);
     const row = await this.requireOwned(eventId, classCompetitionId);
     this.assertMutableEvent(row.event);
+    const cms = await this.cms.getCompetition(row.cmsCompetitionId);
+    const registrations = await this.loadRegistrations(eventId);
+    const frozen = await this.freezeMissingQualifications(row, cms, registrations);
+    const target = cms.stages.find((item) => item.stageId === stageId);
+    if (target && target.status === 'PENDING' && target.entries.length === 0) {
+      const source = sourceOfStage(cms.format.stages, stageId);
+      const qualified = this.qualifiedFromPreviousStage(frozen, cms, stageId);
+      if (qualified.length === 0) {
+        throw new BadRequestException(
+          source?.qualifierStatus === 'NQ'
+            ? 'Нет участников со статусом NQ. Финал B разыгрывают проигравшие полуфинал.'
+            : 'Нет участников со статусом QQ. Сначала отметьте, кто проходит в следующий этап.',
+        );
+      }
+      await this.cms.setStageField(row.cmsCompetitionId, stageId, qualified);
+    }
     const next = await this.cms.seedStage(row.cmsCompetitionId, stageId);
     await this.persistOutcome(row.id, next);
-    return this.toView(await this.reload(row.id), next, await this.loadRegistrations(eventId));
+    return this.present(await this.reload(row.id), next, registrations);
   }
 
   async reassignHeats(
@@ -272,7 +304,7 @@ export class ClassCompetitionsService {
     );
     await this.moveHeatTimes(row.id, stageId, parsed.heats);
     await this.persistOutcome(row.id, next);
-    return this.toView(await this.reload(row.id), next, await this.loadRegistrations(eventId));
+    return this.present(await this.reload(row.id), next, await this.loadRegistrations(eventId));
   }
 
   async recordHeatTimes(
@@ -301,7 +333,7 @@ export class ClassCompetitionsService {
     await this.upsertHeatTimes(row.id, stageId, parsed);
 
     if (!parsed.commit) {
-      return this.toView(
+      return this.present(
         await this.reload(row.id),
         current,
         await this.loadRegistrations(eventId),
@@ -354,9 +386,115 @@ export class ClassCompetitionsService {
     });
 
     await this.cms.recordResults(row.cmsCompetitionId, stageId, heatResults);
-    const advanced = await this.cms.advanceStage(row.cmsCompetitionId, stageId);
-    await this.persistOutcome(row.id, advanced);
-    return this.toView(await this.reload(row.id), advanced, registrations);
+    await this.assignQualification(row.id, stage, byRegistration, startNumbers);
+    const completed = await this.cms.completeStage(row.cmsCompetitionId, stageId);
+    await this.persistOutcome(row.id, completed);
+    return this.present(
+      await this.reload(row.id),
+      completed,
+      await this.loadRegistrations(eventId),
+    );
+  }
+
+  async setStageQualification(
+    authentikId: string | undefined,
+    eventId: string,
+    classCompetitionId: string,
+    stageId: string,
+    body: unknown,
+  ): Promise<ClassCompetitionView> {
+    await this.rolesService.assertHasAnyRole(authentikId, ADMIN_ROLE_CODES);
+    const parsed = parseStageQualificationBody(body);
+    const row = await this.requireOwned(eventId, classCompetitionId);
+    this.assertMutableEvent(row.event);
+    const cms = await this.cms.getCompetition(row.cmsCompetitionId);
+    const stage = cms.stages.find((item) => item.stageId === stageId);
+    if (!stage || stage.status !== 'COMPLETED') {
+      throw new BadRequestException('Статус этапа можно менять только после его фиксации.');
+    }
+    const heatTime = row.heatTimes.find(
+      (item) => item.stageId === stageId && item.registrationId === parsed.registrationId,
+    );
+    if (!heatTime) {
+      throw new NotFoundException('Участник не выступал на этом этапе.');
+    }
+    await this.prisma.classHeatTime.updateMany({
+      where: {
+        classCompetitionId: row.id,
+        stageId,
+        registrationId: parsed.registrationId,
+      },
+      data: { qualificationStatus: parsed.status },
+    });
+    if (!appearedOnLaterStage(cms, stageId, parsed.registrationId)) {
+      await this.prisma.registration.update({
+        where: { id: parsed.registrationId },
+        data: { status: parsed.status },
+      });
+    }
+    return this.present(
+      await this.reload(row.id),
+      cms,
+      await this.loadRegistrations(eventId),
+    );
+  }
+
+  private async assignQualification(
+    classCompetitionId: string,
+    stage: CmsCompetition['stages'][number],
+    byRegistration: Map<string, { status: string; timeMilliseconds: number | null }>,
+    startNumbers: Map<string, number | null>,
+  ) {
+    const updates: Array<{ registrationId: string; status: RegistrationStatusCode }> = [];
+    for (const heat of stage.heats) {
+      const slots = heat.slots.map((slot) => {
+        const stored = byRegistration.get(slot.participantId);
+        return {
+          registrationId: slot.participantId,
+          status: stored?.status ?? 'DNS',
+          timeMilliseconds: stored?.timeMilliseconds ?? null,
+          startNumber: startNumbers.get(slot.participantId) ?? null,
+        };
+      });
+      for (const [registrationId, status] of qualificationForHeat(slots)) {
+        updates.push({ registrationId, status });
+      }
+    }
+    await this.prisma.$transaction(async (tx) => {
+      for (const update of updates) {
+        await tx.classHeatTime.updateMany({
+          where: {
+            classCompetitionId,
+            stageId: stage.stageId,
+            registrationId: update.registrationId,
+          },
+          data: { qualificationStatus: update.status },
+        });
+        await tx.registration.update({
+          where: { id: update.registrationId },
+          data: { status: update.status },
+        });
+      }
+    });
+  }
+
+  private qualifiedFromPreviousStage(
+    row: StoredClassCompetition,
+    cms: CmsCompetition,
+    stageId: string,
+  ): string[] {
+    const source = sourceOfStage(cms.format.stages, stageId);
+    if (!source) return [];
+    const previous = cms.stages.find((stage) => stage.stageId === source.sourceStageId);
+    if (!previous || previous.status !== 'COMPLETED') return [];
+    const ids = row.heatTimes
+      .filter(
+        (item) =>
+          item.stageId === source.sourceStageId &&
+          item.qualificationStatus === source.qualifierStatus,
+      )
+      .map((item) => item.registrationId);
+    return [...new Set(ids)];
   }
 
   private assertEntriesMatchHeats(
@@ -425,6 +563,7 @@ export class ClassCompetitionsService {
             registrationId,
             status: previous.status,
             timeMilliseconds: previous.timeMilliseconds,
+            qualificationStatus: previous.qualificationStatus,
           },
         ];
       }),
@@ -558,7 +697,14 @@ export class ClassCompetitionsService {
       formatId: row.formatId,
       gender: row.gender,
       status: cms.status,
-      stages: cms.format.stages.map((spec) => this.toStage(spec, runs.get(spec.id), people, times)),
+      stages: orderFinals(cms.format.stages).map((spec) => {
+        const source = sourceOfStage(cms.format.stages, spec.id);
+        return {
+          ...this.toStage(spec, runs.get(spec.id), people, times),
+          sourceStageId: source?.sourceStageId ?? null,
+          qualifierStatus: source?.qualifierStatus ?? null,
+        };
+      }),
       classification: [...places.entries()]
         .map(([registrationId, place]) => ({
           registrationId,
@@ -574,7 +720,7 @@ export class ClassCompetitionsService {
     run: CmsCompetition['stages'][number] | undefined,
     people: Map<string, StoredRegistration>,
     times: Map<string, StoredHeatTime>,
-  ): ClassCompetitionView['stages'][number] {
+  ): Omit<ClassCompetitionView['stages'][number], 'sourceStageId' | 'qualifierStatus'> {
     const person = (registrationId: string) => {
       const registration = people.get(registrationId);
       return {
@@ -582,8 +728,12 @@ export class ClassCompetitionsService {
         firstName: registration?.firstName ?? '',
         lastName: registration?.lastName ?? '',
         startNumber: registration?.startNumber ?? null,
+        registrationStatus: registration?.status ?? RegistrationStatusCode.REGISTERED,
       };
     };
+    const stageStatus = (registrationId: string, stored: StoredHeatTime | undefined) =>
+      stored?.qualificationStatus ??
+      person(registrationId).registrationStatus;
     return {
       stageId: spec.id,
       kind: spec.kind,
@@ -595,6 +745,7 @@ export class ClassCompetitionsService {
           const stored = times.get(`${spec.id}:${heat.heatNumber}:${slot.participantId}`);
           return {
             ...person(slot.participantId),
+            registrationStatus: stageStatus(slot.participantId, stored),
             position: slot.position,
             timeMilliseconds: stored?.timeMilliseconds ?? null,
             resultStatus: stored?.status ?? null,
@@ -608,6 +759,140 @@ export class ClassCompetitionsService {
       })),
     };
   }
+
+  private async present(
+    row: StoredClassCompetition,
+    cms: CmsCompetition,
+    registrations: StoredRegistration[],
+  ): Promise<ClassCompetitionView> {
+    const frozen = await this.freezeMissingQualifications(row, cms, registrations);
+    return this.toView(frozen, cms, registrations);
+  }
+
+  private async freezeMissingQualifications(
+    row: StoredClassCompetition,
+    cms: CmsCompetition,
+    registrations: StoredRegistration[],
+  ): Promise<StoredClassCompetition> {
+    const startNumbers = new Map(registrations.map((item) => [item.id, item.startNumber]));
+    const registrationStatus = new Map(registrations.map((item) => [item.id, item.status]));
+    const heatTimes = row.heatTimes.map((item) => ({ ...item }));
+    const updates: Array<{
+      stageId: string;
+      registrationId: string;
+      status: RegistrationStatus;
+    }> = [];
+
+    for (const run of cms.stages) {
+      if (run.status !== 'COMPLETED') continue;
+      const stageTimes = heatTimes.filter((item) => item.stageId === run.stageId);
+      if (stageTimes.every((item) => item.qualificationStatus != null)) continue;
+      const byHeat = new Map<number, StoredHeatTime[]>();
+      for (const item of stageTimes) {
+        const group = byHeat.get(item.heatNumber) ?? [];
+        group.push(item);
+        byHeat.set(item.heatNumber, group);
+      }
+      const assigned = new Map<string, RegistrationStatusCode>();
+      for (const group of byHeat.values()) {
+        for (const [registrationId, status] of qualificationForHeat(
+          group.map((item) => ({
+            registrationId: item.registrationId,
+            status: item.status,
+            timeMilliseconds: item.timeMilliseconds,
+            startNumber: startNumbers.get(item.registrationId) ?? null,
+          })),
+        )) {
+          assigned.set(registrationId, status);
+        }
+      }
+      for (const item of stageTimes) {
+        if (item.qualificationStatus != null) continue;
+        const computed = assigned.get(item.registrationId);
+        if (!computed) continue;
+        const current = registrationStatus.get(item.registrationId);
+        const keepCurrent =
+          !appearedOnLaterStage(cms, run.stageId, item.registrationId) &&
+          isStageOutcomeStatus(current);
+        const status = keepCurrent ? (current as RegistrationStatus) : computed;
+        item.qualificationStatus = status;
+        updates.push({ stageId: run.stageId, registrationId: item.registrationId, status });
+      }
+    }
+
+    if (updates.length > 0) {
+      await this.prisma.$transaction(async (tx) => {
+        for (const update of updates) {
+          await tx.classHeatTime.updateMany({
+            where: {
+              classCompetitionId: row.id,
+              stageId: update.stageId,
+              registrationId: update.registrationId,
+              qualificationStatus: null,
+            },
+            data: { qualificationStatus: update.status },
+          });
+        }
+      });
+    }
+    return { ...row, heatTimes };
+  }
+}
+
+function orderFinals(stages: CmsStageSpec[]): CmsStageSpec[] {
+  const next = [...stages];
+  const finalB = next.findIndex((stage) => stage.kind === 'FINAL_B' || stage.id === 'final_b');
+  const finalA = next.findIndex((stage) => stage.kind === 'FINAL_A' || stage.id === 'final_a');
+  if (finalB < 0 || finalA < 0 || finalB < finalA) return next;
+  const [consolation] = next.splice(finalB, 1);
+  const finalAIndex = next.findIndex((stage) => stage.kind === 'FINAL_A' || stage.id === 'final_a');
+  next.splice(finalAIndex, 0, consolation);
+  return next;
+}
+
+const STAGE_OUTCOME_STATUSES = new Set<string>([
+  RegistrationStatusCode.QQ,
+  RegistrationStatusCode.NQ,
+  RegistrationStatusCode.DNS,
+  RegistrationStatusCode.DNF,
+  RegistrationStatusCode.DSQ,
+]);
+
+function isStageOutcomeStatus(status: string | undefined): boolean {
+  return status != null && STAGE_OUTCOME_STATUSES.has(status);
+}
+
+function appearedOnLaterStage(
+  cms: CmsCompetition,
+  stageId: string,
+  registrationId: string,
+): boolean {
+  const index = cms.format.stages.findIndex((stage) => stage.id === stageId);
+  if (index < 0) return false;
+  const laterIds = new Set(cms.format.stages.slice(index + 1).map((stage) => stage.id));
+  return cms.stages.some((stage) => {
+    if (!laterIds.has(stage.stageId) || stage.status === 'PENDING') return false;
+    const inHeat = stage.heats.some((heat) =>
+      heat.slots.some((slot) => slot.participantId === registrationId),
+    );
+    const inField = stage.entries.some((entry) => entry.participantId === registrationId);
+    return inHeat || inField;
+  });
+}
+
+function sourceOfStage(
+  stages: CmsStageSpec[],
+  stageId: string,
+): { sourceStageId: string; qualifierStatus: 'QQ' | 'NQ' } | null {
+  for (const stage of stages) {
+    if (stage.advancement.type !== 'ROUTES') continue;
+    for (const route of stage.advancement.routes) {
+      if (route.toStageId !== stageId) continue;
+      const qualifierStatus = route.cut.type === 'SECOND_HALF' || stageId === 'final_b' ? 'NQ' : 'QQ';
+      return { sourceStageId: stage.id, qualifierStatus };
+    }
+  }
+  return null;
 }
 
 function isUniqueViolation(error: unknown): boolean {

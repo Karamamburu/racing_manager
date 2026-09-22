@@ -6,6 +6,7 @@ export const RegistrationStatusCode = {
   DNS: 'DNS',
   DNF: 'DNF',
   QQ: 'QQ',
+  NQ: 'NQ',
   DSQ: 'DSQ',
 } as const;
 
@@ -20,6 +21,7 @@ export const REGISTRATION_STATUSES = [
   RegistrationStatusCode.DNS,
   RegistrationStatusCode.DNF,
   RegistrationStatusCode.QQ,
+  RegistrationStatusCode.NQ,
   RegistrationStatusCode.DSQ,
 ] as const;
 
@@ -34,6 +36,7 @@ export const LISTED_REGISTRATION_STATUSES: RegistrationStatusCode[] = [
   RegistrationStatusCode.DNS,
   RegistrationStatusCode.DNF,
   RegistrationStatusCode.QQ,
+  RegistrationStatusCode.NQ,
   RegistrationStatusCode.DSQ,
 ];
 
@@ -43,6 +46,7 @@ export const MANAGEABLE_REGISTRATION_STATUSES: RegistrationStatusCode[] = [
   RegistrationStatusCode.DNS,
   RegistrationStatusCode.DNF,
   RegistrationStatusCode.QQ,
+  RegistrationStatusCode.NQ,
   RegistrationStatusCode.DSQ,
   RegistrationStatusCode.CANCELLED,
 ];
@@ -51,6 +55,7 @@ export const UNRANKED_REGISTRATION_STATUSES: RegistrationStatusCode[] = [
   RegistrationStatusCode.DNS,
   RegistrationStatusCode.DNF,
   RegistrationStatusCode.DSQ,
+  RegistrationStatusCode.NQ,
   RegistrationStatusCode.CANCELLED,
   RegistrationStatusCode.WITHDRAWN,
 ];
@@ -84,6 +89,7 @@ export function isRecordableRegistrationStatus(status: string): boolean {
     status === RegistrationStatusCode.CONFIRMED ||
     status === RegistrationStatusCode.DNF ||
     status === RegistrationStatusCode.QQ ||
+    status === RegistrationStatusCode.NQ ||
     status === RegistrationStatusCode.DSQ ||
     status === RegistrationStatusCode.REGISTERED
   );

@@ -12,6 +12,7 @@ export type ClassHeatSlot = {
   firstName: string;
   lastName: string;
   startNumber: number | null;
+  registrationStatus: string;
   timeMilliseconds: number | null;
   resultStatus: HeatResultStatus | null;
 };
@@ -21,6 +22,8 @@ export type ClassCompetitionStage = {
   kind: string;
   label: string | null;
   status: ClassStageStatus;
+  sourceStageId: string | null;
+  qualifierStatus: 'QQ' | 'NQ' | null;
   heats: Array<{
     heatNumber: number;
     slots: ClassHeatSlot[];

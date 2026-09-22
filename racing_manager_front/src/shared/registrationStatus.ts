@@ -6,6 +6,7 @@ export const RegistrationStatusCode = {
   DNS: 'DNS',
   DNF: 'DNF',
   QQ: 'QQ',
+  NQ: 'NQ',
   DSQ: 'DSQ',
 } as const;
 
@@ -20,6 +21,7 @@ export const REGISTRATION_STATUSES = [
   RegistrationStatusCode.DNS,
   RegistrationStatusCode.DNF,
   RegistrationStatusCode.QQ,
+  RegistrationStatusCode.NQ,
   RegistrationStatusCode.DSQ,
 ] as const;
 
@@ -29,6 +31,7 @@ export const MANAGEABLE_REGISTRATION_STATUSES = [
   RegistrationStatusCode.DNS,
   RegistrationStatusCode.DNF,
   RegistrationStatusCode.QQ,
+  RegistrationStatusCode.NQ,
   RegistrationStatusCode.DSQ,
   RegistrationStatusCode.CANCELLED,
 ] as const;
@@ -49,6 +52,7 @@ export const REGISTRATION_STATUS_META: Record<
   DNS: { text: 'DNS — не стартовал', color: 'default' },
   DNF: { text: 'DNF — не финишировал', color: 'orange' },
   QQ: { text: 'QQ — квалифицирован в следующий раунд', color: 'cyan' },
+  NQ: { text: 'NQ — не квалифицирован', color: 'gold' },
   DSQ: { text: 'DSQ — дисквалифицирован', color: 'magenta' },
 };
 
@@ -66,6 +70,7 @@ export function isRecordableRegistrationStatus(status: string): boolean {
     status === 'CONFIRMED' ||
     status === 'DNF' ||
     status === 'QQ' ||
+    status === 'NQ' ||
     status === 'DSQ'
   );
 }

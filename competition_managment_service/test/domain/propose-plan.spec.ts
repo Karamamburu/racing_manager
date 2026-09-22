@@ -35,7 +35,7 @@ function heatSpec(plan: ReturnType<typeof proposePlan>, stageId: string) {
 describe('proposePlan', () => {
   it('builds prologue, 4 QF, 2 SF and finals A/B for 24', () => {
     const plan = proposePlan({ participantCount: 24 });
-    expect(ids(plan)).toEqual(['prologue', 'qf', 'sf', 'final_a', 'final_b']);
+    expect(ids(plan)).toEqual(['prologue', 'qf', 'sf', 'final_b', 'final_a']);
     expect(rationale(plan, 'qf')).toMatchObject({
       expectedParticipants: 24,
       heatCount: 4,
@@ -60,7 +60,7 @@ describe('proposePlan', () => {
 
   it('builds 3 quarterfinals for 17', () => {
     const plan = proposePlan({ participantCount: 17 });
-    expect(ids(plan)).toEqual(['prologue', 'qf', 'sf', 'final_a', 'final_b']);
+    expect(ids(plan)).toEqual(['prologue', 'qf', 'sf', 'final_b', 'final_a']);
     expect(rationale(plan, 'qf')).toMatchObject({
       expectedParticipants: 17,
       heatCount: 3,
@@ -72,7 +72,7 @@ describe('proposePlan', () => {
 
   it('skips quarterfinals when 12 fit in two semifinals', () => {
     const plan = proposePlan({ participantCount: 12 });
-    expect(ids(plan)).toEqual(['prologue', 'sf', 'final_a', 'final_b']);
+    expect(ids(plan)).toEqual(['prologue', 'sf', 'final_b', 'final_a']);
     expect(rationale(plan, 'sf')).toMatchObject({
       expectedParticipants: 12,
       heatCount: 2,
@@ -93,7 +93,7 @@ describe('proposePlan', () => {
 
   it('adds 1/8 finals for 48', () => {
     const plan = proposePlan({ participantCount: 48 });
-    expect(ids(plan)).toEqual(['prologue', 'eighth', 'qf', 'sf', 'final_a', 'final_b']);
+    expect(ids(plan)).toEqual(['prologue', 'eighth', 'qf', 'sf', 'final_b', 'final_a']);
     expect(rationale(plan, 'eighth')).toMatchObject({
       expectedParticipants: 48,
       heatCount: 8,
@@ -107,7 +107,7 @@ describe('proposePlan', () => {
 
   it('proposes 3 quarterfinals as the remaining grid after 17 finishers', () => {
     const tail = proposePlan({ participantCount: 17, includePrologue: false });
-    expect(ids(tail)).toEqual(['qf', 'sf', 'final_a', 'final_b']);
+    expect(ids(tail)).toEqual(['qf', 'sf', 'final_b', 'final_a']);
     expect(rationale(tail, 'qf')).toMatchObject({
       expectedParticipants: 17,
       heatCount: 3,
@@ -118,12 +118,26 @@ describe('proposePlan', () => {
       participantCount: 17,
       removeStageIds: ['qf'],
     });
-    expect(ids(remaining)).toEqual(['prologue', 'sf', 'final_a', 'final_b']);
+    expect(ids(remaining)).toEqual(['prologue', 'sf', 'final_b', 'final_a']);
     expect(rationale(remaining, 'sf').heatCount).toBe(2);
   });
 });
 
 describe('revisePlan', () => {
+  it('drops Final B and leaves semifinal winners going only to Final A', () => {
+    const revised = revisePlan({
+      format: proposePlan({ participantCount: 12 }).format,
+      participantCount: 12,
+      removeStageIds: ['final_b'],
+    });
+    expect(ids(revised)).toEqual(['prologue', 'sf', 'final_a']);
+    const sf = revised.format.stages.find((stage) => stage.id === 'sf');
+    expect(sf?.advancement).toEqual({
+      type: 'ROUTES',
+      routes: [{ cut: { type: 'FIRST_HALF' }, toStageId: 'final_a' }],
+    });
+  });
+
   it('drops quarterfinals and enlarges the two semifinals', () => {
     const proposed = proposePlan({ participantCount: 24 });
     const revised = revisePlan({
@@ -131,7 +145,7 @@ describe('revisePlan', () => {
       participantCount: 24,
       removeStageIds: ['qf'],
     });
-    expect(ids(revised)).toEqual(['prologue', 'sf', 'final_a', 'final_b']);
+    expect(ids(revised)).toEqual(['prologue', 'sf', 'final_b', 'final_a']);
     const prologue = revised.format.stages.find((stage) => stage.id === 'prologue');
     expect(prologue?.advancement).toEqual({
       type: 'ROUTES',
@@ -154,7 +168,7 @@ describe('revisePlan', () => {
       participantCount: 12,
       removeStageIds: ['prologue'],
     });
-    expect(ids(withoutPrologue)).toEqual(['sf', 'final_a', 'final_b']);
+    expect(ids(withoutPrologue)).toEqual(['sf', 'final_b', 'final_a']);
 
     const restored = revisePlan({
       format: withoutPrologue.format,
@@ -177,7 +191,7 @@ describe('revisePlan', () => {
       ],
     });
 
-    expect(ids(restored)).toEqual(['prologue', 'sf', 'final_a', 'final_b']);
+    expect(ids(restored)).toEqual(['prologue', 'sf', 'final_b', 'final_a']);
     expect(restored.format.stages[0].advancement).toEqual({
       type: 'ROUTES',
       routes: [{ cut: { type: 'TOP_N', n: 12 }, toStageId: 'sf' }],

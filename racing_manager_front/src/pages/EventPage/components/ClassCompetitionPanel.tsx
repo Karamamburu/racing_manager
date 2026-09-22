@@ -21,7 +21,10 @@ import type {
 } from '../../../features/class-competitions/types';
 import { formatFinishTime } from '../../../shared/formatFinishTime';
 import type { EventLap } from '../../../shared/types/event';
+import type { RegistrationStatusCode } from '../../../shared/registrationStatus';
+import { registrationStatusMeta } from '../../../shared/registrationStatus';
 import { FinishTimeCell } from './FinishTimeCell';
+import { RegistrationStatusSelect } from './RegistrationStatusSelect';
 
 const STAGE_LABELS: Record<string, string> = {
   PROLOGUE: 'Пролог',
@@ -144,6 +147,25 @@ export function ClassCompetitionPanel({
           stage={stage}
           eventLaps={eventLaps}
           editable={editable}
+          previousCompleted={
+            stage.sourceStageId != null &&
+            competition.stages.find((item) => item.stageId === stage.sourceStageId)?.status ===
+              'COMPLETED'
+          }
+          qualifierStatus={stage.qualifierStatus}
+          onChangeRegistrationStatus={(registrationId, status) =>
+            run(
+              `qualification-${stage.stageId}-${registrationId}`,
+              () =>
+                classCompetitionsService
+                  .setStageQualification(eventId, competition.id, stage.stageId, {
+                    registrationId,
+                    status,
+                  })
+                  .then(() => undefined),
+              'Статус заявки на этапе обновлён',
+            )
+          }
           pending={pending}
           onRemove={
             editable && canRemoveStage(competition, stage)
@@ -230,7 +252,7 @@ export function ClassCompetitionPanel({
                     entries: [],
                   })
                   .then(() => undefined),
-              'Этап зафиксирован',
+              'Этап зафиксирован. Проверьте статусы перед сеткой следующего этапа',
             )
           }
         />
@@ -240,7 +262,7 @@ export function ClassCompetitionPanel({
 }
 
 function canRemoveStage(competition: ClassCompetitionView, stage: ClassCompetitionStage): boolean {
-  if (!['prologue', 'eighth', 'qf'].includes(stage.stageId)) return false;
+  if (!['prologue', 'eighth', 'qf', 'final_b'].includes(stage.stageId)) return false;
   if (stage.status !== 'PENDING') return false;
   if (competition.status === 'DRAFT') return true;
   return stage.entries.length === 0;
@@ -280,7 +302,10 @@ function StageBoard({
   stage,
   eventLaps,
   editable,
+  previousCompleted,
+  qualifierStatus,
   pending,
+  onChangeRegistrationStatus,
   onRemove,
   onSeed,
   onReassign,
@@ -291,7 +316,10 @@ function StageBoard({
   stage: ClassCompetitionStage;
   eventLaps: EventLap[];
   editable: boolean;
+  previousCompleted: boolean;
+  qualifierStatus: 'QQ' | 'NQ' | null;
   pending: string | null;
+  onChangeRegistrationStatus: (registrationId: string, status: RegistrationStatusCode) => void;
   onRemove: (() => void) | null;
   onSeed: () => void;
   onReassign: (heats: Array<{ heatNumber: number; registrationIds: string[] }>) => void;
@@ -363,7 +391,10 @@ function StageBoard({
             Убрать этап
           </Button>
         ) : null}
-        {editable && stage.status === 'PENDING' && stage.entries.length > 0 && stage.heats.length === 0 ? (
+        {editable &&
+        stage.status === 'PENDING' &&
+        stage.heats.length === 0 &&
+        (stage.entries.length > 0 || previousCompleted) ? (
           <Button size="small" type="primary" loading={pending === `seed-${stage.stageId}`} onClick={onSeed}>
             Сформировать заезды
           </Button>
@@ -380,12 +411,22 @@ function StageBoard({
         ) : null}
       </Space>
       {stage.status === 'COMPLETED' && stage.heats.length > 0 ? (
-        <CompletedStageResults stage={stage} eventLaps={eventLaps} />
+        <CompletedStageResults
+          stage={stage}
+          eventLaps={eventLaps}
+          canEditStatus={editable}
+          pending={pending}
+          onChangeRegistrationStatus={onChangeRegistrationStatus}
+        />
       ) : stage.heats.length === 0 ? (
         <Typography.Text type="secondary">
-          {stage.entries.length > 0
-            ? `${stage.entries.length} участников ждут распределения по заездам`
-            : 'Участники появятся после предыдущего этапа'}
+          {previousCompleted
+            ? qualifierStatus === 'NQ'
+              ? 'Финал B собирается из участников со статусом NQ. Сформируйте заезды, когда состав готов'
+              : 'Отметьте квалифицированных и сформируйте заезды'
+            : stage.entries.length > 0
+              ? `${stage.entries.length} участников ждут распределения по заездам`
+              : 'Участники появятся после предыдущего этапа'}
         </Typography.Text>
       ) : (
         <DndContext sensors={sensors} onDragEnd={onDragEnd}>
@@ -612,9 +653,15 @@ function statusOrder(status: HeatResultStatus | null): number {
 function CompletedStageResults({
   stage,
   eventLaps,
+  canEditStatus,
+  pending,
+  onChangeRegistrationStatus,
 }: {
   stage: ClassCompetitionStage;
   eventLaps: EventLap[];
+  canEditStatus: boolean;
+  pending: string | null;
+  onChangeRegistrationStatus: (registrationId: string, status: RegistrationStatusCode) => void;
 }) {
   const rows = rankStageSlots(stage);
   const severalHeats = stage.heats.length > 1;
@@ -671,6 +718,23 @@ function CompletedStageResults({
           formatFinishTime(record.timeMilliseconds)
         ) : (
           <Tag>{record.resultStatus ?? '—'}</Tag>
+        ),
+    },
+    {
+      title: 'Статус заявки',
+      key: 'registrationStatus',
+      width: 280,
+      render: (_value: unknown, record) =>
+        canEditStatus ? (
+          <RegistrationStatusSelect
+            value={record.registrationStatus}
+            loading={pending === `qualification-${stage.stageId}-${record.registrationId}`}
+            onChange={(status) => onChangeRegistrationStatus(record.registrationId, status)}
+          />
+        ) : (
+          <Tag color={registrationStatusMeta(record.registrationStatus).color}>
+            {registrationStatusMeta(record.registrationStatus).text}
+          </Tag>
         ),
     },
   ];

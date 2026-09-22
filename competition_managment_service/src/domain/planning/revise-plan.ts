@@ -44,6 +44,15 @@ function raiseHeatSize(stage: StageSpec, incoming: number): void {
   }
 }
 
+function dropInboundRoutes(format: CompetitionFormat, removedId: string): void {
+  for (const stage of format.stages) {
+    if (stage.advancement.type !== 'ROUTES') continue;
+    const routes = stage.advancement.routes.filter((route) => route.toStageId !== removedId);
+    stage.advancement =
+      routes.length === 0 ? { type: 'NONE' } : { type: 'ROUTES', routes };
+  }
+}
+
 function rewireRemoved(format: CompetitionFormat, removedId: string, successorId: string): void {
   for (const stage of format.stages) {
     if (stage.advancement.type !== 'ROUTES') {
@@ -151,8 +160,13 @@ export function revisePlan(input: RevisePlanInput): ProposedPlan {
 
   const expected = expectedFieldByStage(format, input.participantCount);
   const successorByRemoved = new Map<string, string>();
+  const droppedTerminals: string[] = [];
   for (const stageId of removeStageIds) {
     const removed = findStage(format, stageId, 'removeStageIds');
+    if (removed.advancement.type === 'NONE') {
+      droppedTerminals.push(stageId);
+      continue;
+    }
     const successorId = uniqueSuccessor(removed);
     successorByRemoved.set(stageId, successorId);
     const successor = findStage(format, successorId, 'removeStageIds');
@@ -161,6 +175,9 @@ export function revisePlan(input: RevisePlanInput): ProposedPlan {
 
   for (const [stageId, successorId] of successorByRemoved) {
     rewireRemoved(format, stageId, successorId);
+  }
+  for (const stageId of droppedTerminals) {
+    dropInboundRoutes(format, stageId);
   }
   if (removeStageIds.length > 0) {
     const drop = new Set(removeStageIds);

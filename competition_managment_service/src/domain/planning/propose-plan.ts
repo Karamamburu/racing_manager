@@ -95,16 +95,16 @@ function knockoutRounds(
   if (includeFinalB) {
     rounds.push(
       {
-        id: 'final_a',
-        kind: 'FINAL_A',
-        label: 'Final A',
+        id: 'final_b',
+        kind: 'FINAL_B',
+        label: 'Final B',
         heatCountMode: 'one',
         seeding: { type: 'BY_OVERALL_RANK' },
       },
       {
-        id: 'final_b',
-        kind: 'FINAL_B',
-        label: 'Final B',
+        id: 'final_a',
+        kind: 'FINAL_A',
+        label: 'Final A',
         heatCountMode: 'one',
         seeding: { type: 'BY_OVERALL_RANK' },
       },

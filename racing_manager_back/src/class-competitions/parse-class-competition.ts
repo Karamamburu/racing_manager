@@ -1,4 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
+import {
+  isManageableRegistrationStatus,
+  type RegistrationStatusCode,
+} from '../registrations/registration-status';
 import { ADDABLE_STAGE_KINDS, AddableStageKind } from './stage-templates';
 
 const HEAT_STATUSES = ['OK', 'DNS', 'DNF', 'DSQ'] as const;
@@ -156,4 +160,28 @@ export function parseHeatTimesBody(body: unknown): ParsedHeatTimes {
     };
   });
   return { commit: body.commit === true, entries };
+}
+
+export function parseStageQualificationBody(body: unknown): {
+  registrationId: string;
+  status: RegistrationStatusCode;
+} {
+  if (!isRecord(body)) {
+    throw new BadRequestException('Request body must be a JSON object.');
+  }
+  const registrationId = body.registrationId;
+  if (typeof registrationId !== 'string' || !registrationId.trim()) {
+    throw new BadRequestException('registrationId is required.');
+  }
+  const status = body.status;
+  if (typeof status !== 'string' || !status.trim()) {
+    throw new BadRequestException('status is required.');
+  }
+  const normalized = status.trim().toUpperCase();
+  if (!isManageableRegistrationStatus(normalized)) {
+    throw new BadRequestException(
+      'status must be REGISTERED, CONFIRMED, DNS, DNF, QQ, NQ, DSQ or CANCELLED.',
+    );
+  }
+  return { registrationId: registrationId.trim(), status: normalized };
 }

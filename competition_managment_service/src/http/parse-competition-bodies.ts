@@ -1,5 +1,5 @@
 import { DomainError, ErrorCodes } from '../domain/errors';
-import { isRecord, readString } from './parse-helpers';
+import { isRecord, readArray, readString } from './parse-helpers';
 import { parseFormat, parseRoutes } from './parse-format';
 import {
   parseHeatResults,
@@ -25,6 +25,27 @@ export function parseCreateCompetitionBody(body: unknown) {
     participants: parseParticipants(body.participants),
     ...parseCreatePlannerOptions(body),
   };
+}
+
+export function parseParticipantIdList(body: unknown): string[] {
+  if (!isRecord(body)) {
+    throw new DomainError(
+      ErrorCodes.PARTICIPANT_INVALID,
+      'Request body must be a JSON object.',
+    );
+  }
+  const ids = readArray(body.participantIds, 'participantIds');
+  return ids.map((id, index) => {
+    const parsed = readString(id, `participantIds[${index}]`);
+    if (!parsed) {
+      throw new DomainError(
+        ErrorCodes.PARTICIPANT_INVALID,
+        'participantIds must be non-empty strings.',
+        `participantIds[${index}]`,
+      );
+    }
+    return parsed;
+  });
 }
 
 export function parseSeedStageBody(body: unknown) {

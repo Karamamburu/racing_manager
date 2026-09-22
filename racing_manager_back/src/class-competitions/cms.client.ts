@@ -60,6 +60,21 @@ export class CmsClient {
     );
   }
 
+  completeStage(id: string, stageId: string): Promise<CmsCompetition> {
+    return this.request(
+      'POST',
+      `/v1/competitions/${id}/stages/${encodeURIComponent(stageId)}/complete`,
+    );
+  }
+
+  setStageField(id: string, stageId: string, participantIds: string[]): Promise<CmsCompetition> {
+    return this.request(
+      'PUT',
+      `/v1/competitions/${id}/stages/${encodeURIComponent(stageId)}/field`,
+      { participantIds },
+    );
+  }
+
   advanceStage(id: string, stageId: string): Promise<CmsCompetition> {
     return this.request(
       'POST',

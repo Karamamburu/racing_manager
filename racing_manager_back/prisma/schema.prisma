@@ -48,6 +48,7 @@ enum RegistrationStatus {
   DNS
   DNF
   QQ
+  NQ
   DSQ
 
   @@map("registration_status")
@@ -279,6 +280,7 @@ model ClassHeatTime {
   registration       Registration          @relation(fields: [registrationId], references: [id], onDelete: Cascade)
   timeMilliseconds   Int?                  @map("time_milliseconds")
   status             ClassHeatResultStatus @default(OK)
+  qualificationStatus RegistrationStatus?  @map("qualification_status")
   createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
 
