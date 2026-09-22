@@ -1,4 +1,4 @@
-import { Button, Card, Col, Collapse, Divider, Modal, Result, Row, Skeleton, Space, Table, Tag, Tooltip, Typography, message, theme } from 'antd';
+import { Button, Card, Col, Collapse, Divider, Modal, Result, Row, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -829,8 +829,8 @@ export function EventPage() {
                   <Typography.Title level={4} style={{ marginTop: 0, marginBottom: 12 }}>
                     {group.title}
                   </Typography.Title>
-                  <Collapse
-                    defaultActiveKey={group.sections.map((section) => section.key)}
+                  <Tabs
+                    type="card"
                     items={group.sections.map((section) => {
                       const competition = competitionForRows(section.rows, classCompetitions);
                       const bracketInProgress = competition != null && competition.status !== 'DONE';
