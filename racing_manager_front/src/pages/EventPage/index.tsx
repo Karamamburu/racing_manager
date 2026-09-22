@@ -849,7 +849,7 @@ export function EventPage() {
                   }}
                 >
                   <Typography.Title level={4} style={{ marginTop: 0, marginBottom: 12 }}>
-                    {group.title}
+                    {group.title} ({group.sections.reduce((sum, section) => sum + section.rows.length, 0)})
                   </Typography.Title>
                   <Tabs
                     type="card"
