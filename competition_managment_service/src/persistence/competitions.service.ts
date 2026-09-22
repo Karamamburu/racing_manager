@@ -335,6 +335,8 @@ export class CompetitionsService {
       heats: assignManualHeats(
         toDomainParticipants(entries.map((entry) => entry.participant)),
         heats,
+        undefined,
+        { allowEmpty: true },
       ),
     };
     const byExternal = this.participantIds(competition);

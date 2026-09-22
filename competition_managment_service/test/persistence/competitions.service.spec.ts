@@ -416,6 +416,33 @@ describe('CompetitionsService.reassignHeats', () => {
     expect(prisma.competition.findUnique).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps an empty heat when rearranging a seeded stage', async () => {
+    const people = [p1Fixture(), p2Fixture()];
+    const loaded = seededPrologue(people);
+    const created: Array<{ heatNumber: number; slots: { create: Array<{ participantId: string }> } }> = [];
+    const tx = {
+      heat: {
+        deleteMany: jest.fn(),
+        create: jest.fn(({ data }: { data: (typeof created)[number] }) => {
+          created.push(data);
+        }),
+      },
+    };
+    const prisma = {
+      competition: { findUnique: jest.fn().mockResolvedValue(loaded) },
+      $transaction: jest.fn(async (fn: (client: typeof tx) => Promise<void>) => fn(tx)),
+    };
+    const service = new CompetitionsService(prisma as unknown as PrismaService);
+
+    await service.reassignHeats(competitionId, 'prologue', [
+      { heatNumber: 1, participantIds: ['p1', 'p2'] },
+      { heatNumber: 2, participantIds: [] },
+    ]);
+
+    expect(created.map((heat) => heat.heatNumber)).toEqual([1, 2]);
+    expect(created[1].slots.create).toEqual([]);
+  });
+
   it('rejects reassignment after a result is recorded', async () => {
     const people = [p1Fixture(), p2Fixture()];
     const loaded = seededPrologue(people);

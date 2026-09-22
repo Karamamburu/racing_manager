@@ -92,8 +92,8 @@ export function parseHeatAssignmentBody(body: unknown): ParsedHeatAssignment {
     if (typeof item.heatNumber !== 'number' || !Number.isInteger(item.heatNumber) || item.heatNumber < 1) {
       throw new BadRequestException(`heats[${index}].heatNumber must be an integer >= 1.`);
     }
-    if (!Array.isArray(item.registrationIds) || item.registrationIds.length === 0) {
-      throw new BadRequestException(`heats[${index}].registrationIds must be a non-empty array.`);
+    if (!Array.isArray(item.registrationIds)) {
+      throw new BadRequestException(`heats[${index}].registrationIds must be an array.`);
     }
     const registrationIds = item.registrationIds.map((id, idIndex) => {
       if (typeof id !== 'string' || !id.trim()) {

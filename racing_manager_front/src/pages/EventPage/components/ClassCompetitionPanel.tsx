@@ -300,12 +300,13 @@ function StageBoard({
   onCommit: () => void;
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-  const canDrag = editable && stage.status === 'SEEDED' && stage.heats.length > 1;
+  const canArrange = editable && stage.status === 'SEEDED' && stage.heats.length > 0;
+  const canDrag = canArrange && stage.heats.length > 1;
   const canTime = editable && stage.status === 'SEEDED';
   const readyToCommit =
     canTime &&
     stage.heats.length > 0 &&
-    stage.heats.every((heat) => heat.slots.every(slotFilled));
+    stage.heats.every((heat) => heat.slots.length > 0 && heat.slots.every(slotFilled));
   const title = STAGE_LABELS[stage.kind] ?? stage.label ?? stage.stageId;
 
   const onDragEnd = (event: DragEndEvent) => {
@@ -326,10 +327,29 @@ function StageBoard({
     const target = groups.find((heat) => heat.heatNumber === targetHeat);
     if (!target) return;
     target.registrationIds.push(registrationId);
+    onReassign(numberHeats(groups));
+  };
+
+  const addHeat = () => {
     onReassign(
-      groups
-        .filter((heat) => heat.registrationIds.length > 0)
-        .map((heat, index) => ({ heatNumber: index + 1, registrationIds: heat.registrationIds })),
+      numberHeats([
+        ...stage.heats.map((heat) => ({
+          registrationIds: heat.slots.map((slot) => slot.registrationId),
+        })),
+        { registrationIds: [] },
+      ]),
+    );
+  };
+
+  const deleteHeat = (heatNumber: number) => {
+    onReassign(
+      numberHeats(
+        stage.heats
+          .filter((heat) => heat.heatNumber !== heatNumber)
+          .map((heat) => ({
+            registrationIds: heat.slots.map((slot) => slot.registrationId),
+          })),
+      ),
     );
   };
 
@@ -346,6 +366,11 @@ function StageBoard({
         {editable && stage.status === 'PENDING' && stage.entries.length > 0 && stage.heats.length === 0 ? (
           <Button size="small" type="primary" loading={pending === `seed-${stage.stageId}`} onClick={onSeed}>
             Сформировать заезды
+          </Button>
+        ) : null}
+        {canArrange ? (
+          <Button size="small" loading={pending === `move-${stage.stageId}`} onClick={addHeat}>
+            Добавить заезд
           </Button>
         ) : null}
         {readyToCommit ? (
@@ -373,7 +398,9 @@ function StageBoard({
                 slots={heat.slots}
                 canDrag={canDrag}
                 canTime={canTime}
+                canDelete={canArrange && heat.slots.length === 0 && stage.heats.length > 1}
                 pending={pending}
+                onDelete={() => deleteHeat(heat.heatNumber)}
                 onSaveTime={onSaveTime}
                 onSaveStatus={onSaveStatus}
               />
@@ -385,13 +412,24 @@ function StageBoard({
   );
 }
 
+function numberHeats(
+  heats: Array<{ registrationIds: string[] }>,
+): Array<{ heatNumber: number; registrationIds: string[] }> {
+  return heats.map((heat, index) => ({
+    heatNumber: index + 1,
+    registrationIds: heat.registrationIds,
+  }));
+}
+
 function HeatColumn({
   stageId,
   heatNumber,
   slots,
   canDrag,
   canTime,
+  canDelete,
   pending,
+  onDelete,
   onSaveTime,
   onSaveStatus,
 }: {
@@ -400,7 +438,9 @@ function HeatColumn({
   slots: ClassHeatSlot[];
   canDrag: boolean;
   canTime: boolean;
+  canDelete: boolean;
   pending: string | null;
+  onDelete: () => void;
   onSaveTime: (slot: ClassHeatSlot, timeMilliseconds: number) => void;
   onSaveStatus: (slot: ClassHeatSlot, status: HeatResultStatus) => void;
 }) {
@@ -417,8 +457,18 @@ function HeatColumn({
         background: isOver ? '#f6ffed' : '#fafafa',
       }}
     >
-      <Typography.Text type="secondary">Заезд {heatNumber}</Typography.Text>
+      <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+        <Typography.Text type="secondary">Заезд {heatNumber}</Typography.Text>
+        {canDelete ? (
+          <Button size="small" danger loading={pending === `move-${stageId}`} onClick={onDelete}>
+            Удалить
+          </Button>
+        ) : null}
+      </Space>
       <Space direction="vertical" size={8} style={{ width: '100%', marginTop: 8 }}>
+        {slots.length === 0 ? (
+          <Typography.Text type="secondary">Перетащите сюда участников</Typography.Text>
+        ) : null}
         {slots.map((slot) => (
           <StarterCard
             key={slot.registrationId}

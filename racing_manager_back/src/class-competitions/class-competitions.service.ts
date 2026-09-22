@@ -307,6 +307,9 @@ export class ClassCompetitionsService {
         await this.loadRegistrations(eventId),
       );
     }
+    if (stage.heats.some((heat) => heat.slots.length === 0)) {
+      throw new BadRequestException('Пустой заезд нужно удалить или заполнить участниками.');
+    }
 
     const stored = await this.prisma.classHeatTime.findMany({
       where: { classCompetitionId: row.id, stageId },
