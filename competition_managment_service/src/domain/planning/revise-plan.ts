@@ -9,7 +9,7 @@ function cloneFormat(format: CompetitionFormat): CompetitionFormat {
   return JSON.parse(JSON.stringify(format)) as CompetitionFormat;
 }
 
-function uniqueSuccessor(stage: StageSpec): string {
+function removalTarget(stage: StageSpec): { successorId: string; sideStageIds: string[] } {
   if (stage.advancement.type !== 'ROUTES') {
     throw new DomainError(
       ErrorCodes.FORMAT_INVALID,
@@ -17,17 +17,24 @@ function uniqueSuccessor(stage: StageSpec): string {
       'removeStageIds',
     );
   }
-  const destinations = [
-    ...new Set(stage.advancement.routes.map((route) => route.toStageId)),
-  ];
-  if (destinations.length !== 1) {
+  const destinations = [...new Set(stage.advancement.routes.map((route) => route.toStageId))];
+  if (destinations.length === 0) {
     throw new DomainError(
       ErrorCodes.FORMAT_INVALID,
-      `Stage "${stage.id}" has multiple successors; send a full format instead.`,
+      `Cannot remove terminal stage "${stage.id}" without a successor.`,
       'removeStageIds',
     );
   }
-  return destinations[0];
+  if (destinations.length === 1) {
+    return { successorId: destinations[0], sideStageIds: [] };
+  }
+  const primary =
+    stage.advancement.routes.find((route) => route.cut.type === 'FIRST_HALF')?.toStageId ??
+    destinations[0];
+  return {
+    successorId: primary,
+    sideStageIds: destinations.filter((id) => id !== primary),
+  };
 }
 
 function raiseHeatSize(stage: StageSpec, incoming: number): void {
@@ -161,15 +168,17 @@ export function revisePlan(input: RevisePlanInput): ProposedPlan {
   const expected = expectedFieldByStage(format, input.participantCount);
   const successorByRemoved = new Map<string, string>();
   const droppedTerminals: string[] = [];
+  const sideStageIds: string[] = [];
   for (const stageId of removeStageIds) {
     const removed = findStage(format, stageId, 'removeStageIds');
     if (removed.advancement.type === 'NONE') {
       droppedTerminals.push(stageId);
       continue;
     }
-    const successorId = uniqueSuccessor(removed);
-    successorByRemoved.set(stageId, successorId);
-    const successor = findStage(format, successorId, 'removeStageIds');
+    const target = removalTarget(removed);
+    successorByRemoved.set(stageId, target.successorId);
+    sideStageIds.push(...target.sideStageIds);
+    const successor = findStage(format, target.successorId, 'removeStageIds');
     raiseHeatSize(successor, expected.get(stageId) ?? 0);
   }
 
@@ -182,6 +191,15 @@ export function revisePlan(input: RevisePlanInput): ProposedPlan {
   if (removeStageIds.length > 0) {
     const drop = new Set(removeStageIds);
     format.stages = format.stages.filter((stage) => !drop.has(stage.id));
+  }
+  if (sideStageIds.length > 0) {
+    const referenced = new Set<string>();
+    for (const stage of format.stages) {
+      if (stage.advancement.type !== 'ROUTES') continue;
+      for (const route of stage.advancement.routes) referenced.add(route.toStageId);
+    }
+    const orphans = new Set(sideStageIds.filter((id) => !referenced.has(id)));
+    format.stages = format.stages.filter((stage) => !orphans.has(stage.id));
   }
 
   for (const op of addStages) {

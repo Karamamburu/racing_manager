@@ -80,7 +80,7 @@ export function parsePlanChangeBody(body: unknown): ParsedPlanChange {
     typeof body.addStage !== 'string' ||
     !(ADDABLE_STAGE_KINDS as readonly string[]).includes(body.addStage)
   ) {
-    throw new BadRequestException('addStage must be PROLOGUE, EIGHTHFINAL, or QUARTERFINAL.');
+    throw new BadRequestException('addStage must be PROLOGUE, EIGHTHFINAL, QUARTERFINAL, or SEMIFINAL.');
   }
   return { addStage: body.addStage as AddableStageKind };
 }

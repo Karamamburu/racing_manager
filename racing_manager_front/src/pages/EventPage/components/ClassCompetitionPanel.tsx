@@ -40,6 +40,7 @@ const ADDABLE: Array<{ kind: AddableStageKind; id: string; title: string }> = [
   { kind: 'PROLOGUE', id: 'prologue', title: 'Пролог' },
   { kind: 'EIGHTHFINAL', id: 'eighth', title: '1/8 финала' },
   { kind: 'QUARTERFINAL', id: 'qf', title: '1/4 финала' },
+  { kind: 'SEMIFINAL', id: 'sf', title: '1/2 финала' },
 ];
 
 const STATUS_OPTIONS: Array<{ value: HeatResultStatus; label: string }> = [
@@ -289,14 +290,25 @@ function seededStageIds(competition: ClassCompetitionView | null): string[] {
 }
 
 function canRemoveStage(competition: ClassCompetitionView, stage: ClassCompetitionStage): boolean {
-  if (!['prologue', 'eighth', 'qf', 'final_b'].includes(stage.stageId)) return false;
+  if (!['prologue', 'eighth', 'qf', 'sf', 'final_b'].includes(stage.stageId)) return false;
   if (stage.status !== 'PENDING') return false;
   if (competition.status === 'DRAFT') return true;
   return stage.entries.length === 0;
 }
 
+function canAddSemifinal(competition: ClassCompetitionView): boolean {
+  const final = competition.stages.find(
+    (stage) => stage.stageId === 'final' || stage.stageId === 'final_a',
+  );
+  if (!final || final.status !== 'PENDING') return false;
+  if (!final.sourceStageId) return true;
+  const source = competition.stages.find((stage) => stage.stageId === final.sourceStageId);
+  return source != null && source.status !== 'COMPLETED';
+}
+
 function canAddStage(competition: ClassCompetitionView, kind: AddableStageKind): boolean {
   if (kind === 'PROLOGUE') return competition.status === 'DRAFT';
+  if (kind === 'SEMIFINAL') return canAddSemifinal(competition);
   const afterId = kind === 'EIGHTHFINAL'
     ? competition.stages.some((stage) => stage.stageId === 'prologue')
       ? 'prologue'

@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { CmsStageSpec } from './cms.types';
 
-export const ADDABLE_STAGE_KINDS = ['PROLOGUE', 'EIGHTHFINAL', 'QUARTERFINAL'] as const;
+export const ADDABLE_STAGE_KINDS = ['PROLOGUE', 'EIGHTHFINAL', 'QUARTERFINAL', 'SEMIFINAL'] as const;
 
 export type AddableStageKind = (typeof ADDABLE_STAGE_KINDS)[number];
 
@@ -11,6 +11,7 @@ const STAGE_IDS: Record<AddableStageKind, string> = {
   PROLOGUE: 'prologue',
   EIGHTHFINAL: 'eighth',
   QUARTERFINAL: 'qf',
+  SEMIFINAL: 'sf',
 };
 
 export type AddStageOp = {
@@ -35,6 +36,10 @@ export function buildAddStageOp(
       throw new BadRequestException('В сетке нет этапа, в который можно перейти из пролога.');
     }
     return { afterStageId: null, stage: prologueStage(nextId, field) };
+  }
+
+  if (kind === 'SEMIFINAL') {
+    return semifinalOp(stages, field);
   }
 
   const ids = new Set(stages.map((stage) => stage.id));
@@ -75,6 +80,63 @@ function prologueStage(nextStageId: string, participantCount: number): CmsStageS
       routes: [{ cut: { type: 'TOP_N', n: participantCount }, toStageId: nextStageId }],
     },
   };
+}
+
+function semifinalOp(stages: CmsStageSpec[], participantCount: number): AddStageOp {
+  const singleFinal = stages.find((stage) => stage.id === 'final');
+  const finalA = stages.find((stage) => stage.id === 'final_a');
+  const finalB = stages.find((stage) => stage.id === 'final_b');
+  const targetId = singleFinal?.id ?? finalA?.id;
+  if (!targetId) {
+    throw new BadRequestException('В сетке нет финала, перед которым можно добавить полуфинал.');
+  }
+
+  const inbound = stages.find(
+    (stage) =>
+      stage.advancement.type === 'ROUTES' &&
+      stage.advancement.routes.some((route) => route.toStageId === targetId),
+  );
+  if (inbound && (inbound.advancement.type !== 'ROUTES' || inbound.advancement.routes.length !== 1)) {
+    throw new BadRequestException('Этап ведёт сразу в несколько следующих, его нельзя сдвинуть автоматически.');
+  }
+
+  const advancement: CmsStageSpec['advancement'] =
+    !singleFinal && finalA && finalB
+      ? {
+          type: 'ROUTES',
+          routes: [
+            { cut: { type: 'FIRST_HALF' }, toStageId: 'final_a' },
+            { cut: { type: 'SECOND_HALF' }, toStageId: 'final_b' },
+          ],
+        }
+      : {
+          type: 'ROUTES',
+          routes: [{ cut: { type: 'FIRST_HALF' }, toStageId: targetId }],
+        };
+
+  const stage: CmsStageSpec = {
+    id: 'sf',
+    kind: 'SEMIFINAL',
+    label: '1/2 final',
+    heats: {
+      type: 'HEATS',
+      heatCount: 2,
+      heatSize: Math.max(PREFERRED_HEAT_SIZE, Math.ceil(participantCount / 2)),
+      remainder: 'BALANCED',
+      seeding: { type: 'SNAKE' },
+    },
+    ranking: { type: 'BY_PLACE' },
+    advancement,
+  };
+
+  if (!inbound) {
+    if (stages[0]?.id !== targetId || advancement.routes.length !== 1) {
+      throw new BadRequestException('В сетке нет этапа, перед которым можно вставить полуфинал.');
+    }
+    return { afterStageId: null, stage };
+  }
+
+  return { afterStageId: inbound.id, stage };
 }
 
 function knockoutStage(
