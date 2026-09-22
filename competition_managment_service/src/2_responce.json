@@ -1,0 +1,488 @@
+{
+    "id": "c018eeca-f16d-45d0-a27c-28565979ecf5",
+    "name": "Спринт FS — мужчины",
+    "status": "IN_PROGRESS",
+    "format": {
+        "stages": [
+            {
+                "id": "prologue",
+                "kind": "PROLOGUE",
+                "heats": {
+                    "type": "NONE"
+                },
+                "ranking": {
+                    "type": "BY_PLACE"
+                },
+                "advancement": {
+                    "type": "ROUTES",
+                    "routes": [
+                        {
+                            "cut": {
+                                "type": "TOP_PERCENT",
+                                "percent": 50
+                            },
+                            "toStageId": "qf"
+                        }
+                    ]
+                },
+                "label": "Prologue"
+            },
+            {
+                "id": "qf",
+                "kind": "QUARTERFINAL",
+                "heats": {
+                    "type": "HEATS",
+                    "heatCount": 4,
+                    "heatSize": 6,
+                    "remainder": "BALANCED",
+                    "seeding": {
+                        "type": "SNAKE"
+                    }
+                },
+                "ranking": {
+                    "type": "BY_PLACE"
+                },
+                "advancement": {
+                    "type": "ROUTES",
+                    "routes": [
+                        {
+                            "cut": {
+                                "type": "TOP_FRACTION",
+                                "numerator": 1,
+                                "denominator": 2
+                            },
+                            "toStageId": "sf"
+                        }
+                    ]
+                },
+                "label": "1/4 final"
+            },
+            {
+                "id": "sf",
+                "kind": "SEMIFINAL",
+                "heats": {
+                    "type": "HEATS",
+                    "heatCount": 2,
+                    "heatSize": 6,
+                    "remainder": "BALANCED",
+                    "seeding": {
+                        "type": "SNAKE"
+                    }
+                },
+                "ranking": {
+                    "type": "BY_PLACE"
+                },
+                "advancement": {
+                    "type": "ROUTES",
+                    "routes": [
+                        {
+                            "cut": {
+                                "type": "FIRST_HALF"
+                            },
+                            "toStageId": "final_a"
+                        },
+                        {
+                            "cut": {
+                                "type": "SECOND_HALF"
+                            },
+                            "toStageId": "final_b"
+                        }
+                    ]
+                },
+                "label": "1/2 final"
+            },
+            {
+                "id": "final_a",
+                "kind": "FINAL_A",
+                "heats": {
+                    "type": "HEATS",
+                    "heatCount": 1,
+                    "remainder": "BALANCED",
+                    "seeding": {
+                        "type": "BY_OVERALL_RANK"
+                    }
+                },
+                "ranking": {
+                    "type": "BY_PLACE"
+                },
+                "advancement": {
+                    "type": "NONE"
+                },
+                "label": "Final A"
+            },
+            {
+                "id": "final_b",
+                "kind": "FINAL_B",
+                "heats": {
+                    "type": "HEATS",
+                    "heatCount": 1,
+                    "remainder": "BALANCED",
+                    "seeding": {
+                        "type": "BY_OVERALL_RANK"
+                    }
+                },
+                "ranking": {
+                    "type": "BY_PLACE"
+                },
+                "advancement": {
+                    "type": "NONE"
+                },
+                "label": "Final B"
+            }
+        ]
+    },
+    "participants": [
+        {
+            "id": "m01",
+            "seed": 1,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m02",
+            "seed": 2,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m03",
+            "seed": 3,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m04",
+            "seed": 4,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m05",
+            "seed": 5,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m06",
+            "seed": 6,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m07",
+            "seed": 7,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m08",
+            "seed": 8,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m09",
+            "seed": 9,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m10",
+            "seed": 10,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m11",
+            "seed": 11,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m12",
+            "seed": 12,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m13",
+            "seed": 13,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m14",
+            "seed": 14,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m15",
+            "seed": 15,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m16",
+            "seed": 16,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        },
+        {
+            "id": "m17",
+            "seed": 17,
+            "meta": {
+                "format": "FREESTYLE",
+                "gender": "M"
+            }
+        }
+    ],
+    "stages": [
+        {
+            "stageId": "final_a",
+            "status": "PENDING",
+            "entries": [],
+            "heats": [],
+            "ranking": []
+        },
+        {
+            "stageId": "final_b",
+            "status": "PENDING",
+            "entries": [],
+            "heats": [],
+            "ranking": []
+        },
+        {
+            "stageId": "prologue",
+            "status": "SEEDED",
+            "entries": [
+                {
+                    "participantId": "m01",
+                    "seed": 1,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m02",
+                    "seed": 2,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m03",
+                    "seed": 3,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m04",
+                    "seed": 4,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m05",
+                    "seed": 5,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m06",
+                    "seed": 6,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m07",
+                    "seed": 7,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m08",
+                    "seed": 8,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m09",
+                    "seed": 9,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m10",
+                    "seed": 10,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m11",
+                    "seed": 11,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m12",
+                    "seed": 12,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m13",
+                    "seed": 13,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m14",
+                    "seed": 14,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m15",
+                    "seed": 15,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m16",
+                    "seed": 16,
+                    "eliminated": false
+                },
+                {
+                    "participantId": "m17",
+                    "seed": 17,
+                    "eliminated": false
+                }
+            ],
+            "heats": [
+                {
+                    "heatNumber": 1,
+                    "slots": [
+                        {
+                            "position": 1,
+                            "participantId": "m01",
+                            "result": null
+                        },
+                        {
+                            "position": 2,
+                            "participantId": "m02",
+                            "result": null
+                        },
+                        {
+                            "position": 3,
+                            "participantId": "m03",
+                            "result": null
+                        },
+                        {
+                            "position": 4,
+                            "participantId": "m04",
+                            "result": null
+                        },
+                        {
+                            "position": 5,
+                            "participantId": "m05",
+                            "result": null
+                        },
+                        {
+                            "position": 6,
+                            "participantId": "m06",
+                            "result": null
+                        },
+                        {
+                            "position": 7,
+                            "participantId": "m07",
+                            "result": null
+                        },
+                        {
+                            "position": 8,
+                            "participantId": "m08",
+                            "result": null
+                        },
+                        {
+                            "position": 9,
+                            "participantId": "m09",
+                            "result": null
+                        },
+                        {
+                            "position": 10,
+                            "participantId": "m10",
+                            "result": null
+                        },
+                        {
+                            "position": 11,
+                            "participantId": "m11",
+                            "result": null
+                        },
+                        {
+                            "position": 12,
+                            "participantId": "m12",
+                            "result": null
+                        },
+                        {
+                            "position": 13,
+                            "participantId": "m13",
+                            "result": null
+                        },
+                        {
+                            "position": 14,
+                            "participantId": "m14",
+                            "result": null
+                        },
+                        {
+                            "position": 15,
+                            "participantId": "m15",
+                            "result": null
+                        },
+                        {
+                            "position": 16,
+                            "participantId": "m16",
+                            "result": null
+                        },
+                        {
+                            "position": 17,
+                            "participantId": "m17",
+                            "result": null
+                        }
+                    ]
+                }
+            ],
+            "ranking": []
+        },
+        {
+            "stageId": "qf",
+            "status": "PENDING",
+            "entries": [],
+            "heats": [],
+            "ranking": []
+        },
+        {
+            "stageId": "sf",
+            "status": "PENDING",
+            "entries": [],
+            "heats": [],
+            "ranking": []
+        }
+    ],
+    "createdAt": "2026-09-19T06:45:24.794Z",
+    "updatedAt": "2026-09-19T06:50:57.039Z"
+}

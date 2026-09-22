@@ -1,0 +1,181 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum StageKind {
+  PROLOGUE
+  EIGHTHFINAL
+  QUARTERFINAL
+  SEMIFINAL
+  FINAL
+  FINAL_A
+  FINAL_B
+  CUSTOM
+
+  @@map("stage_kind")
+}
+
+enum ResultStatus {
+  OK
+  DNS
+  DNF
+  DSQ
+  NQ
+
+  @@map("result_status")
+}
+
+enum CompetitionStatus {
+  DRAFT
+  IN_PROGRESS
+  DONE
+
+  @@map("competition_status")
+}
+
+enum StageRunStatus {
+  PENDING
+  SEEDED
+  COMPLETED
+
+  @@map("stage_run_status")
+}
+
+model FormatRecord {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  key         String?  @unique
+  label       String
+  description String?
+  format      Json
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  competitions Competition[]
+
+  @@map("competition_formats")
+}
+
+model Competition {
+  id             String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name           String?
+  status         CompetitionStatus  @default(DRAFT)
+  formatId       String?            @map("format_id") @db.Uuid
+  formatRecord   FormatRecord?      @relation(fields: [formatId], references: [id])
+  formatSnapshot Json               @map("format_snapshot")
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  participants CompetitionParticipant[]
+  stageRuns    StageRun[]
+  stageEntries StageEntry[]
+
+  @@index([status], map: "competitions_status_idx")
+  @@map("competitions")
+}
+
+model CompetitionParticipant {
+  id            String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  competitionId String   @map("competition_id") @db.Uuid
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  externalId    String   @map("external_id")
+  seed          Int
+  meta          Json?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  entries   StageEntry[]
+  heatSlots HeatSlot[]
+  rankings  StageRanking[]
+
+  @@unique([competitionId, externalId])
+  @@unique([competitionId, seed])
+  @@map("competition_participants")
+}
+
+model StageRun {
+  id            String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  competitionId String         @map("competition_id") @db.Uuid
+  competition   Competition    @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  stageId       String         @map("stage_id")
+  status        StageRunStatus @default(PENDING)
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  heats    Heat[]
+  rankings StageRanking[]
+
+  @@unique([competitionId, stageId])
+  @@map("stage_runs")
+}
+
+model StageEntry {
+  id            String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  competitionId String                 @map("competition_id") @db.Uuid
+  competition   Competition            @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  stageId       String                 @map("stage_id")
+  participantId String                 @map("participant_id") @db.Uuid
+  participant   CompetitionParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  seed          Int
+  eliminated    Boolean                @default(false)
+
+  @@unique([competitionId, stageId, participantId])
+  @@unique([competitionId, stageId, seed])
+  @@index([competitionId, stageId], map: "stage_entries_stage_idx")
+  @@map("stage_entries")
+}
+
+model Heat {
+  id         String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  stageRunId String   @map("stage_run_id") @db.Uuid
+  stageRun   StageRun @relation(fields: [stageRunId], references: [id], onDelete: Cascade)
+  heatNumber Int      @map("heat_number")
+  slots      HeatSlot[]
+
+  @@unique([stageRunId, heatNumber])
+  @@map("heats")
+}
+
+model HeatSlot {
+  id            String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  heatId        String                 @map("heat_id") @db.Uuid
+  heat          Heat                   @relation(fields: [heatId], references: [id], onDelete: Cascade)
+  position      Int
+  participantId String                 @map("participant_id") @db.Uuid
+  participant   CompetitionParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  result        HeatResult?
+
+  @@unique([heatId, position])
+  @@unique([heatId, participantId])
+  @@map("heat_slots")
+}
+
+model HeatResult {
+  id               String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  heatSlotId       String       @unique @map("heat_slot_id") @db.Uuid
+  heatSlot         HeatSlot     @relation(fields: [heatSlotId], references: [id], onDelete: Cascade)
+  status           ResultStatus
+  place            Int?
+
+  @@map("heat_results")
+}
+
+model StageRanking {
+  id               String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  stageRunId       String                 @map("stage_run_id") @db.Uuid
+  stageRun         StageRun               @relation(fields: [stageRunId], references: [id], onDelete: Cascade)
+  participantId    String                 @map("participant_id") @db.Uuid
+  participant      CompetitionParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  rank             Int
+  heatNumber       Int                    @map("heat_number")
+  status           ResultStatus
+  place            Int?
+
+  @@unique([stageRunId, participantId])
+  @@unique([stageRunId, rank])
+  @@map("stage_rankings")
+}
