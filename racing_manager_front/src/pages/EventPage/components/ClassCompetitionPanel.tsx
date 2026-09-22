@@ -729,6 +729,7 @@ function CompletedStageResults({
           <RegistrationStatusSelect
             value={record.registrationStatus}
             loading={pending === `qualification-${stage.stageId}-${record.registrationId}`}
+            omit={isTerminalStage(stage.kind) ? ['QQ', 'NQ'] : undefined}
             onChange={(status) => onChangeRegistrationStatus(record.registrationId, status)}
           />
         ) : (
@@ -749,6 +750,10 @@ function CompletedStageResults({
       scroll={{ x: 'max-content' }}
     />
   );
+}
+
+function isTerminalStage(kind: string): boolean {
+  return kind === 'FINAL' || kind === 'FINAL_A' || kind === 'FINAL_B';
 }
 
 function stageStatusLabel(status: ClassCompetitionStage['status']): string {

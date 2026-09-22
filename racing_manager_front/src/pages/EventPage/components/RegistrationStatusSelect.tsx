@@ -10,6 +10,7 @@ type RegistrationStatusSelectProps = {
   value: string;
   loading?: boolean;
   disabled?: boolean;
+  omit?: readonly RegistrationStatusCode[];
   onChange: (status: RegistrationStatusCode) => void;
 };
 
@@ -26,6 +27,7 @@ export function RegistrationStatusSelect({
   value,
   loading,
   disabled,
+  omit,
   onChange,
 }: RegistrationStatusSelectProps) {
   return (
@@ -33,7 +35,7 @@ export function RegistrationStatusSelect({
       value={isRegistrationStatus(value) ? value : undefined}
       loading={loading}
       disabled={disabled}
-      options={options}
+      options={omit?.length ? options.filter((option) => !omit.includes(option.value)) : options}
       popupMatchSelectWidth={false}
       style={{ minWidth: 260 }}
       placeholder={
