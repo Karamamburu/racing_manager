@@ -3,6 +3,7 @@ import { CompetitionsService } from '../persistence/competitions.service';
 import {
   parseCreateCompetitionBody,
   parsePersistedAdvanceBody,
+  parseReassignHeatsBody,
   parseSeedStageBody,
   parseStageResultsBody,
 } from './parse-competition-bodies';
@@ -45,6 +46,16 @@ export class CompetitionsController {
   ) {
     const parsed = parseSeedStageBody(body);
     return this.competitions.seedStage(id, stageId, parsed.manualHeats);
+  }
+
+  @Put(':id/stages/:stageId/heats')
+  reassignHeats(
+    @Param('id') id: string,
+    @Param('stageId') stageId: string,
+    @Body() body: unknown,
+  ) {
+    const parsed = parseReassignHeatsBody(body);
+    return this.competitions.reassignHeats(id, stageId, parsed.heats);
   }
 
   @Put(':id/stages/:stageId/results')

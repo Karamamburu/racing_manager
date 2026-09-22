@@ -147,4 +147,40 @@ describe('revisePlan', () => {
       heatSizes: [12, 12],
     });
   });
+
+  it('prepends a stage when afterStageId is null and points it at the former first stage', () => {
+    const withoutPrologue = revisePlan({
+      format: proposePlan({ participantCount: 12 }).format,
+      participantCount: 12,
+      removeStageIds: ['prologue'],
+    });
+    expect(ids(withoutPrologue)).toEqual(['sf', 'final_a', 'final_b']);
+
+    const restored = revisePlan({
+      format: withoutPrologue.format,
+      participantCount: 12,
+      addStages: [
+        {
+          afterStageId: null,
+          stage: {
+            id: 'prologue',
+            kind: 'PROLOGUE',
+            label: 'Prologue',
+            heats: { type: 'NONE' },
+            ranking: { type: 'BY_PLACE' },
+            advancement: {
+              type: 'ROUTES',
+              routes: [{ cut: { type: 'TOP_N', n: 12 }, toStageId: 'ignored' }],
+            },
+          },
+        },
+      ],
+    });
+
+    expect(ids(restored)).toEqual(['prologue', 'sf', 'final_a', 'final_b']);
+    expect(restored.format.stages[0].advancement).toEqual({
+      type: 'ROUTES',
+      routes: [{ cut: { type: 'TOP_N', n: 12 }, toStageId: 'sf' }],
+    });
+  });
 });

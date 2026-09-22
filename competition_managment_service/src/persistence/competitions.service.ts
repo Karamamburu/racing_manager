@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma';
 import { advanceStage } from '../domain/advance-stage';
 import { buildStartLists } from '../domain/build-start-lists';
+import { assignManualHeats } from '../domain/seeding/manual';
 import { DomainError, ErrorCodes } from '../domain/errors';
 import { normalizeParticipants } from '../domain/participants';
 import {
@@ -297,6 +298,49 @@ export class CompetitionsService {
           data: { status: 'IN_PROGRESS' },
         });
       }
+    });
+
+    return this.getById(competition.id);
+  }
+
+  async reassignHeats(
+    competitionId: string,
+    stageId: string,
+    heats: ManualHeatAssignment[],
+  ) {
+    const competition = await this.load(competitionId);
+    this.assertMutable(competition);
+    const stageRun = this.requireStageRun(competition, stageId);
+    if (stageRun.status !== 'SEEDED') {
+      throw new DomainError(
+        ErrorCodes.STAGE_NOT_READY,
+        `Stage "${stageId}" must be SEEDED to reassign heats.`,
+        'stageId',
+      );
+    }
+    const hasResults = stageRun.heats.some((heat) =>
+      heat.slots.some((slot) => slot.result != null),
+    );
+    if (hasResults) {
+      throw new DomainError(
+        ErrorCodes.STAGE_NOT_READY,
+        `Stage "${stageId}" already has results and cannot be reassigned.`,
+        'heatResults',
+      );
+    }
+
+    const entries = this.entriesForStage(competition, stageId);
+    const startLists: StartLists = {
+      stageId,
+      heats: assignManualHeats(
+        toDomainParticipants(entries.map((entry) => entry.participant)),
+        heats,
+      ),
+    };
+    const byExternal = this.participantIds(competition);
+
+    await this.prisma.$transaction(async (tx) => {
+      await this.replaceHeats(tx, stageRun.id, startLists, byExternal);
     });
 
     return this.getById(competition.id);

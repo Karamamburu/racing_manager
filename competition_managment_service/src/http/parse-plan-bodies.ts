@@ -43,7 +43,10 @@ function parseAddStages(value: unknown): AddStageOp[] | undefined {
     const path = `addStages[${index}]`;
     const raw = readObject(item, path);
     return {
-      afterStageId: readString(raw.afterStageId, `${path}.afterStageId`) as string,
+      afterStageId:
+        raw.afterStageId === null
+          ? null
+          : (readString(raw.afterStageId, `${path}.afterStageId`) as string),
       stage: parseStage(raw.stage, `${path}.stage`),
     };
   });

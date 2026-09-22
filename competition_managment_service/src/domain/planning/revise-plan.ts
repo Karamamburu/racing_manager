@@ -57,7 +57,54 @@ function rewireRemoved(format: CompetitionFormat, removedId: string, successorId
   }
 }
 
+function prependStage(format: CompetitionFormat, stage: StageSpec): void {
+  if (format.stages.some((item) => item.id === stage.id)) {
+    throw new DomainError(
+      ErrorCodes.FORMAT_INVALID,
+      `Duplicate stage id "${stage.id}".`,
+      'addStages.stage.id',
+    );
+  }
+
+  const inserted: StageSpec = JSON.parse(JSON.stringify(stage)) as StageSpec;
+  const former = format.stages[0];
+  if (!former) {
+    format.stages.push(inserted);
+    return;
+  }
+
+  if (inserted.advancement.type === 'NONE') {
+    inserted.advancement = {
+      type: 'ROUTES',
+      routes: [{ cut: { type: 'TOP_N', n: 1 }, toStageId: former.id }],
+    };
+  } else if (inserted.advancement.routes.length === 1) {
+    inserted.advancement = {
+      type: 'ROUTES',
+      routes: [
+        {
+          ...inserted.advancement.routes[0],
+          toStageId: former.id,
+        },
+      ],
+    };
+  } else {
+    throw new DomainError(
+      ErrorCodes.FORMAT_INVALID,
+      `Prepended stage "${inserted.id}" must advance through a single route.`,
+      'addStages.stage.advancement',
+    );
+  }
+
+  format.stages.unshift(inserted);
+}
+
 function insertStage(format: CompetitionFormat, op: AddStageOp): void {
+  if (op.afterStageId == null) {
+    prependStage(format, op.stage);
+    return;
+  }
+
   const after = findStage(format, op.afterStageId, 'addStages.afterStageId');
   if (format.stages.some((stage) => stage.id === op.stage.id)) {
     throw new DomainError(

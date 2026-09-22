@@ -55,6 +55,24 @@ export function parsePersistedAdvanceBody(body: unknown) {
   };
 }
 
+export function parseReassignHeatsBody(body: unknown) {
+  if (!isRecord(body)) {
+    throw new DomainError(
+      ErrorCodes.MANUAL_ASSIGNMENT_INVALID,
+      'Request body must be a JSON object.',
+    );
+  }
+  const heats = parseManualHeats(body.heats, 'heats');
+  if (!heats || heats.length === 0) {
+    throw new DomainError(
+      ErrorCodes.MANUAL_ASSIGNMENT_INVALID,
+      'heats is required.',
+      'heats',
+    );
+  }
+  return { heats };
+}
+
 export function parseStageResultsBody(body: unknown) {
   if (!isRecord(body)) {
     throw new DomainError(

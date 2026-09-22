@@ -32,8 +32,19 @@ export async function freezeEventPlaces(
   });
   if (!event) return;
 
+  const brackets = await db.classCompetition.findMany({
+    where: { eventId },
+    select: { formatId: true, gender: true },
+  });
+  const bracketKeys = new Set(
+    brackets.map((row) => `${row.formatId ?? 'none'}:${row.gender}`),
+  );
+
   const ranked = rankRegistrations(event.registrations, event.laps.length);
   for (const { registration, place } of ranked) {
+    if (bracketKeys.has(`${registration.formatId ?? 'none'}:${registration.gender}`)) {
+      continue;
+    }
     if (!registration.result) continue;
     await db.result.update({
       where: { id: registration.result.id },
