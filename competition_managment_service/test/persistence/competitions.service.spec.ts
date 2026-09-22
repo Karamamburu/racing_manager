@@ -383,6 +383,145 @@ describe('CompetitionsService.updatePlan', () => {
   });
 });
 
+describe('CompetitionsService.reassignHeats', () => {
+  it('replaces slots on a seeded stage that has no results', async () => {
+    const people = [p1Fixture(), p2Fixture(), p3Fixture(), p4Fixture()];
+    const loaded = seededPrologue(people);
+    const created: Array<{ heatNumber: number; slots: { create: Array<{ participantId: string }> } }> = [];
+    const tx = {
+      heat: {
+        deleteMany: jest.fn(),
+        create: jest.fn(({ data }: { data: (typeof created)[number] }) => {
+          created.push(data);
+        }),
+      },
+    };
+    const prisma = {
+      competition: { findUnique: jest.fn().mockResolvedValue(loaded) },
+      $transaction: jest.fn(async (fn: (client: typeof tx) => Promise<void>) => fn(tx)),
+    };
+    const service = new CompetitionsService(prisma as unknown as PrismaService);
+
+    await service.reassignHeats(competitionId, 'prologue', [
+      { heatNumber: 1, participantIds: ['p1', 'p3'] },
+      { heatNumber: 2, participantIds: ['p2', 'p4'] },
+    ]);
+
+    expect(tx.heat.deleteMany).toHaveBeenCalledWith({ where: { stageRunId: 'run-prologue' } });
+    expect(created.map((heat) => heat.heatNumber)).toEqual([1, 2]);
+    expect(created[0].slots.create.map((slot) => slot.participantId)).toEqual([
+      people[0].id,
+      people[2].id,
+    ]);
+    expect(prisma.competition.findUnique).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps an empty heat when rearranging a seeded stage', async () => {
+    const people = [p1Fixture(), p2Fixture()];
+    const loaded = seededPrologue(people);
+    const created: Array<{ heatNumber: number; slots: { create: Array<{ participantId: string }> } }> = [];
+    const tx = {
+      heat: {
+        deleteMany: jest.fn(),
+        create: jest.fn(({ data }: { data: (typeof created)[number] }) => {
+          created.push(data);
+        }),
+      },
+    };
+    const prisma = {
+      competition: { findUnique: jest.fn().mockResolvedValue(loaded) },
+      $transaction: jest.fn(async (fn: (client: typeof tx) => Promise<void>) => fn(tx)),
+    };
+    const service = new CompetitionsService(prisma as unknown as PrismaService);
+
+    await service.reassignHeats(competitionId, 'prologue', [
+      { heatNumber: 1, participantIds: ['p1', 'p2'] },
+      { heatNumber: 2, participantIds: [] },
+    ]);
+
+    expect(created.map((heat) => heat.heatNumber)).toEqual([1, 2]);
+    expect(created[1].slots.create).toEqual([]);
+  });
+
+  it('rejects reassignment after a result is recorded', async () => {
+    const people = [p1Fixture(), p2Fixture()];
+    const loaded = seededPrologue(people);
+    loaded.stageRuns[0].heats[0].slots[0].result = {
+      id: 'result-p1',
+      heatSlotId: 'slot-p1',
+      status: 'OK',
+      place: 1,
+    };
+    const prisma = {
+      competition: { findUnique: jest.fn().mockResolvedValue(loaded) },
+      $transaction: jest.fn(),
+    };
+    const service = new CompetitionsService(prisma as unknown as PrismaService);
+
+    await expect(
+      service.reassignHeats(competitionId, 'prologue', [
+        { heatNumber: 1, participantIds: ['p1', 'p2'] },
+      ]),
+    ).rejects.toThrow(/results/);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+});
+
+function seededPrologue(
+  people: ReturnType<typeof p1Fixture>[],
+) {
+  return {
+    id: competitionId,
+    name: 'Mini',
+    status: 'IN_PROGRESS',
+    formatId: null,
+    formatSnapshot: miniFormat,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    participants: people,
+    stageEntries: people.map((row) => ({
+      id: `entry-${row.externalId}`,
+      competitionId,
+      stageId: 'prologue',
+      participantId: row.id,
+      seed: row.seed,
+      eliminated: false,
+      participant: row,
+    })),
+    stageRuns: [
+      {
+        id: 'run-prologue',
+        competitionId,
+        stageId: 'prologue',
+        status: 'SEEDED' as const,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        rankings: [],
+        heats: [
+          {
+            id: 'heat-1',
+            stageRunId: 'run-prologue',
+            heatNumber: 1,
+            slots: people.map((row, index) => ({
+              id: `slot-${row.externalId}`,
+              heatId: 'heat-1',
+              position: index + 1,
+              participantId: row.id,
+              participant: row,
+              result: null as {
+                id: string;
+                heatSlotId: string;
+                status: string;
+                place: number;
+              } | null,
+            })),
+          },
+        ],
+      },
+    ],
+  };
+}
+
 describe('CompetitionsService.getStageProposal', () => {
   it('proposes a single final after 4 OK prologue results', async () => {
     const people = [p1Fixture(), p2Fixture(), p3Fixture(), p4Fixture()];

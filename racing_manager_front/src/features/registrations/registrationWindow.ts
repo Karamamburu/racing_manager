@@ -9,6 +9,13 @@ function registrationClosesAt(
   return registrationClose < eventDate ? registrationClose : eventDate;
 }
 
+export function isRegistrationWindowClosed(
+  event: Pick<EventDetails, 'eventDate' | 'registrationClose'>,
+  now = new Date(),
+): boolean {
+  return now.getTime() > registrationClosesAt(event).getTime();
+}
+
 export function isEventRegistrationOpen(
   event: Pick<EventDetails, 'status' | 'eventDate' | 'registrationClose'>,
   now = new Date(),

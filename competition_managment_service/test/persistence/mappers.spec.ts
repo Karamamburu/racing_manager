@@ -14,8 +14,8 @@ describe('persistence mappers', () => {
       'prologue',
       'qf',
       'sf',
-      'final_a',
       'final_b',
+      'final_a',
     ]);
     expect(format.stages[1].heats).toEqual({
       type: 'HEATS',

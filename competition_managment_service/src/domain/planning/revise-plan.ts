@@ -44,6 +44,15 @@ function raiseHeatSize(stage: StageSpec, incoming: number): void {
   }
 }
 
+function dropInboundRoutes(format: CompetitionFormat, removedId: string): void {
+  for (const stage of format.stages) {
+    if (stage.advancement.type !== 'ROUTES') continue;
+    const routes = stage.advancement.routes.filter((route) => route.toStageId !== removedId);
+    stage.advancement =
+      routes.length === 0 ? { type: 'NONE' } : { type: 'ROUTES', routes };
+  }
+}
+
 function rewireRemoved(format: CompetitionFormat, removedId: string, successorId: string): void {
   for (const stage of format.stages) {
     if (stage.advancement.type !== 'ROUTES') {
@@ -57,7 +66,54 @@ function rewireRemoved(format: CompetitionFormat, removedId: string, successorId
   }
 }
 
+function prependStage(format: CompetitionFormat, stage: StageSpec): void {
+  if (format.stages.some((item) => item.id === stage.id)) {
+    throw new DomainError(
+      ErrorCodes.FORMAT_INVALID,
+      `Duplicate stage id "${stage.id}".`,
+      'addStages.stage.id',
+    );
+  }
+
+  const inserted: StageSpec = JSON.parse(JSON.stringify(stage)) as StageSpec;
+  const former = format.stages[0];
+  if (!former) {
+    format.stages.push(inserted);
+    return;
+  }
+
+  if (inserted.advancement.type === 'NONE') {
+    inserted.advancement = {
+      type: 'ROUTES',
+      routes: [{ cut: { type: 'TOP_N', n: 1 }, toStageId: former.id }],
+    };
+  } else if (inserted.advancement.routes.length === 1) {
+    inserted.advancement = {
+      type: 'ROUTES',
+      routes: [
+        {
+          ...inserted.advancement.routes[0],
+          toStageId: former.id,
+        },
+      ],
+    };
+  } else {
+    throw new DomainError(
+      ErrorCodes.FORMAT_INVALID,
+      `Prepended stage "${inserted.id}" must advance through a single route.`,
+      'addStages.stage.advancement',
+    );
+  }
+
+  format.stages.unshift(inserted);
+}
+
 function insertStage(format: CompetitionFormat, op: AddStageOp): void {
+  if (op.afterStageId == null) {
+    prependStage(format, op.stage);
+    return;
+  }
+
   const after = findStage(format, op.afterStageId, 'addStages.afterStageId');
   if (format.stages.some((stage) => stage.id === op.stage.id)) {
     throw new DomainError(
@@ -104,8 +160,13 @@ export function revisePlan(input: RevisePlanInput): ProposedPlan {
 
   const expected = expectedFieldByStage(format, input.participantCount);
   const successorByRemoved = new Map<string, string>();
+  const droppedTerminals: string[] = [];
   for (const stageId of removeStageIds) {
     const removed = findStage(format, stageId, 'removeStageIds');
+    if (removed.advancement.type === 'NONE') {
+      droppedTerminals.push(stageId);
+      continue;
+    }
     const successorId = uniqueSuccessor(removed);
     successorByRemoved.set(stageId, successorId);
     const successor = findStage(format, successorId, 'removeStageIds');
@@ -114,6 +175,9 @@ export function revisePlan(input: RevisePlanInput): ProposedPlan {
 
   for (const [stageId, successorId] of successorByRemoved) {
     rewireRemoved(format, stageId, successorId);
+  }
+  for (const stageId of droppedTerminals) {
+    dropInboundRoutes(format, stageId);
   }
   if (removeStageIds.length > 0) {
     const drop = new Set(removeStageIds);

@@ -1,6 +1,6 @@
 import { assignHeats, singleHeat } from './seeding/assign-heats';
 import { normalizeParticipants } from './participants';
-import { BuildStartListsInput, StartLists } from './types';
+import { BuildStartListsInput, StartLists, isSingleHeatFinal } from './types';
 import { findStage, validateFormat } from './validate-format';
 
 export function buildStartLists(input: BuildStartListsInput): StartLists {
@@ -8,7 +8,7 @@ export function buildStartLists(input: BuildStartListsInput): StartLists {
   const stage = findStage(input.format, input.stageId);
   const participants = normalizeParticipants(input.participants);
 
-  if (stage.heats.type === 'NONE') {
+  if (stage.heats.type === 'NONE' || isSingleHeatFinal(stage.kind)) {
     return {
       stageId: stage.id,
       heats: singleHeat(participants),

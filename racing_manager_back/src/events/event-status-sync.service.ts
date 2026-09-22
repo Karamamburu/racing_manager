@@ -53,8 +53,18 @@ export class EventStatusSyncService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      if (doneIds.length > 0) {
-        for (const id of doneIds) {
+      const blocking =
+        doneIds.length === 0
+          ? []
+          : await this.prisma.classCompetition.findMany({
+              where: { eventId: { in: doneIds }, status: { not: 'DONE' } },
+              select: { eventId: true },
+            });
+      const blockedEventIds = new Set(blocking.map((row) => row.eventId));
+      const readyIds = doneIds.filter((id) => !blockedEventIds.has(id));
+
+      if (readyIds.length > 0) {
+        for (const id of readyIds) {
           await this.prisma.$transaction(async (tx) => {
             await tx.event.update({
               where: { id },

@@ -48,9 +48,27 @@ enum RegistrationStatus {
   DNS
   DNF
   QQ
+  NQ
   DSQ
 
   @@map("registration_status")
+}
+
+enum ClassCompetitionStatus {
+  DRAFT
+  IN_PROGRESS
+  DONE
+
+  @@map("class_competition_status")
+}
+
+enum ClassHeatResultStatus {
+  OK
+  DNS
+  DNF
+  DSQ
+
+  @@map("class_heat_result_status")
 }
 
 enum PersonalConsentDocumentType {
@@ -154,6 +172,7 @@ model Event {
   eventFormats       EventFormat[]
   registrations      Registration[]
   laps               EventLap[]
+  classCompetitions  ClassCompetition[]
 
   @@index([trackId], map: "idx_events_track_id")
   @@index([eventDate], map: "idx_events_date")
@@ -168,8 +187,9 @@ model ParticipationFormat {
   code           String
   name           String
   sortOrder      Int            @default(0) @map("sort_order")
-  eventFormats   EventFormat[]
-  registrations  Registration[]
+  eventFormats      EventFormat[]
+  registrations     Registration[]
+  classCompetitions ClassCompetition[]
 
   @@unique([sport, code])
   @@index([sport], map: "idx_participation_formats_sport")
@@ -208,6 +228,7 @@ model Registration {
   registeredAt DateTime           @default(now()) @map("registered_at") @db.Timestamptz(6)
   updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
   result       Result?
+  heatTimes    ClassHeatTime[]
 
   @@index([eventId], map: "idx_registrations_event_id")
   @@index([userId], map: "idx_registrations_user_id")
@@ -229,6 +250,44 @@ model EventLap {
   @@unique([eventId, lapNumber])
   @@index([eventId], map: "idx_event_laps_event_id")
   @@map("event_laps")
+}
+
+model ClassCompetition {
+  id               String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  eventId          String                 @map("event_id") @db.Uuid
+  event            Event                  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  formatId         Int?                   @map("format_id")
+  format           ParticipationFormat?   @relation(fields: [formatId], references: [id])
+  gender           GenderType
+  cmsCompetitionId String                 @unique @map("cms_competition_id") @db.Uuid
+  status           ClassCompetitionStatus @default(DRAFT)
+  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  heatTimes        ClassHeatTime[]
+
+  @@unique([eventId, formatId, gender])
+  @@index([eventId], map: "idx_class_competitions_event_id")
+  @@map("class_competitions")
+}
+
+model ClassHeatTime {
+  id                 String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  classCompetitionId String                @map("class_competition_id") @db.Uuid
+  classCompetition   ClassCompetition      @relation(fields: [classCompetitionId], references: [id], onDelete: Cascade)
+  stageId            String                @map("stage_id")
+  heatNumber         Int                   @map("heat_number")
+  registrationId     String                @map("registration_id") @db.Uuid
+  registration       Registration          @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  timeMilliseconds   Int?                  @map("time_milliseconds")
+  status             ClassHeatResultStatus @default(OK)
+  qualificationStatus RegistrationStatus?  @map("qualification_status")
+  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([classCompetitionId, stageId, heatNumber, registrationId])
+  @@index([classCompetitionId, stageId], map: "idx_class_heat_times_stage")
+  @@index([registrationId], map: "idx_class_heat_times_registration_id")
+  @@map("class_heat_times")
 }
 
 model Result {

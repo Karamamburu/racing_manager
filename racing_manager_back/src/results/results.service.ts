@@ -51,6 +51,8 @@ type RegistrationForResult = {
   eventId: string;
   startNumber: number | null;
   status: string;
+  gender: string;
+  formatId: number | null;
 };
 
 @Injectable()
@@ -77,10 +79,25 @@ export class ResultsService {
         eventId: true,
         startNumber: true,
         status: true,
+        gender: true,
+        formatId: true,
       },
     });
     if (!registration) {
       throw new NotFoundException('Registration not found.');
+    }
+    const bracket = await this.prisma.classCompetition.findFirst({
+      where: {
+        eventId,
+        gender: registration.gender,
+        formatId: registration.formatId,
+      },
+      select: { id: true },
+    });
+    if (bracket) {
+      throw new BadRequestException(
+        'Это многоэтапная гонка. Время записывается в заезд, а не общим результатом.',
+      );
     }
     this.assertRecordableRegistration(registration);
 

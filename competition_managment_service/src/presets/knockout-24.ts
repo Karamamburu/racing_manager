@@ -69,9 +69,9 @@ export const knockout24Format: CompetitionFormat = {
       },
     },
     {
-      id: 'final_a',
-      kind: 'FINAL_A',
-      label: 'Final A',
+      id: 'final_b',
+      kind: 'FINAL_B',
+      label: 'Final B',
       heats: {
         type: 'HEATS',
         heatCount: 1,
@@ -82,9 +82,9 @@ export const knockout24Format: CompetitionFormat = {
       advancement: { type: 'NONE' },
     },
     {
-      id: 'final_b',
-      kind: 'FINAL_B',
-      label: 'Final B',
+      id: 'final_a',
+      kind: 'FINAL_A',
+      label: 'Final A',
       heats: {
         type: 'HEATS',
         heatCount: 1,

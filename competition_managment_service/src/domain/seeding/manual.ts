@@ -5,6 +5,7 @@ export function assignManualHeats(
   participants: Participant[],
   manualHeats: ManualHeatAssignment[] | undefined,
   expectedHeatCount?: number,
+  options?: { allowEmpty?: boolean },
 ): Heat[] {
   if (!manualHeats || manualHeats.length === 0) {
     throw new DomainError(
@@ -50,7 +51,7 @@ export function assignManualHeats(
   const heats: Heat[] = [];
   for (let heatIndex = 0; heatIndex < sorted.length; heatIndex += 1) {
     const assignment = sorted[heatIndex];
-    if (!assignment.participantIds.length) {
+    if (!options?.allowEmpty && !assignment.participantIds.length) {
       throw new DomainError(
         ErrorCodes.MANUAL_ASSIGNMENT_INVALID,
         'Each manual heat must contain at least one participant.',

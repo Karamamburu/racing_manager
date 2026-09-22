@@ -1,4 +1,5 @@
 import { buildStartLists } from '../../src/domain/build-start-lists';
+import { proposePlan } from '../../src/domain/planning';
 import { knockout24Format } from '../../src/presets';
 import { heatSeeds, makeParticipants } from './helpers';
 
@@ -37,6 +38,33 @@ describe('buildStartLists', () => {
     });
     expect(result.heats).toHaveLength(4);
     expect(result.heats.map((heat) => heat.slots.length)).toEqual([5, 5, 5, 5]);
+  });
+
+  it('puts every finalist into one heat even when they exceed the heat size', () => {
+    const format = proposePlan({ participantCount: 24 }).format;
+    for (const stageId of ['final_a', 'final_b']) {
+      const stage = format.stages.find((item) => item.id === stageId);
+      if (stage?.heats.type === 'HEATS') {
+        stage.heats.heatCount = 1;
+        stage.heats.heatSize = 6;
+      }
+    }
+
+    const finalA = buildStartLists({
+      format,
+      stageId: 'final_a',
+      participants: makeParticipants(10),
+    });
+    expect(finalA.heats).toHaveLength(1);
+    expect(finalA.heats[0].slots).toHaveLength(10);
+
+    const finalB = buildStartLists({
+      format,
+      stageId: 'final_b',
+      participants: makeParticipants(8),
+    });
+    expect(finalB.heats).toHaveLength(1);
+    expect(finalB.heats[0].slots).toHaveLength(8);
   });
 
   it('uses fewer QF heats when only 10 athletes remain', () => {

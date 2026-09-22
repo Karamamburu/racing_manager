@@ -3,8 +3,13 @@ import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import { canChangeEventStatus, canCreateEvents, canManageCreatedEvent } from '../../features/auth/canCreateEvents';
+import { canChangeEventStatus, canCreateEvents, canManageCreatedEvent, isAdministrator } from '../../features/auth/canCreateEvents';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
+import type { ClassCompetitionView } from '../../features/class-competitions/types';
+import {
+  classCompetitionsQueryKey,
+  useClassCompetitionsQuery,
+} from '../../features/class-competitions/useClassCompetitionsQuery';
 import { eventsService } from '../../features/events/eventsService';
 import { recentEventsQueryKey } from '../../features/events/useRecentEventsQuery';
 import {
@@ -13,6 +18,7 @@ import {
 } from '../../features/events/useEventDetailsQuery';
 import {
   isEventRegistrationOpen,
+  isRegistrationWindowClosed,
   registrationClosedReason,
 } from '../../features/registrations/registrationWindow';
 import { registrationsService } from '../../features/registrations/registrationsService';
@@ -29,11 +35,13 @@ import {
 import { AppShell } from '../../shared/layout';
 import type { EventFormatRef, EventLap, EventParticipant } from '../../shared/types/event';
 import type { FeatureItem } from '../../shared/types/track';
+import { ClassCompetitionPanel } from './components/ClassCompetitionPanel';
 import { EditEventModal } from './components/EditEventModal';
 import { EventTrackMap } from './components/EventTrackMap';
 import { EventStatusSelect } from './components/EventStatusSelect';
 import { FinishTimeCell } from './components/FinishTimeCell';
 import { RegisterEventModal } from './components/RegisterEventModal';
+import { SeedTestRegistrationsModal } from './components/SeedTestRegistrationsModal';
 import { RegistrationStatusSelect } from './components/RegistrationStatusSelect';
 import { StartNumberCell } from './components/StartNumberCell';
 
@@ -90,6 +98,42 @@ function formatEventLaps(laps: EventLap[]): string {
 
 function participantLapTime(participant: EventParticipant, lapNumber: number): number | null {
   return (participant.laps ?? []).find((lap) => lap.lapNumber === lapNumber)?.timeMilliseconds ?? null;
+}
+
+function competitionForRows(
+  rows: EventParticipant[],
+  competitions: ClassCompetitionView[],
+): ClassCompetitionView | null {
+  const sample = rows[0];
+  if (!sample) return null;
+  return (
+    competitions.find(
+      (competition) =>
+        competition.gender === sample.gender &&
+        competition.formatId === (sample.format?.id ?? null),
+    ) ?? null
+  );
+}
+
+function rowsWithClassification(
+  rows: EventParticipant[],
+  competition: ClassCompetitionView | null,
+): EventParticipant[] {
+  if (!competition || competition.status !== 'DONE') return rows;
+  const placed = new Map(
+    competition.classification.map((item) => [item.registrationId, item]),
+  );
+  return rows
+    .map((row) => {
+      const result = placed.get(row.id);
+      if (!result) return row;
+      return {
+        ...row,
+        place: result.place,
+        finishTimeMs: result.timeMilliseconds ?? row.finishTimeMs,
+      };
+    })
+    .sort((a, b) => (a.place ?? Number.POSITIVE_INFINITY) - (b.place ?? Number.POSITIVE_INFINITY));
 }
 
 function classificationTitle(gender: string, formatName: string | null): string {
@@ -312,11 +356,13 @@ export function EventPage() {
   const queryClient = useQueryClient();
   const { id } = useParams<{ id: string }>();
   const eventQuery = useEventDetailsQuery(id);
+  const classCompetitionsQuery = useClassCompetitionsQuery(id);
   const sessionQuery = useSessionQuery();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
   const [isCancelRegistrationOpen, setIsCancelRegistrationOpen] = useState(false);
+  const [isTestRegistrationsOpen, setIsTestRegistrationsOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [isCancellingRegistration, setIsCancellingRegistration] = useState(false);
@@ -409,6 +455,7 @@ export function EventPage() {
   const refreshEvent = async () => {
     if (!event.id) return;
     await queryClient.invalidateQueries({ queryKey: eventDetailsQueryKey(event.id) });
+    await queryClient.invalidateQueries({ queryKey: classCompetitionsQueryKey(event.id) });
     void queryClient.invalidateQueries({ queryKey: recentEventsQueryKey });
   };
 
@@ -529,6 +576,10 @@ export function EventPage() {
     await submitRegistrationStatus(participant, nextStatus);
   };
 
+  const canRunBracket =
+    canCreateEvents(session?.roles) && event.status !== 'CANCELLED' && !pastCompleted;
+  const registrationClosed = isRegistrationWindowClosed(event);
+  const classCompetitions = classCompetitionsQuery.data ?? [];
   const participantColumns = getParticipantColumns({
     eventLaps: event.laps ?? [],
     canAssignNumbers,
@@ -718,7 +769,16 @@ export function EventPage() {
           ) : null}
         </Row>
 
-        <Card title={`Зарегистрированные участники (${event.registrations.length})`}>
+        <Card
+          title={`Зарегистрированные участники (${event.registrations.length})`}
+          extra={
+            isAdministrator(session?.roles) &&
+            !pastCompleted &&
+            event.status !== 'CANCELLED' ? (
+              <Button onClick={() => setIsTestRegistrationsOpen(true)}>Тестовые заявки</Button>
+            ) : null
+          }
+        >
           {participantSections.length === 0 ? (
             <Table
               columns={participantColumns}
@@ -730,20 +790,65 @@ export function EventPage() {
             />
           ) : (
             <Space direction="vertical" size={24} style={{ width: '100%' }}>
-              {participantSections.map((section) => (
-                <div key={section.key}>
-                  <Typography.Title level={5} style={{ marginTop: 0 }}>
-                    {section.title}
-                  </Typography.Title>
-                  <Table
-                    columns={participantColumns}
-                    dataSource={section.rows}
-                    rowKey="id"
-                    pagination={false}
-                    scroll={{ x: 'max-content' }}
-                  />
-                </div>
-              ))}
+              {classCompetitionsQuery.isError ? (
+                <Typography.Text type="danger">
+                  Не удалось загрузить сетку многоэтапной гонки.
+                </Typography.Text>
+              ) : null}
+              {participantSections.map((section) => {
+                const competition = competitionForRows(section.rows, classCompetitions);
+                const bracketInProgress = competition != null && competition.status !== 'DONE';
+                const sample = section.rows[0];
+                const columns = competition
+                  ? getParticipantColumns({
+                      eventLaps: event.laps ?? [],
+                      canAssignNumbers: false,
+                      canAssignResults: false,
+                      canChangeStatus: canChangeRegistrationStatus,
+                      savingNumberId: savingStartNumberId,
+                      savingResultId: savingFinishTimeId,
+                      savingStatusId: savingRegistrationStatusId,
+                      savingLap,
+                      onAssignNumber: assignStartNumber,
+                      onChangeStatus: assignRegistrationStatus,
+                      onAssignLap: assignLapTime,
+                      onAssignResult: assignFinishTime,
+                      onInvalidResult: () => {
+                        message.error(
+                          'Введите время цифрами. Минуты и секунды — до 59, например 13215 → 01:32:15',
+                        );
+                      },
+                    })
+                  : participantColumns;
+                return (
+                  <div key={section.key}>
+                    <Typography.Title level={5} style={{ marginTop: 0 }}>
+                      {section.title}
+                    </Typography.Title>
+                    {classCompetitionsQuery.isSuccess ? (
+                      <ClassCompetitionPanel
+                        eventId={event.id}
+                        competition={competition}
+                        formatId={sample?.format?.id ?? null}
+                        gender={sample?.gender ?? ''}
+                        eventLaps={event.laps ?? []}
+                        canManage={canRunBracket}
+                        registrationClosed={registrationClosed}
+                        onChanged={refreshEvent}
+                      />
+                    ) : null}
+                    {bracketInProgress ? null : (
+                      <Table
+                        columns={columns}
+                        dataSource={rowsWithClassification(section.rows, competition)}
+                        rowKey="id"
+                        pagination={false}
+                        scroll={{ x: 'max-content' }}
+                      />
+                    )}
+                  </div>
+                );
+              })}
             </Space>
           )}
         </Card>
@@ -753,6 +858,13 @@ export function EventPage() {
         event={event}
         onClose={() => setIsEditOpen(false)}
         onUpdated={refreshEvent}
+      />
+      <SeedTestRegistrationsModal
+        open={isTestRegistrationsOpen}
+        eventId={event.id}
+        formats={event.formats}
+        onClose={() => setIsTestRegistrationsOpen(false)}
+        onCreated={refreshEvent}
       />
       <RegisterEventModal
         open={isRegisterOpen}

@@ -33,7 +33,8 @@ export type ProposedPlan = {
 };
 
 export type AddStageOp = {
-  afterStageId: string;
+  /** Null inserts the stage as the new first stage. */
+  afterStageId: string | null;
   stage: import('../types').StageSpec;
 };
 

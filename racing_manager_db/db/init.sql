@@ -23,8 +23,10 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TYPE sport_type AS ENUM ('RUN', 'SKI', 'ROLLER_SKI', 'BIKE');
 CREATE TYPE event_type AS ENUM ('RACE', 'TIME_TRIAL');
 CREATE TYPE event_status AS ENUM ('PLANNED', 'IN_PROGRESS', 'DONE', 'CANCELLED');
-CREATE TYPE registration_status AS ENUM ('REGISTERED', 'CONFIRMED', 'CANCELLED', 'WITHDRAWN', 'DNS', 'DNF', 'QQ', 'DSQ');
+CREATE TYPE registration_status AS ENUM ('REGISTERED', 'CONFIRMED', 'CANCELLED', 'WITHDRAWN', 'DNS', 'DNF', 'QQ', 'NQ', 'DSQ');
 CREATE TYPE gender_type AS ENUM ('M', 'F');
+CREATE TYPE class_competition_status AS ENUM ('DRAFT', 'IN_PROGRESS', 'DONE');
+CREATE TYPE class_heat_result_status AS ENUM ('OK', 'DNS', 'DNF', 'DSQ');
 CREATE TYPE personal_consent_document_type AS ENUM ('PRIVACY_POLICY', 'PERSONAL_DATA_CONSENT');
 CREATE TYPE personal_consent_action AS ENUM ('GRANTED', 'REVOKED');
 CREATE TYPE personal_consent_source AS ENUM ('PROFILE_UPDATE', 'REGISTRATION', 'REVOKE');
@@ -206,6 +208,39 @@ CREATE TABLE results (
 );
 
 -- ========================================
+-- CLASS COMPETITIONS
+-- One multi-stage CMS competition per event classification (format x gender).
+-- Heat times stay here; CMS stores places and the bracket.
+-- ========================================
+CREATE TABLE class_competitions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  format_id INT REFERENCES participation_formats(id),
+  gender gender_type NOT NULL,
+  cms_competition_id UUID NOT NULL UNIQUE,
+  status class_competition_status NOT NULL DEFAULT 'DRAFT',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX class_competitions_event_class
+  ON class_competitions (event_id, gender, COALESCE(format_id, -1));
+
+CREATE TABLE class_heat_times (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  class_competition_id UUID NOT NULL REFERENCES class_competitions(id) ON DELETE CASCADE,
+  stage_id TEXT NOT NULL,
+  heat_number INT NOT NULL CHECK (heat_number > 0),
+  registration_id UUID NOT NULL REFERENCES registrations(id) ON DELETE CASCADE,
+  time_milliseconds INT CHECK (time_milliseconds IS NULL OR time_milliseconds > 0),
+  status class_heat_result_status NOT NULL DEFAULT 'OK',
+  qualification_status registration_status,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (class_competition_id, stage_id, heat_number, registration_id)
+);
+
+-- ========================================
 -- RESULT LAPS
 -- Split time for one planned event lap of one result.
 -- ========================================
@@ -282,6 +317,9 @@ CREATE INDEX idx_registrations_event_id ON registrations(event_id);
 CREATE INDEX idx_registrations_user_id ON registrations(user_id);
 CREATE INDEX idx_registrations_status ON registrations(status);
 CREATE INDEX idx_registrations_format_id ON registrations(format_id);
+CREATE INDEX idx_class_competitions_event_id ON class_competitions(event_id);
+CREATE INDEX idx_class_heat_times_stage ON class_heat_times(class_competition_id, stage_id);
+CREATE INDEX idx_class_heat_times_registration_id ON class_heat_times(registration_id);
 CREATE INDEX idx_personal_consent_events_user_id ON personal_consent_events(user_id);
 CREATE INDEX idx_personal_consent_events_document_id ON personal_consent_events(document_id);
 CREATE INDEX idx_news_track_id ON news(track_id);
@@ -289,7 +327,7 @@ CREATE INDEX idx_news_published_at ON news(published_at DESC);
 CREATE UNIQUE INDEX idx_registrations_event_user_active
   ON registrations (event_id, user_id)
   WHERE user_id IS NOT NULL
-    AND status IN ('REGISTERED', 'CONFIRMED', 'DNS', 'DNF', 'QQ', 'DSQ');
+    AND status IN ('REGISTERED', 'CONFIRMED', 'DNS', 'DNF', 'QQ', 'NQ', 'DSQ');
 CREATE UNIQUE INDEX idx_registrations_event_person_active
   ON registrations (
     event_id,
@@ -298,7 +336,7 @@ CREATE UNIQUE INDEX idx_registrations_event_person_active
     birth_year
   )
   WHERE user_id IS NULL
-    AND status IN ('REGISTERED', 'CONFIRMED', 'DNS', 'DNF', 'QQ', 'DSQ');
+    AND status IN ('REGISTERED', 'CONFIRMED', 'DNS', 'DNF', 'QQ', 'NQ', 'DSQ');
 CREATE UNIQUE INDEX idx_registrations_event_start_number
   ON registrations (event_id, start_number)
   WHERE start_number IS NOT NULL;

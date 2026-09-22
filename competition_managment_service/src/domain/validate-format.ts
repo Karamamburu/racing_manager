@@ -9,6 +9,7 @@ import {
   STAGE_KINDS,
   StageKind,
   StageSpec,
+  isSingleHeatFinal,
 } from './types';
 
 function isStageKind(value: string): value is StageKind {
@@ -213,6 +214,18 @@ function validateStage(stage: StageSpec, path: string): void {
     );
   }
   validateHeatLayout(stage.heats, `${path}.heats`);
+  if (
+    isSingleHeatFinal(stage.kind) &&
+    stage.heats.type === 'HEATS' &&
+    stage.heats.heatCount != null &&
+    stage.heats.heatCount > 1
+  ) {
+    throw new DomainError(
+      ErrorCodes.FORMAT_INVALID,
+      'Finals are raced as a single heat.',
+      `${path}.heats.heatCount`,
+    );
+  }
   validateRankingRule(stage.ranking, `${path}.ranking`);
   validateAdvancement(stage.advancement, `${path}.advancement`);
 }

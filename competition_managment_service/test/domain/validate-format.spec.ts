@@ -14,6 +14,27 @@ describe('validateFormat', () => {
     expect(() => validateFormat(knockout24Format)).not.toThrow();
   });
 
+  it('rejects more than one heat in a final', () => {
+    const format: CompetitionFormat = {
+      stages: [
+        {
+          id: 'final_a',
+          kind: 'FINAL_A',
+          heats: {
+            type: 'HEATS',
+            heatCount: 2,
+            heatSize: 6,
+            remainder: 'BALANCED',
+            seeding: { type: 'BY_OVERALL_RANK' },
+          },
+          ranking: { type: 'BY_PLACE' },
+          advancement: { type: 'NONE' },
+        },
+      ],
+    };
+    expect(() => validateFormat(format)).toThrow(/single heat/);
+  });
+
   it('rejects an empty stage list', () => {
     expect(() => validateFormat({ stages: [] })).toThrow(DomainError);
   });

@@ -1,5 +1,5 @@
 import { balancedHeatSizes, resolveHeatCount } from '../seeding/heat-sizes';
-import { CompetitionFormat, StageKind, StageSpec } from '../types';
+import { CompetitionFormat, StageKind, StageSpec, isSingleHeatFinal } from '../types';
 import { expectedFieldByStage } from './expected-field';
 import {
   DEFAULT_MAX_HEAT_SIZE,
@@ -19,6 +19,9 @@ function heatRationale(stage: StageSpec, expected: number): {
 } {
   if (stage.heats.type !== 'HEATS' || expected < 1) {
     return { heatCount: null, heatSizes: [] };
+  }
+  if (isSingleHeatFinal(stage.kind)) {
+    return { heatCount: 1, heatSizes: [expected] };
   }
   const count = resolveHeatCount(
     expected,

@@ -3,6 +3,8 @@ import { CompetitionsService } from '../persistence/competitions.service';
 import {
   parseCreateCompetitionBody,
   parsePersistedAdvanceBody,
+  parseReassignHeatsBody,
+  parseParticipantIdList,
   parseSeedStageBody,
   parseStageResultsBody,
 } from './parse-competition-bodies';
@@ -47,6 +49,16 @@ export class CompetitionsController {
     return this.competitions.seedStage(id, stageId, parsed.manualHeats);
   }
 
+  @Put(':id/stages/:stageId/heats')
+  reassignHeats(
+    @Param('id') id: string,
+    @Param('stageId') stageId: string,
+    @Body() body: unknown,
+  ) {
+    const parsed = parseReassignHeatsBody(body);
+    return this.competitions.reassignHeats(id, stageId, parsed.heats);
+  }
+
   @Put(':id/stages/:stageId/results')
   results(
     @Param('id') id: string,
@@ -55,6 +67,20 @@ export class CompetitionsController {
   ) {
     const parsed = parseStageResultsBody(body);
     return this.competitions.recordResults(id, stageId, parsed.heatResults);
+  }
+
+  @Post(':id/stages/:stageId/complete')
+  complete(@Param('id') id: string, @Param('stageId') stageId: string) {
+    return this.competitions.completeStage(id, stageId);
+  }
+
+  @Put(':id/stages/:stageId/field')
+  setField(
+    @Param('id') id: string,
+    @Param('stageId') stageId: string,
+    @Body() body: unknown,
+  ) {
+    return this.competitions.setStageField(id, stageId, parseParticipantIdList(body));
   }
 
   @Post(':id/stages/:stageId/advance')
