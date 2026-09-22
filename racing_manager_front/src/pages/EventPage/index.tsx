@@ -142,11 +142,18 @@ function rowsWithClassification(
     .sort((a, b) => (a.place ?? Number.POSITIVE_INFINITY) - (b.place ?? Number.POSITIVE_INFINITY));
 }
 
-function formatParticipantCount(count: number): string {
+function formatParticipantCount(count: number, gender: string): string {
   const mod10 = count % 10;
   const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${count} участник`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} участника`;
+  const one = mod10 === 1 && mod100 !== 11;
+  const few = mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14);
+  if (gender === 'F') {
+    if (one) return `${count} участница`;
+    if (few) return `${count} участницы`;
+    return `${count} участниц`;
+  }
+  if (one) return `${count} участник`;
+  if (few) return `${count} участника`;
   return `${count} участников`;
 }
 
@@ -855,7 +862,7 @@ export function EventPage() {
                           <Space size={8}>
                             <span>{section.title}</span>
                             <Typography.Text type="secondary">
-                              {formatParticipantCount(section.rows.length)}
+                              {formatParticipantCount(section.rows.length, group.key)}
                             </Typography.Text>
                           </Space>
                         ),
