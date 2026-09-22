@@ -831,6 +831,7 @@ export function EventPage() {
                         competition={competition}
                         formatId={sample?.format?.id ?? null}
                         gender={sample?.gender ?? ''}
+                        eventLaps={event.laps ?? []}
                         canManage={canRunBracket}
                         registrationClosed={registrationClosed}
                         onChanged={refreshEvent}

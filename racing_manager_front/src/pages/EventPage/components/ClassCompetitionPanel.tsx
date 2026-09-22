@@ -8,7 +8,8 @@ import {
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { Button, Select, Space, Tag, Typography, message } from 'antd';
+import { Button, Select, Space, Table, Tag, Typography, message } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { classCompetitionsService } from '../../../features/class-competitions/classCompetitionsService';
 import type {
@@ -18,6 +19,8 @@ import type {
   ClassHeatSlot,
   HeatResultStatus,
 } from '../../../features/class-competitions/types';
+import { formatFinishTime } from '../../../shared/formatFinishTime';
+import type { EventLap } from '../../../shared/types/event';
 import { FinishTimeCell } from './FinishTimeCell';
 
 const STAGE_LABELS: Record<string, string> = {
@@ -48,6 +51,7 @@ type ClassCompetitionPanelProps = {
   competition: ClassCompetitionView | null;
   formatId: number | null;
   gender: string;
+  eventLaps: EventLap[];
   canManage: boolean;
   registrationClosed: boolean;
   onChanged: () => Promise<void> | void;
@@ -58,6 +62,7 @@ export function ClassCompetitionPanel({
   competition,
   formatId,
   gender,
+  eventLaps,
   canManage,
   registrationClosed,
   onChanged,
@@ -137,6 +142,7 @@ export function ClassCompetitionPanel({
         <StageBoard
           key={stage.stageId}
           stage={stage}
+          eventLaps={eventLaps}
           editable={editable}
           pending={pending}
           onRemove={
@@ -272,6 +278,7 @@ function slotFilled(slot: ClassHeatSlot): boolean {
 
 function StageBoard({
   stage,
+  eventLaps,
   editable,
   pending,
   onRemove,
@@ -282,6 +289,7 @@ function StageBoard({
   onCommit,
 }: {
   stage: ClassCompetitionStage;
+  eventLaps: EventLap[];
   editable: boolean;
   pending: string | null;
   onRemove: (() => void) | null;
@@ -346,7 +354,9 @@ function StageBoard({
           </Button>
         ) : null}
       </Space>
-      {stage.heats.length === 0 ? (
+      {stage.status === 'COMPLETED' && stage.heats.length > 0 ? (
+        <CompletedStageResults stage={stage} eventLaps={eventLaps} />
+      ) : stage.heats.length === 0 ? (
         <Typography.Text type="secondary">
           {stage.entries.length > 0
             ? `${stage.entries.length} участников ждут распределения по заездам`
@@ -513,6 +523,117 @@ function StarterCard({
         </div>
       </Space>
     </div>
+  );
+}
+
+type RankedSlot = ClassHeatSlot & { place: number | null; heatNumber: number };
+
+function rankStageSlots(stage: ClassCompetitionStage): RankedSlot[] {
+  const slots = stage.heats.flatMap((heat) =>
+    heat.slots.map((slot) => ({ ...slot, heatNumber: heat.heatNumber })),
+  );
+  const finished = slots
+    .filter((slot) => slot.resultStatus === 'OK' && slot.timeMilliseconds != null)
+    .sort((a, b) => {
+      const byTime = (a.timeMilliseconds ?? 0) - (b.timeMilliseconds ?? 0);
+      if (byTime !== 0) return byTime;
+      return (a.startNumber ?? Number.POSITIVE_INFINITY) - (b.startNumber ?? Number.POSITIVE_INFINITY);
+    });
+  const rest = slots
+    .filter((slot) => slot.resultStatus !== 'OK' || slot.timeMilliseconds == null)
+    .sort((a, b) => {
+      const byStatus = statusOrder(a.resultStatus) - statusOrder(b.resultStatus);
+      if (byStatus !== 0) return byStatus;
+      return (a.startNumber ?? Number.POSITIVE_INFINITY) - (b.startNumber ?? Number.POSITIVE_INFINITY);
+    });
+  return [
+    ...finished.map((slot, index) => ({ ...slot, place: index + 1 })),
+    ...rest.map((slot) => ({ ...slot, place: null })),
+  ];
+}
+
+function statusOrder(status: HeatResultStatus | null): number {
+  if (status === 'DNF') return 0;
+  if (status === 'DSQ') return 1;
+  if (status === 'DNS') return 2;
+  return 3;
+}
+
+function CompletedStageResults({
+  stage,
+  eventLaps,
+}: {
+  stage: ClassCompetitionStage;
+  eventLaps: EventLap[];
+}) {
+  const rows = rankStageSlots(stage);
+  const severalHeats = stage.heats.length > 1;
+  const lapColumns: ColumnsType<RankedSlot> = eventLaps.map((lap) => ({
+    title: (
+      <span>
+        Круг {lap.lapNumber}
+        <div style={{ fontWeight: 400, fontSize: 12, color: 'rgba(0, 0, 0, 0.45)' }}>
+          {lap.distanceKm} км
+        </div>
+      </span>
+    ),
+    key: `lap-${lap.lapNumber}`,
+    width: 120,
+    render: (_value: unknown, record) =>
+      record.resultStatus === 'OK' && eventLaps.length === 1
+        ? formatFinishTime(record.timeMilliseconds)
+        : '—',
+  }));
+  const columns: ColumnsType<RankedSlot> = [
+    {
+      title: 'Место',
+      dataIndex: 'place',
+      width: 80,
+      render: (value: number | null) => value ?? '—',
+    },
+    {
+      title: 'Ст. №',
+      dataIndex: 'startNumber',
+      width: 80,
+      render: (value: number | null) => value ?? '—',
+    },
+    {
+      title: 'Участник',
+      key: 'name',
+      render: (_value: unknown, record) => `${record.lastName} ${record.firstName}`.trim(),
+    },
+    ...(severalHeats
+      ? [
+          {
+            title: 'Заезд',
+            dataIndex: 'heatNumber',
+            width: 80,
+          } satisfies ColumnsType<RankedSlot>[number],
+        ]
+      : []),
+    ...lapColumns,
+    {
+      title: 'Общее время',
+      key: 'total',
+      width: 140,
+      render: (_value: unknown, record) =>
+        record.resultStatus === 'OK' ? (
+          formatFinishTime(record.timeMilliseconds)
+        ) : (
+          <Tag>{record.resultStatus ?? '—'}</Tag>
+        ),
+    },
+  ];
+
+  return (
+    <Table
+      size="small"
+      pagination={false}
+      rowKey="registrationId"
+      columns={columns}
+      dataSource={rows}
+      scroll={{ x: 'max-content' }}
+    />
   );
 }
 
