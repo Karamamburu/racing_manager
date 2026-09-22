@@ -3,7 +3,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import { canChangeEventStatus, canCreateEvents, canManageCreatedEvent } from '../../features/auth/canCreateEvents';
+import { canChangeEventStatus, canCreateEvents, canManageCreatedEvent, isAdministrator } from '../../features/auth/canCreateEvents';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import type { ClassCompetitionView } from '../../features/class-competitions/types';
 import {
@@ -41,6 +41,7 @@ import { EventTrackMap } from './components/EventTrackMap';
 import { EventStatusSelect } from './components/EventStatusSelect';
 import { FinishTimeCell } from './components/FinishTimeCell';
 import { RegisterEventModal } from './components/RegisterEventModal';
+import { SeedTestRegistrationsModal } from './components/SeedTestRegistrationsModal';
 import { RegistrationStatusSelect } from './components/RegistrationStatusSelect';
 import { StartNumberCell } from './components/StartNumberCell';
 
@@ -361,6 +362,7 @@ export function EventPage() {
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
   const [isCancelRegistrationOpen, setIsCancelRegistrationOpen] = useState(false);
+  const [isTestRegistrationsOpen, setIsTestRegistrationsOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [isCancellingRegistration, setIsCancellingRegistration] = useState(false);
@@ -767,7 +769,16 @@ export function EventPage() {
           ) : null}
         </Row>
 
-        <Card title={`Зарегистрированные участники (${event.registrations.length})`}>
+        <Card
+          title={`Зарегистрированные участники (${event.registrations.length})`}
+          extra={
+            isAdministrator(session?.roles) &&
+            !pastCompleted &&
+            event.status !== 'CANCELLED' ? (
+              <Button onClick={() => setIsTestRegistrationsOpen(true)}>Тестовые заявки</Button>
+            ) : null
+          }
+        >
           {participantSections.length === 0 ? (
             <Table
               columns={participantColumns}
@@ -846,6 +857,13 @@ export function EventPage() {
         event={event}
         onClose={() => setIsEditOpen(false)}
         onUpdated={refreshEvent}
+      />
+      <SeedTestRegistrationsModal
+        open={isTestRegistrationsOpen}
+        eventId={event.id}
+        formats={event.formats}
+        onClose={() => setIsTestRegistrationsOpen(false)}
+        onCreated={refreshEvent}
       />
       <RegisterEventModal
         open={isRegisterOpen}

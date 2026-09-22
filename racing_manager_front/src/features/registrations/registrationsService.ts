@@ -19,6 +19,16 @@ export class RegistrationsService {
     );
   }
 
+  public async seedTestBatch(
+    eventId: string,
+    payload: { count: number; gender: 'M' | 'F'; formatId?: number },
+  ): Promise<{ status: number; data: { created: number } }> {
+    return apiClient.postResult<{ created: number }>(
+      `/events/${eventId}/registrations/test-batch`,
+      payload,
+    );
+  }
+
   public async cancelOwn(
     eventId: string,
   ): Promise<{ status: number; data: RegistrationResponse }> {

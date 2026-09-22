@@ -5,7 +5,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ADMIN_ROLE_CODES } from '../auth/role-codes';
+import { ADMIN_ROLE_CODES, RoleCode } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
 import { UsersService, type AppUser } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -21,6 +21,7 @@ import {
 } from './parse-create-registration';
 import { parseUpdateRegistrationBody } from './parse-update-registration';
 import { parseUpdateRegistrationStatusBody } from './parse-update-registration-status';
+import { buildTestPeople, guestPersonKey } from './seed-test-people';
 import {
   ACTIVE_REGISTRATION_STATUSES,
   LISTED_REGISTRATION_STATUSES,
@@ -110,6 +111,31 @@ type RegistrationsStore = {
   };
 };
 
+function parseSeedTestRegistrationsBody(body: unknown): {
+  count: number;
+  gender: 'M' | 'F';
+  formatId: number | null;
+} {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new BadRequestException('Request body must be a JSON object.');
+  }
+  const raw = body as Record<string, unknown>;
+  if (typeof raw.count !== 'number' || !Number.isInteger(raw.count) || raw.count < 1 || raw.count > 100) {
+    throw new BadRequestException('Количество заявок должно быть от 1 до 100.');
+  }
+  if (raw.gender !== 'M' && raw.gender !== 'F') {
+    throw new BadRequestException('Укажите пол: мужской или женский.');
+  }
+  let formatId: number | null = null;
+  if (raw.formatId != null && raw.formatId !== '') {
+    if (typeof raw.formatId !== 'number' || !Number.isInteger(raw.formatId) || raw.formatId < 1) {
+      throw new BadRequestException('formatId must be a positive integer.');
+    }
+    formatId = raw.formatId;
+  }
+  return { count: raw.count, gender: raw.gender, formatId };
+}
+
 function isUniqueViolation(error: unknown): boolean {
   return Boolean(
     error &&
@@ -124,7 +150,7 @@ export class RegistrationsService {
   private readonly store: RegistrationsStore;
 
   constructor(
-    prisma: PrismaService,
+    private readonly prisma: PrismaService,
     private readonly usersService: UsersService,
     private readonly rolesService: RolesService,
     private readonly eventStatusSync: EventStatusSyncService,
@@ -209,6 +235,63 @@ export class RegistrationsService {
       }
       throw error;
     }
+  }
+
+  async seedTestRegistrations(
+    authentikId: string | undefined,
+    eventId: string,
+    body: unknown,
+  ): Promise<{ created: number }> {
+    await this.rolesService.assertHasAnyRole(authentikId, [RoleCode.ADMINISTRATOR]);
+    const parsed = parseSeedTestRegistrationsBody(body);
+    const event = await this.requireAssignableEvent(eventId);
+    const formatId = this.resolveFormatId(event, parsed.formatId);
+
+    const existing = await this.prisma.registration.findMany({
+      where: { eventId, userId: null },
+      select: { firstName: true, lastName: true, birthYear: true },
+    });
+    let people;
+    try {
+      people = buildTestPeople(
+        parsed.count,
+        parsed.gender,
+        existing.map((row) => guestPersonKey(row.firstName, row.lastName, row.birthYear)),
+      );
+    } catch {
+      throw new BadRequestException(
+        'Не удалось подобрать уникальные имена. Уменьшите количество.',
+      );
+    }
+
+    const highest = await this.prisma.registration.aggregate({
+      where: { eventId, startNumber: { not: null } },
+      _max: { startNumber: true },
+    });
+    let startNumber = (highest._max.startNumber ?? 0) + 1;
+
+    await this.prisma.registration.createMany({
+      data: people.map((person) => {
+        const number = startNumber;
+        startNumber += 1;
+        return {
+          eventId,
+          userId: null,
+          firstName: person.firstName,
+          lastName: person.lastName,
+          gender: parsed.gender,
+          birthYear: person.birthYear,
+          city: person.city,
+          team: 'Тест',
+          formatId,
+          startNumber: number,
+          status: RegistrationStatusCode.CONFIRMED,
+          note: 'test',
+        };
+      }),
+    });
+
+    return { created: people.length };
   }
 
   async cancelOwn(

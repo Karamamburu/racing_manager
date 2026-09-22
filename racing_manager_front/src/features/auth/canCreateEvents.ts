@@ -1,3 +1,7 @@
+export function isAdministrator(roles: string[] | undefined): boolean {
+  return (roles ?? []).includes('ADMINISTRATOR');
+}
+
 export function canCreateEvents(roles: string[] | undefined): boolean {
   return (roles ?? []).some(
     (role) => role === 'ADMINISTRATOR' || role === 'ORGANIZER',

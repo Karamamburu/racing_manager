@@ -11,7 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { ADMIN_ROLE_CODES } from '../auth/role-codes';
+import { ADMIN_ROLE_CODES, RoleCode } from '../auth/role-codes';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
@@ -29,6 +29,22 @@ export class RegistrationsController {
     @Body() body: unknown,
   ) {
     return this.registrationsService.create(
+      req.session?.userSub,
+      eventId,
+      body,
+    );
+  }
+
+  @Post('test-batch')
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(SessionAuthGuard, RolesGuard)
+  @Roles(RoleCode.ADMINISTRATOR)
+  seedTestBatch(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Body() body: unknown,
+  ) {
+    return this.registrationsService.seedTestRegistrations(
       req.session?.userSub,
       eventId,
       body,
