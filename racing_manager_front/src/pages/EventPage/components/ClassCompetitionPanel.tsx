@@ -8,9 +8,9 @@ import {
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { Button, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { Button, Collapse, Select, Space, Table, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { classCompetitionsService } from '../../../features/class-competitions/classCompetitionsService';
 import type {
   AddableStageKind,
@@ -71,6 +71,17 @@ export function ClassCompetitionPanel({
   onChanged,
 }: ClassCompetitionPanelProps) {
   const [pending, setPending] = useState<string | null>(null);
+  const [openStageIds, setOpenStageIds] = useState(() => seededStageIds(competition));
+  const seenSeededRef = useRef(new Set(seededStageIds(competition)));
+  const seededKey = seededStageIds(competition).join('|');
+
+  useEffect(() => {
+    if (!seededKey) return;
+    const newcomers = seededKey.split('|').filter((id) => !seenSeededRef.current.has(id));
+    if (newcomers.length === 0) return;
+    for (const id of newcomers) seenSeededRef.current.add(id);
+    setOpenStageIds((current) => [...current, ...newcomers]);
+  }, [seededKey]);
 
   const run = async (key: string, action: () => Promise<void>, success: string) => {
     setPending(key);
@@ -146,6 +157,16 @@ export function ClassCompetitionPanel({
           key={stage.stageId}
           stage={stage}
           eventLaps={eventLaps}
+          open={openStageIds.includes(stage.stageId)}
+          onOpenChange={(open) =>
+            setOpenStageIds((current) =>
+              open
+                ? current.includes(stage.stageId)
+                  ? current
+                  : [...current, stage.stageId]
+                : current.filter((id) => id !== stage.stageId),
+            )
+          }
           editable={editable}
           previousCompleted={
             stage.sourceStageId != null &&
@@ -261,6 +282,12 @@ export function ClassCompetitionPanel({
   );
 }
 
+function seededStageIds(competition: ClassCompetitionView | null): string[] {
+  return (competition?.stages ?? [])
+    .filter((stage) => stage.status === 'SEEDED')
+    .map((stage) => stage.stageId);
+}
+
 function canRemoveStage(competition: ClassCompetitionView, stage: ClassCompetitionStage): boolean {
   if (!['prologue', 'eighth', 'qf', 'final_b'].includes(stage.stageId)) return false;
   if (stage.status !== 'PENDING') return false;
@@ -301,6 +328,8 @@ function slotFilled(slot: ClassHeatSlot): boolean {
 function StageBoard({
   stage,
   eventLaps,
+  open,
+  onOpenChange,
   editable,
   previousCompleted,
   qualifierStatus,
@@ -315,6 +344,8 @@ function StageBoard({
 }: {
   stage: ClassCompetitionStage;
   eventLaps: EventLap[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   editable: boolean;
   previousCompleted: boolean;
   qualifierStatus: 'QQ' | 'NQ' | null;
@@ -381,77 +412,101 @@ function StageBoard({
     );
   };
 
+  const canSeed =
+    editable &&
+    stage.status === 'PENDING' &&
+    stage.heats.length === 0 &&
+    (stage.entries.length > 0 || previousCompleted);
+  const stageActions = (
+    <Space wrap onClick={(event) => event.stopPropagation()}>
+      {onRemove ? (
+        <Button size="small" danger loading={pending === `remove-${stage.stageId}`} onClick={onRemove}>
+          Убрать этап
+        </Button>
+      ) : null}
+      {canSeed ? (
+        <Button size="small" type="primary" loading={pending === `seed-${stage.stageId}`} onClick={onSeed}>
+          {isTerminalStage(stage.kind) ? 'Сформировать заезд' : 'Сформировать заезды'}
+        </Button>
+      ) : null}
+      {canArrange && !isTerminalStage(stage.kind) ? (
+        <Button size="small" loading={pending === `move-${stage.stageId}`} onClick={addHeat}>
+          Добавить заезд
+        </Button>
+      ) : null}
+      {readyToCommit ? (
+        <Button size="small" type="primary" loading={pending === `commit-${stage.stageId}`} onClick={onCommit}>
+          Зафиксировать этап
+        </Button>
+      ) : null}
+    </Space>
+  );
+
   return (
-    <div>
-      <Space wrap style={{ marginBottom: 8 }}>
-        <Typography.Text strong>{title}</Typography.Text>
-        <Tag>{stageStatusLabel(stage.status)}</Tag>
-        {onRemove ? (
-          <Button size="small" danger loading={pending === `remove-${stage.stageId}`} onClick={onRemove}>
-            Убрать этап
-          </Button>
-        ) : null}
-        {editable &&
-        stage.status === 'PENDING' &&
-        stage.heats.length === 0 &&
-        (stage.entries.length > 0 || previousCompleted) ? (
-          <Button size="small" type="primary" loading={pending === `seed-${stage.stageId}`} onClick={onSeed}>
-            {isTerminalStage(stage.kind) ? 'Сформировать заезд' : 'Сформировать заезды'}
-          </Button>
-        ) : null}
-        {canArrange && !isTerminalStage(stage.kind) ? (
-          <Button size="small" loading={pending === `move-${stage.stageId}`} onClick={addHeat}>
-            Добавить заезд
-          </Button>
-        ) : null}
-        {readyToCommit ? (
-          <Button size="small" type="primary" loading={pending === `commit-${stage.stageId}`} onClick={onCommit}>
-            Зафиксировать этап
-          </Button>
-        ) : null}
-      </Space>
-      {stage.status === 'COMPLETED' && stage.heats.length > 0 ? (
-        <CompletedStageResults
-          stage={stage}
-          eventLaps={eventLaps}
-          canEditStatus={editable}
-          pending={pending}
-          onChangeRegistrationStatus={onChangeRegistrationStatus}
-        />
-      ) : stage.heats.length === 0 ? (
-        <Typography.Text type="secondary">
-          {previousCompleted
-            ? qualifierStatus === 'NQ'
-              ? 'Финал B собирается из участников со статусом NQ. Сформируйте заезд, когда состав готов'
-              : isTerminalStage(stage.kind)
-                ? 'Отметьте квалифицированных и сформируйте заезд'
-                : 'Отметьте квалифицированных и сформируйте заезды'
-            : stage.entries.length > 0
-              ? `${stage.entries.length} участников ждут распределения по заездам`
-              : 'Участники появятся после предыдущего этапа'}
-        </Typography.Text>
-      ) : (
-        <DndContext sensors={sensors} onDragEnd={onDragEnd}>
-          <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4 }}>
-            {stage.heats.map((heat) => (
-              <HeatColumn
-                key={heat.heatNumber}
-                stageId={stage.stageId}
-                heatNumber={heat.heatNumber}
-                slots={heat.slots}
-                canDrag={canDrag}
-                canTime={canTime}
-                canDelete={canArrange && heat.slots.length === 0 && stage.heats.length > 1}
+    <Collapse
+      activeKey={open ? [stage.stageId] : []}
+      onChange={(keys) => {
+        const list = Array.isArray(keys) ? keys : [keys];
+        onOpenChange(list.includes(stage.stageId));
+      }}
+      items={[
+        {
+          key: stage.stageId,
+          label: (
+            <Space size={8}>
+              <Typography.Text strong>{title}</Typography.Text>
+              <Tag>{stageStatusLabel(stage.status)}</Tag>
+            </Space>
+          ),
+          extra:
+            onRemove || canSeed || (canArrange && !isTerminalStage(stage.kind)) || readyToCommit
+              ? stageActions
+              : undefined,
+          children:
+            stage.status === 'COMPLETED' && stage.heats.length > 0 ? (
+              <CompletedStageResults
+                stage={stage}
+                eventLaps={eventLaps}
+                canEditStatus={editable}
                 pending={pending}
-                onDelete={() => deleteHeat(heat.heatNumber)}
-                onSaveTime={onSaveTime}
-                onSaveStatus={onSaveStatus}
+                onChangeRegistrationStatus={onChangeRegistrationStatus}
               />
-            ))}
-          </div>
-        </DndContext>
-      )}
-    </div>
+            ) : stage.heats.length === 0 ? (
+              <Typography.Text type="secondary">
+                {previousCompleted
+                  ? qualifierStatus === 'NQ'
+                    ? 'Финал B собирается из участников со статусом NQ. Сформируйте заезд, когда состав готов'
+                    : isTerminalStage(stage.kind)
+                      ? 'Отметьте квалифицированных и сформируйте заезд'
+                      : 'Отметьте квалифицированных и сформируйте заезды'
+                  : stage.entries.length > 0
+                    ? `${stage.entries.length} участников ждут распределения по заездам`
+                    : 'Участники появятся после предыдущего этапа'}
+              </Typography.Text>
+            ) : (
+              <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+                <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4 }}>
+                  {stage.heats.map((heat) => (
+                    <HeatColumn
+                      key={heat.heatNumber}
+                      stageId={stage.stageId}
+                      heatNumber={heat.heatNumber}
+                      slots={heat.slots}
+                      canDrag={canDrag}
+                      canTime={canTime}
+                      canDelete={canArrange && heat.slots.length === 0 && stage.heats.length > 1}
+                      pending={pending}
+                      onDelete={() => deleteHeat(heat.heatNumber)}
+                      onSaveTime={onSaveTime}
+                      onSaveStatus={onSaveStatus}
+                    />
+                  ))}
+                </div>
+              </DndContext>
+            ),
+        },
+      ]}
+    />
   );
 }
 

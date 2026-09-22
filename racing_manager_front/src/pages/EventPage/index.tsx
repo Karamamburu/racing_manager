@@ -1,4 +1,4 @@
-import { Button, Card, Col, Divider, Modal, Result, Row, Skeleton, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Col, Collapse, Divider, Modal, Result, Row, Skeleton, Space, Table, Tag, Tooltip, Typography, message, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -75,6 +75,12 @@ type ClassificationSection = {
   rows: EventParticipant[];
 };
 
+type GenderGroup = {
+  key: string;
+  title: string;
+  sections: ClassificationSection[];
+};
+
 type SavingLap = {
   registrationId: string;
   lapNumber: number;
@@ -136,51 +142,58 @@ function rowsWithClassification(
     .sort((a, b) => (a.place ?? Number.POSITIVE_INFINITY) - (b.place ?? Number.POSITIVE_INFINITY));
 }
 
-function classificationTitle(gender: string, formatName: string | null): string {
-  const genderLabel = genderGroupLabels[gender] ?? gender;
-  if (!formatName) return genderLabel;
-  return `${genderLabel} · ${formatName}`;
+function formatParticipantCount(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${count} участник`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} участника`;
+  return `${count} участников`;
 }
 
 function groupParticipants(
   participants: EventParticipant[],
   formats: EventFormatRef[],
-): ClassificationSection[] {
+): GenderGroup[] {
   const sortedFormats = [...formats].sort(
     (a, b) => a.sortOrder - b.sortOrder || a.id - b.id,
   );
-  const sections: ClassificationSection[] = [];
+  const groups: GenderGroup[] = [];
 
-  if (sortedFormats.length === 0) {
-    for (const gender of GENDER_ORDER) {
+  for (const gender of GENDER_ORDER) {
+    const sections: ClassificationSection[] = [];
+    if (sortedFormats.length === 0) {
       const rows = participants.filter((participant) => participant.gender === gender);
       if (rows.length) {
         sections.push({
           key: gender,
-          title: classificationTitle(gender, null),
+          title: 'Участники',
           rows,
         });
       }
-    }
-    return sections;
-  }
-
-  for (const format of sortedFormats) {
-    for (const gender of GENDER_ORDER) {
-      const rows = participants.filter(
-        (participant) =>
-          participant.format?.id === format.id && participant.gender === gender,
-      );
-      if (rows.length) {
-        sections.push({
-          key: `${format.id}-${gender}`,
-          title: classificationTitle(gender, format.name),
-          rows,
-        });
+    } else {
+      for (const format of sortedFormats) {
+        const rows = participants.filter(
+          (participant) =>
+            participant.format?.id === format.id && participant.gender === gender,
+        );
+        if (rows.length) {
+          sections.push({
+            key: `${format.id}-${gender}`,
+            title: format.name,
+            rows,
+          });
+        }
       }
     }
+    if (sections.length) {
+      groups.push({
+        key: gender,
+        title: genderGroupLabels[gender] ?? gender,
+        sections,
+      });
+    }
   }
-  return sections;
+  return groups;
 }
 
 function getParticipantColumns(options: {
@@ -370,6 +383,7 @@ export function EventPage() {
   const [savingFinishTimeId, setSavingFinishTimeId] = useState<string | null>(null);
   const [savingRegistrationStatusId, setSavingRegistrationStatusId] = useState<string | null>(null);
   const [savingLap, setSavingLap] = useState<SavingLap | null>(null);
+  const { token } = theme.useToken();
 
   if (eventQuery.isLoading) {
     return (
@@ -597,7 +611,7 @@ export function EventPage() {
       message.error('Введите время цифрами. Минуты и секунды — до 59, например 13215 → 01:32:15');
     },
   });
-  const participantSections = groupParticipants(event.registrations, event.formats);
+  const participantGroups = groupParticipants(event.registrations, event.formats);
 
   const handleStatusChange = (nextStatus: EventStatusCode) => {
     if (nextStatus === 'CANCELLED') {
@@ -779,7 +793,7 @@ export function EventPage() {
             ) : null
           }
         >
-          {participantSections.length === 0 ? (
+          {participantGroups.length === 0 ? (
             <Table
               columns={participantColumns}
               dataSource={[]}
@@ -795,60 +809,97 @@ export function EventPage() {
                   Не удалось загрузить сетку многоэтапной гонки.
                 </Typography.Text>
               ) : null}
-              {participantSections.map((section) => {
-                const competition = competitionForRows(section.rows, classCompetitions);
-                const bracketInProgress = competition != null && competition.status !== 'DONE';
-                const sample = section.rows[0];
-                const columns = competition
-                  ? getParticipantColumns({
-                      eventLaps: event.laps ?? [],
-                      canAssignNumbers: false,
-                      canAssignResults: false,
-                      canChangeStatus: canChangeRegistrationStatus,
-                      savingNumberId: savingStartNumberId,
-                      savingResultId: savingFinishTimeId,
-                      savingStatusId: savingRegistrationStatusId,
-                      savingLap,
-                      onAssignNumber: assignStartNumber,
-                      onChangeStatus: assignRegistrationStatus,
-                      onAssignLap: assignLapTime,
-                      onAssignResult: assignFinishTime,
-                      onInvalidResult: () => {
-                        message.error(
-                          'Введите время цифрами. Минуты и секунды — до 59, например 13215 → 01:32:15',
-                        );
-                      },
-                    })
-                  : participantColumns;
-                return (
-                  <div key={section.key}>
-                    <Typography.Title level={5} style={{ marginTop: 0 }}>
-                      {section.title}
-                    </Typography.Title>
-                    {classCompetitionsQuery.isSuccess ? (
-                      <ClassCompetitionPanel
-                        eventId={event.id}
-                        competition={competition}
-                        formatId={sample?.format?.id ?? null}
-                        gender={sample?.gender ?? ''}
-                        eventLaps={event.laps ?? []}
-                        canManage={canRunBracket}
-                        registrationClosed={registrationClosed}
-                        onChanged={refreshEvent}
-                      />
-                    ) : null}
-                    {bracketInProgress ? null : (
-                      <Table
-                        columns={columns}
-                        dataSource={rowsWithClassification(section.rows, competition)}
-                        rowKey="id"
-                        pagination={false}
-                        scroll={{ x: 'max-content' }}
-                      />
-                    )}
-                  </div>
-                );
-              })}
+              {participantGroups.map((group) => (
+                <div
+                  key={group.key}
+                  style={{
+                    background: token.colorFillAlter,
+                    border: `1px solid ${token.colorBorderSecondary}`,
+                    borderRadius: token.borderRadiusLG,
+                    padding: 16,
+                  }}
+                >
+                  <Typography.Title level={4} style={{ marginTop: 0, marginBottom: 12 }}>
+                    {group.title}
+                  </Typography.Title>
+                  <Collapse
+                    defaultActiveKey={group.sections.map((section) => section.key)}
+                    items={group.sections.map((section) => {
+                      const competition = competitionForRows(section.rows, classCompetitions);
+                      const bracketInProgress = competition != null && competition.status !== 'DONE';
+                      const sample = section.rows[0];
+                      const columns = competition
+                        ? getParticipantColumns({
+                            eventLaps: event.laps ?? [],
+                            canAssignNumbers: false,
+                            canAssignResults: false,
+                            canChangeStatus: canChangeRegistrationStatus,
+                            savingNumberId: savingStartNumberId,
+                            savingResultId: savingFinishTimeId,
+                            savingStatusId: savingRegistrationStatusId,
+                            savingLap,
+                            onAssignNumber: assignStartNumber,
+                            onChangeStatus: assignRegistrationStatus,
+                            onAssignLap: assignLapTime,
+                            onAssignResult: assignFinishTime,
+                            onInvalidResult: () => {
+                              message.error(
+                                'Введите время цифрами. Минуты и секунды — до 59, например 13215 → 01:32:15',
+                              );
+                            },
+                          })
+                        : participantColumns;
+                      return {
+                        key: section.key,
+                        label: (
+                          <Space size={8}>
+                            <span>{section.title}</span>
+                            <Typography.Text type="secondary">
+                              {formatParticipantCount(section.rows.length)}
+                            </Typography.Text>
+                          </Space>
+                        ),
+                        children: (
+                          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                            {classCompetitionsQuery.isSuccess ? (
+                              <ClassCompetitionPanel
+                                eventId={event.id}
+                                competition={competition}
+                                formatId={sample?.format?.id ?? null}
+                                gender={sample?.gender ?? ''}
+                                eventLaps={event.laps ?? []}
+                                canManage={canRunBracket}
+                                registrationClosed={registrationClosed}
+                                onChanged={refreshEvent}
+                              />
+                            ) : null}
+                            {bracketInProgress ? null : (
+                              <Collapse
+                                defaultActiveKey={[]}
+                                items={[
+                                  {
+                                    key: `${section.key}-protocol`,
+                                    label: 'Итоговый протокол',
+                                    children: (
+                                      <Table
+                                        columns={columns}
+                                        dataSource={rowsWithClassification(section.rows, competition)}
+                                        rowKey="id"
+                                        pagination={false}
+                                        scroll={{ x: 'max-content' }}
+                                      />
+                                    ),
+                                  },
+                                ]}
+                              />
+                            )}
+                          </Space>
+                        ),
+                      };
+                    })}
+                  />
+                </div>
+              ))}
             </Space>
           )}
         </Card>
