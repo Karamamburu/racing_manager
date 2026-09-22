@@ -78,6 +78,7 @@ export class ClassCompetitionsService {
         heatNumber: number;
         status: HeatResultStatus;
         timeMilliseconds?: number;
+        lapNumber?: number;
       }>;
     },
   ): Promise<ClassCompetitionView> {

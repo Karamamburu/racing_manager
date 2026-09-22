@@ -60,6 +60,10 @@ type StoredHeatTime = {
   timeMilliseconds: number | null;
   status: ClassHeatResultStatus;
   qualificationStatus: RegistrationStatus | null;
+  laps: Array<{
+    timeMilliseconds: number;
+    eventLap: { lapNumber: number };
+  }>;
 };
 
 type StoredClassCompetition = {
@@ -91,6 +95,12 @@ const classCompetitionInclude = {
       timeMilliseconds: true,
       status: true,
       qualificationStatus: true,
+      laps: {
+        select: {
+          timeMilliseconds: true,
+          eventLap: { select: { lapNumber: true } },
+        },
+      },
     },
   },
 } satisfies Prisma.ClassCompetitionInclude;
@@ -119,6 +129,7 @@ export type ClassCompetitionView = {
         registrationStatus: string;
         timeMilliseconds: number | null;
         resultStatus: string | null;
+        laps: Array<{ lapNumber: number; timeMilliseconds: number }>;
       }>;
     }>;
     entries: Array<{
@@ -330,7 +341,12 @@ export class ClassCompetitionsService {
       }
     }
     this.assertEntriesMatchHeats(parsed, heatByRegistration);
-    await this.upsertHeatTimes(row.id, stageId, parsed);
+    const eventLaps = await this.prisma.eventLap.findMany({
+      where: { eventId },
+      select: { id: true, lapNumber: true },
+      orderBy: { lapNumber: 'asc' },
+    });
+    await this.upsertHeatTimes(row.id, stageId, parsed, eventLaps);
 
     if (!parsed.commit) {
       return this.present(
@@ -522,10 +538,20 @@ export class ClassCompetitionsService {
     classCompetitionId: string,
     stageId: string,
     parsed: ParsedHeatTimes,
+    eventLaps: { id: string; lapNumber: number }[],
   ) {
+    const lapByNumber = new Map(eventLaps.map((lap) => [lap.lapNumber, lap]));
     await this.prisma.$transaction(async (tx) => {
       for (const entry of parsed.entries) {
-        await tx.classHeatTime.upsert({
+        if (eventLaps.length > 0 && entry.status === 'OK' && entry.lapNumber == null) {
+          throw new BadRequestException(
+            'Это мероприятие учитывает время по кругам. Укажите номер круга.',
+          );
+        }
+        if (eventLaps.length === 0 && entry.lapNumber != null) {
+          throw new BadRequestException('У мероприятия нет кругов. Укажите общее время.');
+        }
+        const heatTime = await tx.classHeatTime.upsert({
           where: {
             classCompetitionId_stageId_heatNumber_registrationId: {
               classCompetitionId,
@@ -540,12 +566,50 @@ export class ClassCompetitionsService {
             heatNumber: entry.heatNumber,
             registrationId: entry.registrationId,
             status: entry.status,
+            timeMilliseconds: entry.lapNumber == null ? entry.timeMilliseconds : null,
+          },
+          update:
+            entry.lapNumber == null
+              ? { status: entry.status, timeMilliseconds: entry.timeMilliseconds }
+              : { status: 'OK' },
+        });
+        if (entry.status !== 'OK') {
+          await tx.classHeatLapTime.deleteMany({ where: { classHeatTimeId: heatTime.id } });
+          continue;
+        }
+        if (entry.lapNumber == null || entry.timeMilliseconds == null) continue;
+        const eventLap = lapByNumber.get(entry.lapNumber);
+        if (!eventLap) {
+          throw new BadRequestException(
+            `Круг ${entry.lapNumber} не заявлен на этом мероприятии.`,
+          );
+        }
+        await tx.classHeatLapTime.upsert({
+          where: {
+            classHeatTimeId_eventLapId: {
+              classHeatTimeId: heatTime.id,
+              eventLapId: eventLap.id,
+            },
+          },
+          create: {
+            classHeatTimeId: heatTime.id,
+            eventLapId: eventLap.id,
             timeMilliseconds: entry.timeMilliseconds,
           },
-          update: {
-            status: entry.status,
-            timeMilliseconds: entry.timeMilliseconds,
-          },
+          update: { timeMilliseconds: entry.timeMilliseconds },
+        });
+        const stored = await tx.classHeatLapTime.findMany({
+          where: { classHeatTimeId: heatTime.id },
+          select: { timeMilliseconds: true, eventLap: { select: { lapNumber: true } } },
+        });
+        const byLap = new Map(stored.map((lap) => [lap.eventLap.lapNumber, lap.timeMilliseconds]));
+        const complete = eventLaps.every((lap) => byLap.has(lap.lapNumber));
+        const total = complete
+          ? eventLaps.reduce((sum, lap) => sum + (byLap.get(lap.lapNumber) ?? 0), 0)
+          : null;
+        await tx.classHeatTime.update({
+          where: { id: heatTime.id },
+          data: { status: 'OK', timeMilliseconds: total },
         });
       }
     });
@@ -558,6 +622,7 @@ export class ClassCompetitionsService {
   ) {
     const existing = await this.prisma.classHeatTime.findMany({
       where: { classCompetitionId, stageId },
+      include: { laps: true },
     });
     const byRegistration = new Map(existing.map((row) => [row.registrationId, row]));
     const next = heats.flatMap((heat) =>
@@ -573,14 +638,34 @@ export class ClassCompetitionsService {
             status: previous.status,
             timeMilliseconds: previous.timeMilliseconds,
             qualificationStatus: previous.qualificationStatus,
+            laps: previous.laps,
           },
         ];
       }),
     );
     await this.prisma.$transaction(async (tx) => {
       await tx.classHeatTime.deleteMany({ where: { classCompetitionId, stageId } });
-      if (next.length > 0) {
-        await tx.classHeatTime.createMany({ data: next });
+      for (const row of next) {
+        const created = await tx.classHeatTime.create({
+          data: {
+            classCompetitionId: row.classCompetitionId,
+            stageId: row.stageId,
+            heatNumber: row.heatNumber,
+            registrationId: row.registrationId,
+            status: row.status,
+            timeMilliseconds: row.timeMilliseconds,
+            qualificationStatus: row.qualificationStatus,
+          },
+        });
+        if (row.laps.length > 0) {
+          await tx.classHeatLapTime.createMany({
+            data: row.laps.map((lap) => ({
+              classHeatTimeId: created.id,
+              eventLapId: lap.eventLapId,
+              timeMilliseconds: lap.timeMilliseconds,
+            })),
+          });
+        }
       }
     });
   }
@@ -757,7 +842,14 @@ export class ClassCompetitionsService {
             registrationStatus: stageStatus(slot.participantId, stored),
             position: slot.position,
             timeMilliseconds: stored?.timeMilliseconds ?? null,
-            resultStatus: stored?.status ?? null,
+            resultStatus:
+              stored == null || (stored.status === 'OK' && stored.timeMilliseconds == null)
+                ? null
+                : stored.status,
+            laps: (stored?.laps ?? []).map((lap) => ({
+              lapNumber: lap.eventLap.lapNumber,
+              timeMilliseconds: lap.timeMilliseconds,
+            })),
           };
         }),
       })),

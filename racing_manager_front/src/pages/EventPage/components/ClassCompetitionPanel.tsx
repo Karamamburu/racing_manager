@@ -222,9 +222,11 @@ export function ClassCompetitionPanel({
               'Состав заездов обновлён',
             )
           }
-          onSaveTime={(slot, timeMilliseconds) =>
+          onSaveTime={(slot, timeMilliseconds, lapNumber) =>
             run(
-              `time-${slot.registrationId}`,
+              lapNumber != null
+                ? `time-${slot.registrationId}-${lapNumber}`
+                : `time-${slot.registrationId}`,
               () =>
                 classCompetitionsService
                   .recordHeatTimes(eventId, competition.id, stage.stageId, {
@@ -235,6 +237,7 @@ export function ClassCompetitionPanel({
                         heatNumber: heatNumberOf(stage, slot.registrationId),
                         status: 'OK',
                         timeMilliseconds,
+                        ...(lapNumber != null ? { lapNumber } : {}),
                       },
                     ],
                   })
@@ -330,9 +333,14 @@ function heatNumberOf(stage: ClassCompetitionStage, registrationId: string): num
   return heat?.heatNumber ?? 1;
 }
 
-function slotFilled(slot: ClassHeatSlot): boolean {
+function slotFilled(slot: ClassHeatSlot, eventLaps: EventLap[]): boolean {
   if (slot.resultStatus === 'DNS' || slot.resultStatus === 'DNF' || slot.resultStatus === 'DSQ') {
     return true;
+  }
+  if (eventLaps.length > 1) {
+    return eventLaps.every((lap) =>
+      (slot.laps ?? []).some((item) => item.lapNumber === lap.lapNumber),
+    );
   }
   return slot.resultStatus === 'OK' && slot.timeMilliseconds != null;
 }
@@ -366,7 +374,7 @@ function StageBoard({
   onRemove: (() => void) | null;
   onSeed: () => void;
   onReassign: (heats: Array<{ heatNumber: number; registrationIds: string[] }>) => void;
-  onSaveTime: (slot: ClassHeatSlot, timeMilliseconds: number) => void;
+  onSaveTime: (slot: ClassHeatSlot, timeMilliseconds: number, lapNumber?: number) => void;
   onSaveStatus: (slot: ClassHeatSlot, status: HeatResultStatus) => void;
   onCommit: () => void;
 }) {
@@ -377,7 +385,7 @@ function StageBoard({
   const readyToCommit =
     canTime &&
     stage.heats.length > 0 &&
-    stage.heats.every((heat) => heat.slots.length > 0 && heat.slots.every(slotFilled));
+    stage.heats.every((heat) => heat.slots.length > 0 && heat.slots.every((slot) => slotFilled(slot, eventLaps)));
   const title = STAGE_LABELS[stage.kind] ?? stage.label ?? stage.stageId;
 
   const onDragEnd = (event: DragEndEvent) => {
@@ -504,6 +512,7 @@ function StageBoard({
                       stageId={stage.stageId}
                       heatNumber={heat.heatNumber}
                       slots={heat.slots}
+                      eventLaps={eventLaps}
                       canDrag={canDrag}
                       canTime={canTime}
                       canDelete={canArrange && heat.slots.length === 0 && stage.heats.length > 1}
@@ -535,6 +544,7 @@ function HeatColumn({
   stageId,
   heatNumber,
   slots,
+  eventLaps,
   canDrag,
   canTime,
   canDelete,
@@ -546,12 +556,13 @@ function HeatColumn({
   stageId: string;
   heatNumber: number;
   slots: ClassHeatSlot[];
+  eventLaps: EventLap[];
   canDrag: boolean;
   canTime: boolean;
   canDelete: boolean;
   pending: string | null;
   onDelete: () => void;
-  onSaveTime: (slot: ClassHeatSlot, timeMilliseconds: number) => void;
+  onSaveTime: (slot: ClassHeatSlot, timeMilliseconds: number, lapNumber?: number) => void;
   onSaveStatus: (slot: ClassHeatSlot, status: HeatResultStatus) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `heat:${heatNumber}`, disabled: !canDrag });
@@ -584,6 +595,7 @@ function HeatColumn({
             key={slot.registrationId}
             stageId={stageId}
             slot={slot}
+            eventLaps={eventLaps}
             canDrag={canDrag}
             canTime={canTime}
             pending={pending}
@@ -599,6 +611,7 @@ function HeatColumn({
 function StarterCard({
   stageId,
   slot,
+  eventLaps,
   canDrag,
   canTime,
   pending,
@@ -607,10 +620,11 @@ function StarterCard({
 }: {
   stageId: string;
   slot: ClassHeatSlot;
+  eventLaps: EventLap[];
   canDrag: boolean;
   canTime: boolean;
   pending: string | null;
-  onSaveTime: (slot: ClassHeatSlot, timeMilliseconds: number) => void;
+  onSaveTime: (slot: ClassHeatSlot, timeMilliseconds: number, lapNumber?: number) => void;
   onSaveStatus: (slot: ClassHeatSlot, status: HeatResultStatus) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -669,15 +683,52 @@ function StarterCard({
             (slot.resultStatus !== 'DNS' &&
               slot.resultStatus !== 'DNF' &&
               slot.resultStatus !== 'DSQ') ? (
-              <FinishTimeCell
-                value={slot.timeMilliseconds}
-                canEdit={canTime}
-                saving={pending === `time-${slot.registrationId}`}
-                onSave={(timeMilliseconds) => onSaveTime(slot, timeMilliseconds)}
-                onInvalid={() =>
-                  message.error('Введите время цифрами. Минуты и секунды — до 59, например 13215 → 01:32:15')
-                }
-              />
+              eventLaps.length > 1 ? (
+                <Space direction="vertical" size={4}>
+                  {eventLaps.map((lap) => (
+                    <Space key={lap.lapNumber} size={6}>
+                      <Typography.Text type="secondary" style={{ fontSize: 12, width: 52 }}>
+                        Круг {lap.lapNumber}
+                      </Typography.Text>
+                      <FinishTimeCell
+                        value={
+                          (slot.laps ?? []).find((item) => item.lapNumber === lap.lapNumber)
+                            ?.timeMilliseconds ?? null
+                        }
+                        canEdit={canTime}
+                        saving={pending === `time-${slot.registrationId}-${lap.lapNumber}`}
+                        onSave={(timeMilliseconds) => onSaveTime(slot, timeMilliseconds, lap.lapNumber)}
+                        onInvalid={() =>
+                          message.error(
+                            'Введите время цифрами. Минуты и секунды — до 59, например 13215 → 01:32:15',
+                          )
+                        }
+                      />
+                    </Space>
+                  ))}
+                </Space>
+              ) : (
+                <FinishTimeCell
+                  value={slot.timeMilliseconds}
+                  canEdit={canTime}
+                  saving={
+                    pending ===
+                    (eventLaps.length === 1
+                      ? `time-${slot.registrationId}-${eventLaps[0].lapNumber}`
+                      : `time-${slot.registrationId}`)
+                  }
+                  onSave={(timeMilliseconds) =>
+                    onSaveTime(
+                      slot,
+                      timeMilliseconds,
+                      eventLaps.length === 1 ? eventLaps[0].lapNumber : undefined,
+                    )
+                  }
+                  onInvalid={() =>
+                    message.error('Введите время цифрами. Минуты и секунды — до 59, например 13215 → 01:32:15')
+                  }
+                />
+              )
             ) : null}
           </Space>
         </div>
@@ -745,10 +796,14 @@ function CompletedStageResults({
     ),
     key: `lap-${lap.lapNumber}`,
     width: 120,
-    render: (_value: unknown, record) =>
-      record.resultStatus === 'OK' && eventLaps.length === 1
-        ? formatFinishTime(record.timeMilliseconds)
-        : '—',
+    render: (_value: unknown, record) => {
+      const saved = (record.laps ?? []).find((item) => item.lapNumber === lap.lapNumber);
+      if (saved) return formatFinishTime(saved.timeMilliseconds);
+      if (record.resultStatus === 'OK' && eventLaps.length === 1) {
+        return formatFinishTime(record.timeMilliseconds);
+      }
+      return '—';
+    },
   }));
   const columns: ColumnsType<RankedSlot> = [
     {

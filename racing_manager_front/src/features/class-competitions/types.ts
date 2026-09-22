@@ -15,6 +15,7 @@ export type ClassHeatSlot = {
   registrationStatus: string;
   timeMilliseconds: number | null;
   resultStatus: HeatResultStatus | null;
+  laps: Array<{ lapNumber: number; timeMilliseconds: number }>;
 };
 
 export type ClassCompetitionStage = {

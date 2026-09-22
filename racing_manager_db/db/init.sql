@@ -240,6 +240,17 @@ CREATE TABLE class_heat_times (
   UNIQUE (class_competition_id, stage_id, heat_number, registration_id)
 );
 
+-- Split time for one planned event lap inside a heat.
+CREATE TABLE class_heat_lap_times (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  class_heat_time_id UUID NOT NULL REFERENCES class_heat_times(id) ON DELETE CASCADE,
+  event_lap_id UUID NOT NULL REFERENCES event_laps(id) ON DELETE CASCADE,
+  time_milliseconds INT NOT NULL CHECK (time_milliseconds > 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (class_heat_time_id, event_lap_id)
+);
+
 -- ========================================
 -- RESULT LAPS
 -- Split time for one planned event lap of one result.
@@ -320,6 +331,8 @@ CREATE INDEX idx_registrations_format_id ON registrations(format_id);
 CREATE INDEX idx_class_competitions_event_id ON class_competitions(event_id);
 CREATE INDEX idx_class_heat_times_stage ON class_heat_times(class_competition_id, stage_id);
 CREATE INDEX idx_class_heat_times_registration_id ON class_heat_times(registration_id);
+CREATE INDEX idx_class_heat_lap_times_heat_time_id ON class_heat_lap_times(class_heat_time_id);
+CREATE INDEX idx_class_heat_lap_times_event_lap_id ON class_heat_lap_times(event_lap_id);
 CREATE INDEX idx_personal_consent_events_user_id ON personal_consent_events(user_id);
 CREATE INDEX idx_personal_consent_events_document_id ON personal_consent_events(document_id);
 CREATE INDEX idx_news_track_id ON news(track_id);
