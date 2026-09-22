@@ -14,7 +14,7 @@ import {
   proposePlan,
   revisePlan,
 } from '../domain/planning';
-import { validateFormat } from '../domain/validate-format';
+import { findStage, validateFormat } from '../domain/validate-format';
 import {
   AdvancementRoute,
   CompetitionFormat,
@@ -22,6 +22,7 @@ import {
   ManualHeatAssignment,
   Participant,
   StartLists,
+  isSingleHeatFinal,
 } from '../domain/types';
 import { getPreset } from '../presets';
 import { advancePersistencePlan } from './advance-plan';
@@ -338,6 +339,16 @@ export class CompetitionsService {
         ErrorCodes.STAGE_NOT_READY,
         `Stage "${stageId}" already has results and cannot be reassigned.`,
         'heatResults',
+      );
+    }
+
+    const format = toFormat(competition.formatSnapshot);
+    const stage = findStage(format, stageId);
+    if (isSingleHeatFinal(stage.kind) && heats.length !== 1) {
+      throw new DomainError(
+        ErrorCodes.SEEDING_INVALID,
+        'Finals are raced as a single heat.',
+        'heats',
       );
     }
 

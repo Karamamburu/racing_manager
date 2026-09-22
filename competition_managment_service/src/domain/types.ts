@@ -11,6 +11,10 @@ export const STAGE_KINDS = [
 
 export type StageKind = (typeof STAGE_KINDS)[number];
 
+export function isSingleHeatFinal(kind: StageKind): boolean {
+  return kind === 'FINAL' || kind === 'FINAL_A' || kind === 'FINAL_B';
+}
+
 export const RESULT_STATUSES = ['OK', 'DNS', 'DNF', 'DSQ', 'NQ'] as const;
 
 export type ResultStatus = (typeof RESULT_STATUSES)[number];

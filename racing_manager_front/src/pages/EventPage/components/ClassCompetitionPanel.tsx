@@ -396,10 +396,10 @@ function StageBoard({
         stage.heats.length === 0 &&
         (stage.entries.length > 0 || previousCompleted) ? (
           <Button size="small" type="primary" loading={pending === `seed-${stage.stageId}`} onClick={onSeed}>
-            Сформировать заезды
+            {isTerminalStage(stage.kind) ? 'Сформировать заезд' : 'Сформировать заезды'}
           </Button>
         ) : null}
-        {canArrange ? (
+        {canArrange && !isTerminalStage(stage.kind) ? (
           <Button size="small" loading={pending === `move-${stage.stageId}`} onClick={addHeat}>
             Добавить заезд
           </Button>
@@ -422,8 +422,10 @@ function StageBoard({
         <Typography.Text type="secondary">
           {previousCompleted
             ? qualifierStatus === 'NQ'
-              ? 'Финал B собирается из участников со статусом NQ. Сформируйте заезды, когда состав готов'
-              : 'Отметьте квалифицированных и сформируйте заезды'
+              ? 'Финал B собирается из участников со статусом NQ. Сформируйте заезд, когда состав готов'
+              : isTerminalStage(stage.kind)
+                ? 'Отметьте квалифицированных и сформируйте заезд'
+                : 'Отметьте квалифицированных и сформируйте заезды'
             : stage.entries.length > 0
               ? `${stage.entries.length} участников ждут распределения по заездам`
               : 'Участники появятся после предыдущего этапа'}
