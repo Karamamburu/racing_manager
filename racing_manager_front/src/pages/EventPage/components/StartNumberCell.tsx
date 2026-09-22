@@ -1,5 +1,6 @@
 import { InputNumber } from 'antd';
 import { useEffect, useRef, useState } from 'react';
+import { errorBubbleText, FieldErrorBubble } from './FieldErrorBubble';
 
 type StartNumberCellProps = {
   value: number | null;
@@ -15,6 +16,7 @@ export function StartNumberCell({
   onSave,
 }: StartNumberCellProps) {
   const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<number | null>(value);
   const committing = useRef(false);
 
@@ -47,41 +49,50 @@ export function StartNumberCell({
   const commit = async () => {
     if (committing.current || saving) return;
     if (draft === null || draft === value) {
+      setError(null);
       setEditing(false);
       return;
     }
     committing.current = true;
     try {
       await onSave(draft);
+      setError(null);
       setEditing(false);
-    } catch {
-      // Keep the editor open so the number can be corrected.
+    } catch (saveError) {
+      setError(errorBubbleText(saveError, 'Не удалось выдать номер'));
     } finally {
       committing.current = false;
     }
   };
 
   return (
-    <InputNumber
-      autoFocus
-      min={1}
-      precision={0}
-      size="small"
-      disabled={saving}
-      value={draft}
-      onChange={(next) => setDraft(next)}
-      onBlur={() => {
-        void commit();
-      }}
-      onPressEnter={() => {
-        void commit();
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') {
-          setDraft(value);
-          setEditing(false);
-        }
-      }}
-    />
+    <FieldErrorBubble message={error}>
+      <InputNumber
+        autoFocus
+        min={1}
+        precision={0}
+        size="small"
+        status={error ? 'error' : undefined}
+        disabled={saving}
+        value={draft}
+        onChange={(next) => {
+          setError(null);
+          setDraft(next);
+        }}
+        onBlur={() => {
+          void commit();
+        }}
+        onPressEnter={() => {
+          void commit();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            setError(null);
+            setDraft(value);
+            setEditing(false);
+          }
+        }}
+      />
+    </FieldErrorBubble>
   );
 }

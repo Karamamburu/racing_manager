@@ -84,14 +84,21 @@ export function ClassCompetitionPanel({
     setOpenStageIds((current) => [...current, ...newcomers]);
   }, [seededKey]);
 
-  const run = async (key: string, action: () => Promise<void>, success: string) => {
+  const run = async (
+    key: string,
+    action: () => Promise<void>,
+    success: string,
+    options?: { rethrow?: boolean },
+  ) => {
     setPending(key);
     try {
       await action();
       message.success(success);
       await onChanged();
     } catch (error) {
-      message.error(classCompetitionsService.getErrorMessage(error));
+      const text = classCompetitionsService.getErrorMessage(error);
+      if (options?.rethrow) throw new Error(text);
+      message.error(text);
     } finally {
       setPending(null);
     }
@@ -243,6 +250,7 @@ export function ClassCompetitionPanel({
                   })
                   .then(() => undefined),
               'Время заезда записано',
+              { rethrow: true },
             )
           }
           onSaveStatus={(slot, status) =>
@@ -698,11 +706,6 @@ function StarterCard({
                         canEdit={canTime}
                         saving={pending === `time-${slot.registrationId}-${lap.lapNumber}`}
                         onSave={(timeMilliseconds) => onSaveTime(slot, timeMilliseconds, lap.lapNumber)}
-                        onInvalid={() =>
-                          message.error(
-                            'Введите время цифрами. Минуты и секунды — до 59, например 13215 → 01:32:15',
-                          )
-                        }
                       />
                     </Space>
                   ))}
@@ -723,9 +726,6 @@ function StarterCard({
                       timeMilliseconds,
                       eventLaps.length === 1 ? eventLaps[0].lapNumber : undefined,
                     )
-                  }
-                  onInvalid={() =>
-                    message.error('Введите время цифрами. Минуты и секунды — до 59, например 13215 → 01:32:15')
                   }
                 />
               )

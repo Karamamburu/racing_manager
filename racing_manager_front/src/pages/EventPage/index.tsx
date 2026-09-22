@@ -220,7 +220,6 @@ function getParticipantColumns(options: {
     timeMilliseconds: number,
   ) => Promise<void>;
   onAssignResult: (participant: EventParticipant, timeMilliseconds: number) => Promise<void>;
-  onInvalidResult: () => void;
 }): ColumnsType<EventParticipant> {
   const recordsByLaps = options.eventLaps.length > 0;
   const lapColumns: ColumnsType<EventParticipant> = options.eventLaps.map((lap) => ({
@@ -249,7 +248,6 @@ function getParticipantColumns(options: {
         onSave={(timeMilliseconds) =>
           options.onAssignLap(record, lap.lapNumber, timeMilliseconds)
         }
-        onInvalid={options.onInvalidResult}
       />
     ),
   }));
@@ -299,7 +297,6 @@ function getParticipantColumns(options: {
               }
               saving={options.savingResultId === record.id}
               onSave={(timeMilliseconds) => options.onAssignResult(record, timeMilliseconds)}
-              onInvalid={options.onInvalidResult}
             />
           );
         }
@@ -488,14 +485,13 @@ export function EventPage() {
       refreshEvent();
     } catch (error) {
       const statusCode = registrationsService.getStatus(error);
-      if (statusCode === 403) {
-        message.error('Недостаточно прав. Выдавать номера может организатор или администратор.');
-      } else if (statusCode === 409) {
-        message.error('Этот стартовый номер уже занят.');
-      } else {
-        message.error(registrationsService.getErrorMessage(error));
-      }
-      throw error;
+      const text =
+        statusCode === 403
+          ? 'Недостаточно прав. Выдавать номера может организатор или администратор.'
+          : statusCode === 409
+            ? 'Этот стартовый номер уже занят.'
+            : registrationsService.getErrorMessage(error);
+      throw new Error(text);
     } finally {
       setSavingStartNumberId(null);
     }
@@ -515,14 +511,11 @@ export function EventPage() {
       message.success(`Время круга ${lapNumber} записано`);
     } catch (error) {
       const statusCode = registrationsService.getStatus(error);
-      if (statusCode === 403) {
-        message.error(
-          'Недостаточно прав. Записывать результаты может организатор или администратор.',
-        );
-      } else {
-        message.error(registrationsService.getErrorMessage(error));
-      }
-      throw error;
+      const text =
+        statusCode === 403
+          ? 'Недостаточно прав. Записывать результаты может организатор или администратор.'
+          : registrationsService.getErrorMessage(error);
+      throw new Error(text);
     } finally {
       setSavingLap(null);
     }
@@ -541,14 +534,11 @@ export function EventPage() {
       message.success('Время прохождения записано');
     } catch (error) {
       const statusCode = registrationsService.getStatus(error);
-      if (statusCode === 403) {
-        message.error(
-          'Недостаточно прав. Записывать результаты может организатор или администратор.',
-        );
-      } else {
-        message.error(registrationsService.getErrorMessage(error));
-      }
-      throw error;
+      const text =
+        statusCode === 403
+          ? 'Недостаточно прав. Записывать результаты может организатор или администратор.'
+          : registrationsService.getErrorMessage(error);
+      throw new Error(text);
     } finally {
       setSavingFinishTimeId(null);
     }
@@ -614,9 +604,6 @@ export function EventPage() {
     onChangeStatus: assignRegistrationStatus,
     onAssignLap: assignLapTime,
     onAssignResult: assignFinishTime,
-    onInvalidResult: () => {
-      message.error('Введите время цифрами. Минуты и секунды — до 59, например 13215 → 01:32:15');
-    },
   });
   const participantGroups = groupParticipants(event.registrations, event.formats);
 
@@ -849,11 +836,6 @@ export function EventPage() {
                             onChangeStatus: assignRegistrationStatus,
                             onAssignLap: assignLapTime,
                             onAssignResult: assignFinishTime,
-                            onInvalidResult: () => {
-                              message.error(
-                                'Введите время цифрами. Минуты и секунды — до 59, например 13215 → 01:32:15',
-                              );
-                            },
                           })
                         : participantColumns;
                       return {
