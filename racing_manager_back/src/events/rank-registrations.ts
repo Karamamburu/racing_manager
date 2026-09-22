@@ -1,3 +1,4 @@
+import { competitionPlaces } from '../ranking/competition-places';
 import { isRankedRegistrationStatus } from '../registrations/registration-status';
 
 export type RankableRegistration = {
@@ -104,22 +105,20 @@ export function rankRegistrations<T extends RankableRegistration>(
       }
       return compareRegistrationsByResult(a, b, eventLapCount);
     });
-    if (useStoredPlaces) {
-      for (const registration of sorted) {
-        ranked.push({
-          registration,
-          place: registration.result?.place ?? null,
-        });
-      }
-      continue;
-    }
-    let place = 0;
+    const earners = sorted
+      .filter((registration) => isRankedCompleteResult(registration, eventLapCount))
+      .sort((a, b) => compareRegistrationsByResult(a, b, eventLapCount));
+    const calculated = competitionPlaces(
+      earners,
+      (registration) => registration.result?.timeMilliseconds ?? 0,
+    );
+    const placeById = new Map(
+      earners.map((registration, index) => [registration.id, calculated[index]]),
+    );
     for (const registration of sorted) {
-      const earnsPlace = isRankedCompleteResult(registration, eventLapCount);
-      if (earnsPlace) place += 1;
       ranked.push({
         registration,
-        place: earnsPlace ? place : null,
+        place: placeById.get(registration.id) ?? null,
       });
     }
   }

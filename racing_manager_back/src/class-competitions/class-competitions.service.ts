@@ -21,6 +21,7 @@ import {
   ACTIVE_REGISTRATION_STATUSES,
   RegistrationStatusCode,
 } from '../registrations/registration-status';
+import { competitionPlaces } from '../ranking/competition-places';
 import { classifyBracket, lastOkTimes } from './classify-bracket';
 import { CmsClient } from './cms.client';
 import { outcomeForHeat } from './qualify-heat';
@@ -386,7 +387,10 @@ export class ClassCompetitionsService {
             (startNumbers.get(b.registrationId) ?? Number.POSITIVE_INFINITY)
           );
         });
-      const placeById = new Map(finished.map((item, index) => [item.registrationId, index + 1]));
+      const places = competitionPlaces(finished, (item) => item.timeMilliseconds ?? 0);
+      const placeById = new Map(
+        finished.map((item, index) => [item.registrationId, places[index]]),
+      );
       return {
         heatNumber: heat.heatNumber,
         results: heat.slots.map((slot) => {
@@ -671,15 +675,15 @@ export class ClassCompetitionsService {
   }
 
   private async persistOutcome(id: string, cms: CmsCompetition) {
-    const places = cms.status === 'DONE' ? classifyBracket(cms) : null;
+    const times = await this.prisma.classHeatTime.findMany({ where: { classCompetitionId: id } });
+    const timeByRegistration = lastOkTimes(cms, times);
+    const places = cms.status === 'DONE' ? classifyBracket(cms, timeByRegistration) : null;
     await this.prisma.$transaction(async (tx) => {
       await tx.classCompetition.update({
         where: { id },
         data: { status: cms.status },
       });
       if (!places) return;
-      const times = await tx.classHeatTime.findMany({ where: { classCompetitionId: id } });
-      const timeByRegistration = lastOkTimes(cms, times);
       for (const [registrationId, place] of places) {
         const timeMilliseconds = timeByRegistration.get(registrationId);
         if (timeMilliseconds == null) continue;
@@ -783,7 +787,8 @@ export class ClassCompetitionsService {
     );
     const runs = new Map(cms.stages.map((stage) => [stage.stageId, stage]));
     const timeByRegistration = lastOkTimes(cms, row.heatTimes);
-    const places = cms.status === 'DONE' ? classifyBracket(cms) : new Map<string, number>();
+    const places =
+      cms.status === 'DONE' ? classifyBracket(cms, timeByRegistration) : new Map<string, number>();
 
     return {
       id: row.id,

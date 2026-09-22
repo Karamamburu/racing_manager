@@ -10,7 +10,6 @@ import { UsersService, type AppUser } from '../users/users.service';
 import {
   computePersonalStats,
   EMPTY_PERSONAL_STATS,
-  hasFrozenPlace,
   isCompleteStatsResult,
   type PersonalStats,
   type StatsRegistration,
@@ -122,18 +121,13 @@ export class PersonalService {
       select: statsRegistrationSelect,
     });
     const own = ownRows.map(toStatsRegistration);
-    const liveEventIds = [
-      ...new Set(
-        own
-          .filter(isCompleteStatsResult)
-          .filter((row) => !hasFrozenPlace(row))
-          .map((row) => row.eventId),
-      ),
+    const completeEventIds = [
+      ...new Set(own.filter(isCompleteStatsResult).map((row) => row.eventId)),
     ];
-    const competitorRows = liveEventIds.length
+    const competitorRows = completeEventIds.length
       ? await this.prisma.registration.findMany({
           where: {
-            eventId: { in: liveEventIds },
+            eventId: { in: completeEventIds },
             status: { in: [...LISTED_REGISTRATION_STATUSES] },
           },
           select: statsRegistrationSelect,

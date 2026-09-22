@@ -739,6 +739,15 @@ function StarterCard({
 
 type RankedSlot = ClassHeatSlot & { place: number | null; heatNumber: number };
 
+function competitionPlaces(times: number[]): number[] {
+  const places: number[] = [];
+  for (let index = 0; index < times.length; index += 1) {
+    const tiedWithPrevious = index > 0 && times[index] === times[index - 1];
+    places.push(tiedWithPrevious ? places[index - 1] : index + 1);
+  }
+  return places;
+}
+
 function rankStageSlots(stage: ClassCompetitionStage): RankedSlot[] {
   const slots = stage.heats.flatMap((heat) =>
     heat.slots.map((slot) => ({ ...slot, heatNumber: heat.heatNumber })),
@@ -750,6 +759,7 @@ function rankStageSlots(stage: ClassCompetitionStage): RankedSlot[] {
       if (byTime !== 0) return byTime;
       return (a.startNumber ?? Number.POSITIVE_INFINITY) - (b.startNumber ?? Number.POSITIVE_INFINITY);
     });
+  const places = competitionPlaces(finished.map((slot) => slot.timeMilliseconds ?? 0));
   const rest = slots
     .filter((slot) => slot.resultStatus !== 'OK' || slot.timeMilliseconds == null)
     .sort((a, b) => {
@@ -758,7 +768,7 @@ function rankStageSlots(stage: ClassCompetitionStage): RankedSlot[] {
       return (a.startNumber ?? Number.POSITIVE_INFINITY) - (b.startNumber ?? Number.POSITIVE_INFINITY);
     });
   return [
-    ...finished.map((slot, index) => ({ ...slot, place: index + 1 })),
+    ...finished.map((slot, index) => ({ ...slot, place: places[index] })),
     ...rest.map((slot) => ({ ...slot, place: null })),
   ];
 }
