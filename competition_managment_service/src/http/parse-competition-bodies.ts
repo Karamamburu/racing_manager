@@ -6,6 +6,7 @@ import {
   parseManualHeats,
   parseParticipants,
 } from './parse-bodies';
+import { parseCreatePlannerOptions } from './parse-plan-bodies';
 
 export function parseCreateCompetitionBody(body: unknown) {
   if (!isRecord(body)) {
@@ -22,6 +23,7 @@ export function parseCreateCompetitionBody(body: unknown) {
     presetId,
     format,
     participants: parseParticipants(body.participants),
+    ...parseCreatePlannerOptions(body),
   };
 }
 

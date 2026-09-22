@@ -154,7 +154,7 @@ export function parseRoutes(value: unknown, path: string): AdvancementRoute[] {
   });
 }
 
-function parseStage(value: unknown, path: string): StageSpec {
+export function parseStage(value: unknown, path: string): StageSpec {
   const raw = readObject(value, path);
   const stage: StageSpec = {
     id: readString(raw.id, `${path}.id`) as string,

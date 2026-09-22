@@ -128,6 +128,38 @@ describe('advanceStage', () => {
     expect(result.eliminated.some((item) => item.id === 'p1')).toBe(true);
   });
 
+  it('closes a terminal final with a ranking and nobody marked eliminated', () => {
+    const format: CompetitionFormat = {
+      stages: [
+        {
+          id: 'final',
+          kind: 'FINAL',
+          heats: {
+            type: 'HEATS',
+            heatCount: 1,
+            remainder: 'BALANCED',
+            seeding: { type: 'BY_OVERALL_RANK' },
+          },
+          ranking: { type: 'BY_PLACE' },
+          advancement: { type: 'NONE' },
+        },
+      ],
+    };
+    const participants = makeParticipants(6);
+    const result = advanceStage({
+      format,
+      stageId: 'final',
+      participants,
+      heatResults: [placedHeat(1, participants)],
+    });
+
+    expect(result.routes).toEqual([]);
+    expect(result.eliminated).toEqual([]);
+    expect(result.ranking.map((entry) => entry.participant.id)).toEqual(
+      ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'],
+    );
+  });
+
   it('advances the top N per heat', () => {
     const format: CompetitionFormat = {
       stages: [

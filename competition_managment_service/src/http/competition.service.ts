@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { advanceStage } from '../domain/advance-stage';
 import { DomainError, ErrorCodes } from '../domain/errors';
 import { buildStartLists } from '../domain/build-start-lists';
+import { proposePlan, ProposePlanInput, revisePlan, RevisePlanInput } from '../domain/planning';
 import { validateFormat } from '../domain/validate-format';
 import {
   AdvanceStageInput,
@@ -39,5 +40,13 @@ export class CompetitionService {
 
   advance(input: AdvanceStageInput) {
     return advanceStage(input);
+  }
+
+  propose(input: ProposePlanInput) {
+    return proposePlan(input);
+  }
+
+  revise(input: RevisePlanInput) {
+    return revisePlan(input);
   }
 }

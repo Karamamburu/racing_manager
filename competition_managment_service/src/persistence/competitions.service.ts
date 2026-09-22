@@ -4,6 +4,14 @@ import { advanceStage } from '../domain/advance-stage';
 import { buildStartLists } from '../domain/build-start-lists';
 import { DomainError, ErrorCodes } from '../domain/errors';
 import { normalizeParticipants } from '../domain/participants';
+import {
+  AddStageOp,
+  PatchHeatsOp,
+  attachProposedTail,
+  explainPlan,
+  proposePlan,
+  revisePlan,
+} from '../domain/planning';
 import { validateFormat } from '../domain/validate-format';
 import {
   AdvancementRoute,
@@ -62,6 +70,21 @@ export type CreateCompetitionInput = {
   presetId?: string;
   format?: CompetitionFormat;
   participants: Participant[];
+  preferredHeatSize?: number;
+  maxHeatSize?: number;
+  includePrologue?: boolean;
+  includeFinalB?: boolean;
+};
+
+export type UpdatePlanInput = {
+  format?: CompetitionFormat;
+  removeStageIds?: string[];
+  addStages?: AddStageOp[];
+  patchHeats?: PatchHeatsOp[];
+  preferredHeatSize?: number;
+  maxHeatSize?: number;
+  includePrologue?: boolean;
+  includeFinalB?: boolean;
 };
 
 @Injectable()
@@ -70,7 +93,7 @@ export class CompetitionsService {
 
   async create(input: CreateCompetitionInput) {
     const participants = normalizeParticipants(input.participants);
-    const resolved = await this.resolveFormat(input.presetId, input.format);
+    const resolved = await this.resolveFormat(input, participants.length);
     const sources = sourceStageIds(resolved.format);
     if (sources.length === 0) {
       throw new DomainError(
@@ -121,6 +144,111 @@ export class CompetitionsService {
   async getById(id: string) {
     const competition = await this.load(id);
     return toCompetitionResponse(competition);
+  }
+
+  async getPlan(id: string) {
+    const competition = await this.load(id);
+    const format = toFormat(competition.formatSnapshot);
+    return explainPlan(format, {
+      participantCount: this.planFieldSize(competition),
+      includePrologue: format.stages.some((stage) => stage.kind === 'PROLOGUE'),
+      includeFinalB: format.stages.some((stage) => stage.kind === 'FINAL_B'),
+    });
+  }
+
+  async getStageProposal(competitionId: string, stageId: string) {
+    const competition = await this.load(competitionId);
+    this.assertMutable(competition);
+    const format = toFormat(competition.formatSnapshot);
+    const stageRun = this.requireStageRun(competition, stageId);
+    if (stageRun.status !== 'SEEDED') {
+      throw new DomainError(
+        ErrorCodes.STAGE_NOT_READY,
+        `Stage "${stageId}" must be SEEDED with results to propose the remaining grid.`,
+        'stageId',
+      );
+    }
+    if (!this.allResultsRecorded(stageRun)) {
+      throw new DomainError(
+        ErrorCodes.STAGE_NOT_READY,
+        'All heat results must be recorded before proposing the remaining grid.',
+        'heatResults',
+      );
+    }
+    const okCount = this.countOkFinishers(stageRun);
+    if (okCount < 1) {
+      throw new DomainError(
+        ErrorCodes.STAGE_NOT_READY,
+        'At least one OK finisher is required to propose the remaining grid.',
+        'heatResults',
+      );
+    }
+
+    const lockedStageIds = new Set(
+      competition.stageRuns
+        .filter((run) => run.status === 'SEEDED' || run.status === 'COMPLETED')
+        .map((run) => run.stageId),
+    );
+    const tail = proposePlan({
+      participantCount: okCount,
+      includePrologue: false,
+    });
+    const suggested = attachProposedTail(
+      format,
+      lockedStageIds,
+      stageId,
+      tail.format,
+      okCount,
+    );
+    const plan = explainPlan(suggested, {
+      participantCount: this.entriesForStage(competition, stageId).length,
+      includePrologue: suggested.stages.some((stage) => stage.kind === 'PROLOGUE'),
+      includeFinalB: suggested.stages.some((stage) => stage.kind === 'FINAL_B'),
+    });
+    return {
+      fromStageId: stageId,
+      participantCount: okCount,
+      ...plan,
+    };
+  }
+
+  async updatePlan(competitionId: string, input: UpdatePlanInput) {
+    const competition = await this.load(competitionId);
+    this.assertMutable(competition);
+    const current = toFormat(competition.formatSnapshot);
+    const participantCount = this.planFieldSize(competition);
+    const hasMutations =
+      (input.removeStageIds?.length ?? 0) > 0 ||
+      (input.addStages?.length ?? 0) > 0 ||
+      (input.patchHeats?.length ?? 0) > 0;
+
+    let nextFormat: CompetitionFormat;
+    if (hasMutations) {
+      nextFormat = revisePlan({
+        format: input.format ?? current,
+        participantCount,
+        removeStageIds: input.removeStageIds,
+        addStages: input.addStages,
+        patchHeats: input.patchHeats,
+        preferredHeatSize: input.preferredHeatSize,
+        maxHeatSize: input.maxHeatSize,
+        includePrologue: input.includePrologue,
+        includeFinalB: input.includeFinalB,
+      }).format;
+    } else {
+      const format = input.format as CompetitionFormat;
+      validateFormat(format);
+      nextFormat = format;
+    }
+
+    this.assertPlanReplaceAllowed(competition, current, nextFormat);
+    const started = competition.stageRuns.some((run) => run.status !== 'PENDING');
+    if (started) {
+      await this.syncRemainingStageRuns(competition, nextFormat);
+    } else {
+      await this.replaceDraftFormat(competition, nextFormat);
+    }
+    return this.getById(competition.id);
   }
 
   async seedStage(
@@ -360,23 +488,27 @@ export class CompetitionsService {
   }
 
   private async resolveFormat(
-    presetId: string | undefined,
-    format: CompetitionFormat | undefined,
+    input: CreateCompetitionInput,
+    participantCount: number,
   ): Promise<{ format: CompetitionFormat; formatId?: string }> {
-    if (format) {
-      validateFormat(format);
-      return { format };
+    if (input.format) {
+      validateFormat(input.format);
+      return { format: input.format };
     }
-    if (!presetId) {
-      throw new DomainError(
-        ErrorCodes.COMPETITION_INVALID,
-        'Either presetId or format is required.',
-        'presetId',
-      );
+    if (!input.presetId) {
+      return {
+        format: proposePlan({
+          participantCount,
+          preferredHeatSize: input.preferredHeatSize,
+          maxHeatSize: input.maxHeatSize,
+          includePrologue: input.includePrologue,
+          includeFinalB: input.includeFinalB,
+        }).format,
+      };
     }
-    const coded = getPreset(presetId);
+    const coded = getPreset(input.presetId);
     const stored = await this.prisma.formatRecord.findUnique({
-      where: { key: presetId },
+      where: { key: input.presetId },
     });
     if (coded) {
       return { format: coded.format, formatId: stored?.id };
@@ -386,7 +518,7 @@ export class CompetitionsService {
     }
     throw new DomainError(
       ErrorCodes.PRESET_NOT_FOUND,
-      `Preset "${presetId}" was not found.`,
+      `Preset "${input.presetId}" was not found.`,
       'presetId',
     );
   }
@@ -455,6 +587,180 @@ export class CompetitionsService {
       );
     }
     return id;
+  }
+
+  private planFieldSize(competition: LoadedCompetition): number {
+    const seeded = competition.stageRuns.filter((run) => run.status === 'SEEDED');
+    if (seeded.length === 1 && this.allResultsRecorded(seeded[0])) {
+      const ok = this.countOkFinishers(seeded[0]);
+      if (ok > 0) {
+        return ok;
+      }
+    }
+    return competition.participants.length;
+  }
+
+  private allResultsRecorded(
+    stageRun: LoadedCompetition['stageRuns'][number],
+  ): boolean {
+    return (
+      stageRun.heats.length > 0 &&
+      stageRun.heats.every((heat) => heat.slots.every((slot) => slot.result != null))
+    );
+  }
+
+  private countOkFinishers(stageRun: LoadedCompetition['stageRuns'][number]): number {
+    return stageRun.heats.reduce(
+      (sum, heat) =>
+        sum +
+        heat.slots.filter(
+          (slot) => slot.result?.status === 'OK' && slot.result.place != null,
+        ).length,
+      0,
+    );
+  }
+
+  private assertPlanReplaceAllowed(
+    competition: LoadedCompetition,
+    current: CompetitionFormat,
+    nextFormat: CompetitionFormat,
+  ): void {
+    const nextById = new Map(nextFormat.stages.map((stage) => [stage.id, stage]));
+    const currentById = new Map(current.stages.map((stage) => [stage.id, stage]));
+    const started = competition.stageRuns.some((run) => run.status !== 'PENDING');
+    if (!started) {
+      return;
+    }
+
+    for (const run of competition.stageRuns) {
+      const nextStage = nextById.get(run.stageId);
+      if (run.status === 'SEEDED' || run.status === 'COMPLETED') {
+        if (!nextStage) {
+          throw new DomainError(
+            ErrorCodes.COMPETITION_INVALID,
+            `Cannot remove ${run.status} stage "${run.stageId}".`,
+            'format.stages',
+          );
+        }
+        const currentStage = currentById.get(run.stageId);
+        if (
+          currentStage &&
+          JSON.stringify(currentStage.heats) !== JSON.stringify(nextStage.heats)
+        ) {
+          throw new DomainError(
+            ErrorCodes.COMPETITION_INVALID,
+            `Cannot change heats of ${run.status} stage "${run.stageId}".`,
+            'format.stages',
+          );
+        }
+        if (
+          run.status === 'COMPLETED' &&
+          currentStage &&
+          JSON.stringify(currentStage.advancement) !==
+            JSON.stringify(nextStage.advancement)
+        ) {
+          throw new DomainError(
+            ErrorCodes.COMPETITION_INVALID,
+            `Cannot change COMPLETED stage "${run.stageId}".`,
+            'format.stages',
+          );
+        }
+      }
+    }
+
+    for (const stage of current.stages) {
+      if (nextById.has(stage.id)) {
+        continue;
+      }
+      const run = competition.stageRuns.find((item) => item.stageId === stage.id);
+      if (run && run.status !== 'PENDING') {
+        throw new DomainError(
+          ErrorCodes.COMPETITION_INVALID,
+          `Cannot remove ${run.status} stage "${stage.id}".`,
+          'format.stages',
+        );
+      }
+      const hasEntries = competition.stageEntries.some(
+        (entry) => entry.stageId === stage.id,
+      );
+      if (hasEntries) {
+        throw new DomainError(
+          ErrorCodes.COMPETITION_INVALID,
+          `Cannot remove stage "${stage.id}" that already has participants.`,
+          'format.stages',
+        );
+      }
+      if (run && run.heats.length > 0) {
+        throw new DomainError(
+          ErrorCodes.COMPETITION_INVALID,
+          `Cannot remove stage "${stage.id}" that already has heats.`,
+          'format.stages',
+        );
+      }
+    }
+  }
+
+  private async replaceDraftFormat(
+    competition: LoadedCompetition,
+    nextFormat: CompetitionFormat,
+  ): Promise<void> {
+    const sources = sourceStageIds(nextFormat);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.stageEntry.deleteMany({ where: { competitionId: competition.id } });
+      await tx.stageRun.deleteMany({ where: { competitionId: competition.id } });
+      await tx.competition.update({
+        where: { id: competition.id },
+        data: { formatSnapshot: nextFormat as Prisma.InputJsonValue },
+      });
+      await tx.stageRun.createMany({
+        data: nextFormat.stages.map((stage) => ({
+          competitionId: competition.id,
+          stageId: stage.id,
+        })),
+      });
+      await tx.stageEntry.createMany({
+        data: sources.flatMap((stageId) =>
+          competition.participants.map((participant) => ({
+            competitionId: competition.id,
+            stageId,
+            participantId: participant.id,
+            seed: participant.seed,
+          })),
+        ),
+      });
+    });
+  }
+
+  private async syncRemainingStageRuns(
+    competition: LoadedCompetition,
+    nextFormat: CompetitionFormat,
+  ): Promise<void> {
+    const nextIds = new Set(nextFormat.stages.map((stage) => stage.id));
+    const existingIds = new Set(competition.stageRuns.map((run) => run.stageId));
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const run of competition.stageRuns) {
+        if (nextIds.has(run.stageId)) {
+          continue;
+        }
+        await tx.stageRun.delete({ where: { id: run.id } });
+      }
+      for (const stage of nextFormat.stages) {
+        if (existingIds.has(stage.id)) {
+          continue;
+        }
+        await tx.stageRun.create({
+          data: {
+            competitionId: competition.id,
+            stageId: stage.id,
+          },
+        });
+      }
+      await tx.competition.update({
+        where: { id: competition.id },
+        data: { formatSnapshot: nextFormat as Prisma.InputJsonValue },
+      });
+    });
   }
 
   private async replaceHeats(

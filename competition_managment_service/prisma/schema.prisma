@@ -10,6 +10,7 @@ datasource db {
 
 enum StageKind {
   PROLOGUE
+  EIGHTHFINAL
   QUARTERFINAL
   SEMIFINAL
   FINAL

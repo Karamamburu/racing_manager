@@ -5,6 +5,7 @@ import {
   parseFormatBody,
   parseStartListsBody,
 } from './parse-bodies';
+import { parseProposeBody, parseReviseBody } from './parse-plan-bodies';
 
 @Controller('v1')
 export class CompetitionController {
@@ -34,5 +35,15 @@ export class CompetitionController {
   @Post('stages/advance')
   advance(@Body() body: unknown) {
     return this.competition.advance(parseAdvanceBody(body));
+  }
+
+  @Post('plans/propose')
+  propose(@Body() body: unknown) {
+    return this.competition.propose(parseProposeBody(body));
+  }
+
+  @Post('plans/revise')
+  revise(@Body() body: unknown) {
+    return this.competition.revise(parseReviseBody(body));
   }
 }

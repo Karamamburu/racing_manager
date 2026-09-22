@@ -1,5 +1,6 @@
 export const STAGE_KINDS = [
   'PROLOGUE',
+  'EIGHTHFINAL',
   'QUARTERFINAL',
   'SEMIFINAL',
   'FINAL',

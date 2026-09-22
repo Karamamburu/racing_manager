@@ -67,7 +67,7 @@ export function applyAdvancement(
   const eligible = ranking.filter(isEligible);
 
   if (routes.length === 0) {
-    return { routes: [], eliminated: ranking };
+    return { routes: [], eliminated: [] };
   }
 
   const taken = new Set<string>();

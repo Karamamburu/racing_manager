@@ -1,18 +1,8 @@
+import { sourceStageIds as domainSourceStageIds } from '../domain/planning';
 import { CompetitionFormat } from '../domain/types';
 
 export function sourceStageIds(format: CompetitionFormat): string[] {
-  const targeted = new Set<string>();
-  for (const stage of format.stages) {
-    if (stage.advancement.type !== 'ROUTES') {
-      continue;
-    }
-    for (const route of stage.advancement.routes) {
-      targeted.add(route.toStageId);
-    }
-  }
-  return format.stages
-    .filter((stage) => !targeted.has(stage.id))
-    .map((stage) => stage.id);
+  return domainSourceStageIds(format);
 }
 
 export function isTerminalStage(format: CompetitionFormat, stageId: string): boolean {

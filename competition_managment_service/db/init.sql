@@ -20,6 +20,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- ========================================
 CREATE TYPE stage_kind AS ENUM (
   'PROLOGUE',
+  'EIGHTHFINAL',
   'QUARTERFINAL',
   'SEMIFINAL',
   'FINAL',

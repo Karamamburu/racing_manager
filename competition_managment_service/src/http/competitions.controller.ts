@@ -6,6 +6,7 @@ import {
   parseSeedStageBody,
   parseStageResultsBody,
 } from './parse-competition-bodies';
+import { parsePutPlanBody } from './parse-plan-bodies';
 
 @Controller('v1/competitions')
 export class CompetitionsController {
@@ -19,6 +20,21 @@ export class CompetitionsController {
   @Get(':id')
   get(@Param('id') id: string) {
     return this.competitions.getById(id);
+  }
+
+  @Get(':id/plan')
+  getPlan(@Param('id') id: string) {
+    return this.competitions.getPlan(id);
+  }
+
+  @Put(':id/plan')
+  putPlan(@Param('id') id: string, @Body() body: unknown) {
+    return this.competitions.updatePlan(id, parsePutPlanBody(body));
+  }
+
+  @Get(':id/stages/:stageId/proposal')
+  proposal(@Param('id') id: string, @Param('stageId') stageId: string) {
+    return this.competitions.getStageProposal(id, stageId);
   }
 
   @Post(':id/stages/:stageId/start-lists')

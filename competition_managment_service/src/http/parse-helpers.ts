@@ -64,6 +64,19 @@ export function readArray(value: unknown, path: string): unknown[] {
   return value;
 }
 
+export function readBoolean(value: unknown, path: string, required = true): boolean | undefined {
+  if (value === undefined || value === null) {
+    if (required) {
+      throw new DomainError(ErrorCodes.FORMAT_INVALID, `${path} is required.`, path);
+    }
+    return undefined;
+  }
+  if (typeof value !== 'boolean') {
+    throw new DomainError(ErrorCodes.FORMAT_INVALID, `${path} must be a boolean.`, path);
+  }
+  return value;
+}
+
 export function readMeta(value: unknown, path: string): Record<string, unknown> | undefined {
   if (value === undefined) {
     return undefined;

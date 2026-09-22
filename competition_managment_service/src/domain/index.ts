@@ -31,3 +31,17 @@ export { rankStage } from './ranking/rank-stage';
 export { snakeAssign } from './seeding/snake';
 export { crossAssign } from './seeding/cross';
 export { byOverallRankAssign } from './seeding/by-overall-rank';
+export {
+  attachProposedTail,
+  explainPlan,
+  proposePlan,
+  revisePlan,
+} from './planning';
+export type {
+  AddStageOp,
+  PatchHeatsOp,
+  ProposePlanInput,
+  ProposedPlan,
+  RevisePlanInput,
+  StageRationale,
+} from './planning';
