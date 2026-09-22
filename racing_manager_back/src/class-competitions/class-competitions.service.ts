@@ -22,6 +22,7 @@ import {
   RegistrationStatusCode,
 } from '../registrations/registration-status';
 import { competitionPlaces } from '../ranking/competition-places';
+import { categoryIsFinished } from '../events/category-finish';
 import { classifyBracket, lastOkTimes } from './classify-bracket';
 import { CmsClient } from './cms.client';
 import { outcomeForHeat } from './qualify-heat';
@@ -209,6 +210,23 @@ export class ClassCompetitionsService {
     });
     if (existing) {
       throw new ConflictException('Для этой категории многоэтапная гонка уже создана.');
+    }
+    const protocolResults = await this.prisma.result.count({
+      where: {
+        registration: {
+          eventId,
+          gender: parsed.gender,
+          formatId: parsed.formatId,
+        },
+      },
+    });
+    if (protocolResults > 0) {
+      throw new ConflictException(
+        'В этой категории уже есть результаты в итоговом протоколе.',
+      );
+    }
+    if (await categoryIsFinished(this.prisma, eventId, parsed.formatId, parsed.gender)) {
+      throw new ConflictException('Гонка в этой категории уже завершена.');
     }
 
     const formatName = event.eventFormats.find((item) => item.formatId === parsed.formatId);

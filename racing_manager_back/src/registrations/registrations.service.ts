@@ -9,7 +9,7 @@ import { ADMIN_ROLE_CODES, RoleCode } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
 import { UsersService, type AppUser } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { EventStatusSyncService } from '../events/event-status-sync.service';
+import { categoryIsFinished, CATEGORY_FINISHED_MESSAGE } from '../events/category-finish';
 import {
   PAST_COMPLETED_EVENT_LOCKED_MESSAGE,
   isPastCompletedEvent,
@@ -403,6 +403,16 @@ export class RegistrationsService {
     }
     if (existing.status === status) {
       return this.toResponse(existing);
+    }
+    if (
+      await categoryIsFinished(
+        this.prisma,
+        eventId,
+        existing.formatId,
+        existing.gender,
+      )
+    ) {
+      throw new BadRequestException(CATEGORY_FINISHED_MESSAGE);
     }
 
     if (clearsRegistrationOnStatus(status)) {

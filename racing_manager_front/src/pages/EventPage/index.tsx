@@ -157,6 +157,26 @@ function formatParticipantCount(count: number, gender: string): string {
   return `${count} участников`;
 }
 
+const UNPLACED_STATUSES = new Set(['DNS', 'DNF', 'DSQ', 'NQ', 'CANCELLED', 'WITHDRAWN']);
+
+function categoryHasResults(rows: EventParticipant[]): boolean {
+  return rows.some((row) => row.finishTimeMs != null);
+}
+
+function categoryReadyToFinish(rows: EventParticipant[]): boolean {
+  return rows
+    .filter((row) => !UNPLACED_STATUSES.has(row.status))
+    .every((row) => row.finishTimeMs != null);
+}
+
+function categoryIsFinished(
+  finishes: { formatId: number | null; gender: string }[],
+  formatId: number | null,
+  gender: string,
+): boolean {
+  return finishes.some((item) => item.formatId === formatId && item.gender === gender);
+}
+
 function groupParticipants(
   participants: EventParticipant[],
   formats: EventFormatRef[],
@@ -387,6 +407,7 @@ export function EventPage() {
   const [savingFinishTimeId, setSavingFinishTimeId] = useState<string | null>(null);
   const [savingRegistrationStatusId, setSavingRegistrationStatusId] = useState<string | null>(null);
   const [savingLap, setSavingLap] = useState<SavingLap | null>(null);
+  const [finishingCategory, setFinishingCategory] = useState<string | null>(null);
   const { token } = theme.useToken();
 
   if (eventQuery.isLoading) {
@@ -541,6 +562,20 @@ export function EventPage() {
       throw new Error(text);
     } finally {
       setSavingFinishTimeId(null);
+    }
+  };
+
+  const finishCategory = async (formatId: number | null, gender: string, key: string) => {
+    if (gender !== 'M' && gender !== 'F') return;
+    setFinishingCategory(key);
+    try {
+      await eventsService.finishCategory(event.id, { formatId, gender });
+      await refreshEvent();
+      message.success('Гонка завершена');
+    } catch (error) {
+      message.error(eventsService.getErrorMessage(error));
+    } finally {
+      setFinishingCategory(null);
     }
   };
 
@@ -822,22 +857,30 @@ export function EventPage() {
                       const competition = competitionForRows(section.rows, classCompetitions);
                       const bracketInProgress = competition != null && competition.status !== 'DONE';
                       const sample = section.rows[0];
-                      const columns = competition
-                        ? getParticipantColumns({
-                            eventLaps: event.laps ?? [],
-                            canAssignNumbers: false,
-                            canAssignResults: false,
-                            canChangeStatus: canChangeRegistrationStatus,
-                            savingNumberId: savingStartNumberId,
-                            savingResultId: savingFinishTimeId,
-                            savingStatusId: savingRegistrationStatusId,
-                            savingLap,
-                            onAssignNumber: assignStartNumber,
-                            onChangeStatus: assignRegistrationStatus,
-                            onAssignLap: assignLapTime,
-                            onAssignResult: assignFinishTime,
-                          })
-                        : participantColumns;
+                      const formatId = sample?.format?.id ?? null;
+                      const gender = sample?.gender ?? '';
+                      const categoryFinished = categoryIsFinished(
+                        event.finishedCategories ?? [],
+                        formatId,
+                        gender,
+                      );
+                      const hasResults = categoryHasResults(section.rows);
+                      const readyToFinish = categoryReadyToFinish(section.rows);
+                      const lockedColumns = getParticipantColumns({
+                        eventLaps: event.laps ?? [],
+                        canAssignNumbers: competition ? false : canAssignNumbers,
+                        canAssignResults: false,
+                        canChangeStatus: competition ? canChangeRegistrationStatus : false,
+                        savingNumberId: savingStartNumberId,
+                        savingResultId: savingFinishTimeId,
+                        savingStatusId: savingRegistrationStatusId,
+                        savingLap,
+                        onAssignNumber: assignStartNumber,
+                        onChangeStatus: assignRegistrationStatus,
+                        onAssignLap: assignLapTime,
+                        onAssignResult: assignFinishTime,
+                      });
+                      const columns = competition || categoryFinished ? lockedColumns : participantColumns;
                       return {
                         key: section.key,
                         label: (
@@ -854,16 +897,39 @@ export function EventPage() {
                               <ClassCompetitionPanel
                                 eventId={event.id}
                                 competition={competition}
-                                formatId={sample?.format?.id ?? null}
-                                gender={sample?.gender ?? ''}
+                                formatId={formatId}
+                                gender={gender}
                                 eventLaps={event.laps ?? []}
                                 canManage={canRunBracket}
                                 registrationClosed={registrationClosed}
+                                categoryHasResults={hasResults || categoryFinished}
                                 onChanged={refreshEvent}
                               />
                             ) : null}
                             {bracketInProgress ? null : (
-                              <Collapse
+                              <>
+                                {!competition && canRunBracket && !categoryFinished ? (
+                                  <Tooltip
+                                    title={
+                                      readyToFinish
+                                        ? undefined
+                                        : 'Укажите результат каждому участнику, который занимает место, либо поставьте DNS, DNF, DSQ или NQ.'
+                                    }
+                                  >
+                                    <span>
+                                      <Button
+                                        type="primary"
+                                        disabled={!readyToFinish}
+                                        loading={finishingCategory === section.key}
+                                        onClick={() => finishCategory(formatId, gender, section.key)}
+                                      >
+                                        Завершить гонку
+                                      </Button>
+                                    </span>
+                                  </Tooltip>
+                                ) : null}
+                                {categoryFinished ? <Tag>Гонка завершена</Tag> : null}
+                                <Collapse
                                 defaultActiveKey={[]}
                                 items={[
                                   {
@@ -881,6 +947,7 @@ export function EventPage() {
                                   },
                                 ]}
                               />
+                                </>
                             )}
                           </Space>
                         ),

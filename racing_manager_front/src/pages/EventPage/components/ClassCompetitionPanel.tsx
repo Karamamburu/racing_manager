@@ -58,6 +58,7 @@ type ClassCompetitionPanelProps = {
   eventLaps: EventLap[];
   canManage: boolean;
   registrationClosed: boolean;
+  categoryHasResults: boolean;
   onChanged: () => Promise<void> | void;
 };
 
@@ -69,6 +70,7 @@ export function ClassCompetitionPanel({
   eventLaps,
   canManage,
   registrationClosed,
+  categoryHasResults,
   onChanged,
 }: ClassCompetitionPanelProps) {
   const [pending, setPending] = useState<string | null>(null);
@@ -106,7 +108,7 @@ export function ClassCompetitionPanel({
 
   if (!competition) {
     const classGender = gender === 'M' || gender === 'F' ? gender : null;
-    if (!canManage || !registrationClosed || !classGender) return null;
+    if (!canManage || !registrationClosed || !classGender || categoryHasResults) return null;
     return (
       <Button
         style={{ marginBottom: 12 }}
@@ -135,7 +137,7 @@ export function ClassCompetitionPanel({
   return (
     <Space direction="vertical" size={16} style={{ width: '100%', marginBottom: 16 }}>
       <Space wrap>
-        <Tag>{competition.status === 'DONE' ? 'Сетка завершена' : competition.status === 'DRAFT' ? 'Черновик сетки' : 'Сетка в работе'}</Tag>
+        <Tag>{competition.status === 'DONE' ? 'Гонка завершена' : competition.status === 'DRAFT' ? 'Черновик сетки' : 'Сетка в работе'}</Tag>
         {editable
           ? ADDABLE.filter((item) => !stageById.has(item.id) && canAddStage(competition, item.kind)).map(
               (item) => (
@@ -176,6 +178,7 @@ export function ClassCompetitionPanel({
             )
           }
           editable={editable}
+          finishesRace={stageFinishesRace(competition, stage.stageId)}
           previousCompleted={
             stage.sourceStageId != null &&
             competition.stages.find((item) => item.stageId === stage.sourceStageId)?.status ===
@@ -285,12 +288,20 @@ export function ClassCompetitionPanel({
                     entries: [],
                   })
                   .then(() => undefined),
-              'Этап зафиксирован. Проверьте статусы перед сеткой следующего этапа',
+              stageFinishesRace(competition, stage.stageId)
+                ? 'Гонка завершена'
+                : 'Этап зафиксирован. Проверьте статусы перед сеткой следующего этапа',
             )
           }
         />
       ))}
     </Space>
+  );
+}
+
+function stageFinishesRace(competition: ClassCompetitionView, stageId: string): boolean {
+  return competition.stages.every(
+    (stage) => stage.stageId === stageId || stage.status === 'COMPLETED',
   );
 }
 
@@ -359,6 +370,7 @@ function StageBoard({
   open,
   onOpenChange,
   editable,
+  finishesRace,
   previousCompleted,
   qualifierStatus,
   pending,
@@ -375,6 +387,7 @@ function StageBoard({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editable: boolean;
+  finishesRace: boolean;
   previousCompleted: boolean;
   qualifierStatus: 'QQ' | 'NQ' | null;
   pending: string | null;
@@ -464,7 +477,7 @@ function StageBoard({
       ) : null}
       {readyToCommit ? (
         <Button size="small" type="primary" loading={pending === `commit-${stage.stageId}`} onClick={onCommit}>
-          Зафиксировать этап
+          {finishesRace ? 'Завершить гонку' : 'Зафиксировать этап'}
         </Button>
       ) : null}
     </Space>

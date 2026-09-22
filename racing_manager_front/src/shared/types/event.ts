@@ -175,6 +175,12 @@ export type EventDetails = {
   formats: EventFormatRef[];
   laps: EventLap[];
   registrations: EventParticipant[];
+  finishedCategories: CategoryFinishRef[];
+};
+
+export type CategoryFinishRef = {
+  formatId: number | null;
+  gender: string;
 };
 
 export type EventRaceSummary = {

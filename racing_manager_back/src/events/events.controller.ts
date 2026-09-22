@@ -49,6 +49,17 @@ export class EventsController {
     return this.eventsService.updateStatus(req.session?.userSub, id, body);
   }
 
+  @Post(':id/categories/finish')
+  @HttpCode(HttpStatus.OK)
+  @Roles(...ADMIN_ROLE_CODES)
+  finishCategory(
+    @Req() req: Request,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() body: unknown,
+  ) {
+    return this.eventsService.finishCategory(req.session?.userSub, id, body);
+  }
+
   @Post(':id/cancel')
   @Roles(RoleCode.ADMINISTRATOR)
   cancel(

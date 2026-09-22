@@ -226,6 +226,18 @@ CREATE TABLE class_competitions (
 CREATE UNIQUE INDEX class_competitions_event_class
   ON class_competitions (event_id, gender, COALESCE(format_id, -1));
 
+-- A classification (format x gender) whose protocol was closed without a bracket.
+CREATE TABLE category_finishes (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  format_id INT REFERENCES participation_formats(id),
+  gender gender_type NOT NULL,
+  finished_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX category_finishes_event_class
+  ON category_finishes (event_id, gender, COALESCE(format_id, -1));
+
 CREATE TABLE class_heat_times (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   class_competition_id UUID NOT NULL REFERENCES class_competitions(id) ON DELETE CASCADE,
@@ -329,6 +341,7 @@ CREATE INDEX idx_registrations_user_id ON registrations(user_id);
 CREATE INDEX idx_registrations_status ON registrations(status);
 CREATE INDEX idx_registrations_format_id ON registrations(format_id);
 CREATE INDEX idx_class_competitions_event_id ON class_competitions(event_id);
+CREATE INDEX idx_category_finishes_event_id ON category_finishes(event_id);
 CREATE INDEX idx_class_heat_times_stage ON class_heat_times(class_competition_id, stage_id);
 CREATE INDEX idx_class_heat_times_registration_id ON class_heat_times(registration_id);
 CREATE INDEX idx_class_heat_lap_times_heat_time_id ON class_heat_lap_times(class_heat_time_id);
