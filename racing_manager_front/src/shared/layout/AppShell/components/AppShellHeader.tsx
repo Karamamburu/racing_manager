@@ -16,9 +16,7 @@ export function AppShellHeader({ title, subtitle, extra }: AppShellHeaderProps) 
   const sessionQuery = useSessionQuery();
   const isAuthenticated = Boolean(sessionQuery.data?.authenticated);
 
-  const authAction = isAuthenticated ? (
-    <Button onClick={() => authService.logout()}>Выйти</Button>
-  ) : (
+  const authAction = isAuthenticated ? null : (
     <Button type="primary" onClick={() => authService.startLoginFlow()}>
       Войти
     </Button>

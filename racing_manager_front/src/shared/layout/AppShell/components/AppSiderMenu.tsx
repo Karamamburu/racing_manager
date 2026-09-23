@@ -1,14 +1,19 @@
 import {
   CalendarOutlined,
+  FileProtectOutlined,
   HomeOutlined,
+  LogoutOutlined,
   NodeIndexOutlined,
   ReadOutlined,
+  SettingOutlined,
   TrophyOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import { Layout, Menu } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { authService } from '../../../../features/auth/authService';
+import { openCookiePreferences } from '../../../cookieConsent';
 
 const { Sider } = Layout;
 
@@ -52,6 +57,21 @@ const navItems = [
     label: 'Очки и кубки',
     title: '',
     disabled: true,
+  },
+];
+
+const footerItems = [
+  {
+    key: '/policy',
+    icon: <FileProtectOutlined />,
+    label: <Link to="/policy">Политики</Link>,
+    title: '',
+  },
+  {
+    key: 'cookies',
+    icon: <SettingOutlined />,
+    label: 'Настройки cookies',
+    title: '',
   },
 ];
 
@@ -106,12 +126,29 @@ export function AppSiderMenu() {
         <div className="app-logo" title="Все на старт">
           {collapsed ? 'Старт' : 'Все на старт'}
         </div>
-        <Menu
-          theme="light"
-          mode="inline"
-          selectedKeys={[selectedMenuKey(location.pathname)]}
-          items={navItems}
-        />
+        <div className="app-sider-nav">
+          <Menu
+            theme="light"
+            mode="inline"
+            selectedKeys={[selectedMenuKey(location.pathname)]}
+            items={navItems}
+          />
+        </div>
+        <div className="app-sider-footer">
+          <Menu
+            theme="light"
+            mode="inline"
+            selectedKeys={location.pathname.startsWith('/policy') ? ['/policy'] : []}
+            items={footerItems}
+            onClick={({ key }) => {
+              if (key === 'cookies') openCookiePreferences();
+            }}
+          />
+          <button type="button" className="app-sider-logout" onClick={() => authService.logout()}>
+            <LogoutOutlined />
+            <span>Выйти</span>
+          </button>
+        </div>
       </Sider>
     </div>
   );
