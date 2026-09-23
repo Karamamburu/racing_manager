@@ -662,6 +662,10 @@ export class EventsService {
           where: { registrationId: registration.id },
           data: { place },
         });
+        await tx.registration.update({
+          where: { id: registration.id },
+          data: { status: RegistrationStatusCode.FINISHED },
+        });
       }
       await tx.categoryFinish.create({
         data: {

@@ -8,6 +8,7 @@ export const RegistrationStatusCode = {
   QQ: 'QQ',
   NQ: 'NQ',
   DSQ: 'DSQ',
+  FINISHED: 'FINISHED',
 } as const;
 
 export type RegistrationStatusCode =
@@ -23,6 +24,7 @@ export const REGISTRATION_STATUSES = [
   RegistrationStatusCode.QQ,
   RegistrationStatusCode.NQ,
   RegistrationStatusCode.DSQ,
+  RegistrationStatusCode.FINISHED,
 ] as const;
 
 export const MANAGEABLE_REGISTRATION_STATUSES = [
@@ -54,6 +56,7 @@ export const REGISTRATION_STATUS_META: Record<
   QQ: { text: 'QQ — квалифицирован в следующий раунд', color: 'cyan' },
   NQ: { text: 'NQ — не квалифицирован', color: 'gold' },
   DSQ: { text: 'DSQ — дисквалифицирован', color: 'magenta' },
+  FINISHED: { text: 'Финишировал', color: 'green' },
 };
 
 export function isRegistrationStatus(value: string): value is RegistrationStatusCode {

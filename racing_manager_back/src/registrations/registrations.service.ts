@@ -10,6 +10,7 @@ import { RolesService } from '../auth/roles.service';
 import { UsersService, type AppUser } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { categoryIsFinished, CATEGORY_FINISHED_MESSAGE } from '../events/category-finish';
+import { EventStatusSyncService } from '../events/event-status-sync.service';
 import {
   PAST_COMPLETED_EVENT_LOCKED_MESSAGE,
   isPastCompletedEvent,

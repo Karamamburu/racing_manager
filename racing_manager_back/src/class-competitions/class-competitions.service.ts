@@ -907,7 +907,7 @@ export class ClassCompetitionsService {
       status: RegistrationStatus;
     }> = [];
     const clearQualification: Array<{ stageId: string; registrationId: string }> = [];
-    const confirmRegistrations = new Set<string>();
+    const finishRegistrations = new Set<string>();
 
     for (const run of cms.stages) {
       if (run.status !== 'COMPLETED') continue;
@@ -916,20 +916,21 @@ export class ClassCompetitionsService {
       const stageTimes = heatTimes.filter((item) => item.stageId === run.stageId);
       if (terminal) {
         for (const item of stageTimes) {
-          if (
-            item.qualificationStatus !== RegistrationStatus.QQ &&
-            item.qualificationStatus !== RegistrationStatus.NQ
-          ) {
-            continue;
-          }
-          item.qualificationStatus = RegistrationStatus.CONFIRMED;
+          const closedAsQualifier =
+            item.qualificationStatus === RegistrationStatus.QQ ||
+            item.qualificationStatus === RegistrationStatus.NQ;
+          const closedAsConfirmed = item.qualificationStatus === RegistrationStatus.CONFIRMED;
+          if (!closedAsQualifier && !closedAsConfirmed) continue;
+          item.qualificationStatus = RegistrationStatus.FINISHED;
           clearQualification.push({ stageId: run.stageId, registrationId: item.registrationId });
           const current = registrationStatus.get(item.registrationId);
           if (
-            (current === RegistrationStatusCode.QQ || current === RegistrationStatusCode.NQ) &&
+            (current === RegistrationStatusCode.QQ ||
+              current === RegistrationStatusCode.NQ ||
+              current === RegistrationStatusCode.CONFIRMED) &&
             !appearedOnLaterStage(cms, run.stageId, item.registrationId)
           ) {
-            confirmRegistrations.add(item.registrationId);
+            finishRegistrations.add(item.registrationId);
           }
         }
       }
@@ -968,16 +969,18 @@ export class ClassCompetitionsService {
         updates.push({ stageId: run.stageId, registrationId: item.registrationId, status });
         if (
           terminal &&
-          status === RegistrationStatusCode.CONFIRMED &&
-          (current === RegistrationStatusCode.QQ || current === RegistrationStatusCode.NQ) &&
+          status === RegistrationStatusCode.FINISHED &&
+          (current === RegistrationStatusCode.QQ ||
+            current === RegistrationStatusCode.NQ ||
+            current === RegistrationStatusCode.CONFIRMED) &&
           !appearedOnLaterStage(cms, run.stageId, item.registrationId)
         ) {
-          confirmRegistrations.add(item.registrationId);
+          finishRegistrations.add(item.registrationId);
         }
       }
     }
 
-    if (updates.length > 0 || clearQualification.length > 0 || confirmRegistrations.size > 0) {
+    if (updates.length > 0 || clearQualification.length > 0 || finishRegistrations.size > 0) {
       await this.prisma.$transaction(async (tx) => {
         for (const update of updates) {
           await tx.classHeatTime.updateMany({
@@ -996,18 +999,26 @@ export class ClassCompetitionsService {
               classCompetitionId: row.id,
               stageId: update.stageId,
               registrationId: update.registrationId,
-              qualificationStatus: { in: [RegistrationStatus.QQ, RegistrationStatus.NQ] },
+              qualificationStatus: {
+                in: [
+                  RegistrationStatus.QQ,
+                  RegistrationStatus.NQ,
+                  RegistrationStatus.CONFIRMED,
+                ],
+              },
             },
-            data: { qualificationStatus: RegistrationStatus.CONFIRMED },
+            data: { qualificationStatus: RegistrationStatus.FINISHED },
           });
         }
-        for (const registrationId of confirmRegistrations) {
+        for (const registrationId of finishRegistrations) {
           await tx.registration.updateMany({
             where: {
               id: registrationId,
-              status: { in: [RegistrationStatus.QQ, RegistrationStatus.NQ] },
+              status: {
+                in: [RegistrationStatus.QQ, RegistrationStatus.NQ, RegistrationStatus.CONFIRMED],
+              },
             },
-            data: { status: RegistrationStatus.CONFIRMED },
+            data: { status: RegistrationStatus.FINISHED },
           });
         }
       });

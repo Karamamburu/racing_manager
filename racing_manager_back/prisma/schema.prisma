@@ -50,6 +50,7 @@ enum RegistrationStatus {
   QQ
   NQ
   DSQ
+  FINISHED
 
   @@map("registration_status")
 }

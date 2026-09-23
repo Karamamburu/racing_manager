@@ -30,6 +30,14 @@ export function RegistrationStatusSelect({
   omit,
   onChange,
 }: RegistrationStatusSelectProps) {
+  if (
+    isRegistrationStatus(value) &&
+    !(MANAGEABLE_REGISTRATION_STATUSES as readonly string[]).includes(value)
+  ) {
+    const status = REGISTRATION_STATUS_META[value];
+    return <Tag color={status.color}>{status.text}</Tag>;
+  }
+
   return (
     <Select
       value={isRegistrationStatus(value) ? value : undefined}
