@@ -27,6 +27,7 @@ export type ParsedHeatTimeEntry = {
   heatNumber: number;
   status: HeatTimeStatus;
   timeMilliseconds: number | null;
+  lapNumber: number | null;
 };
 
 export type ParsedHeatTimes = {
@@ -36,6 +37,14 @@ export type ParsedHeatTimes = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseOptionalLapNumber(value: unknown, index: number): number | null {
+  if (value == null) return null;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw new BadRequestException(`entries[${index}].lapNumber must be a positive integer.`);
+  }
+  return value;
 }
 
 export function parseCreateClassCompetitionBody(body: unknown): ParsedCreateClassCompetition {
@@ -80,7 +89,7 @@ export function parsePlanChangeBody(body: unknown): ParsedPlanChange {
     typeof body.addStage !== 'string' ||
     !(ADDABLE_STAGE_KINDS as readonly string[]).includes(body.addStage)
   ) {
-    throw new BadRequestException('addStage must be PROLOGUE, EIGHTHFINAL, or QUARTERFINAL.');
+    throw new BadRequestException('addStage must be PROLOGUE, EIGHTHFINAL, QUARTERFINAL, or SEMIFINAL.');
   }
   return { addStage: body.addStage as AddableStageKind };
 }
@@ -132,10 +141,15 @@ export function parseHeatTimesBody(body: unknown): ParsedHeatTimes {
     if (typeof item.heatNumber !== 'number' || !Number.isInteger(item.heatNumber) || item.heatNumber < 1) {
       throw new BadRequestException(`entries[${index}].heatNumber must be an integer >= 1.`);
     }
-    if (typeof item.status !== 'string' || !(HEAT_STATUSES as readonly string[]).includes(item.status)) {
+    const lapNumber = parseOptionalLapNumber(item.lapNumber, index);
+    const statusRaw = item.status;
+    if (lapNumber != null && statusRaw != null && statusRaw !== 'OK') {
+      throw new BadRequestException(`entries[${index}] cannot combine lapNumber with status ${String(statusRaw)}.`);
+    }
+    if (lapNumber == null && (typeof statusRaw !== 'string' || !(HEAT_STATUSES as readonly string[]).includes(statusRaw))) {
       throw new BadRequestException(`entries[${index}].status must be OK, DNS, DNF, or DSQ.`);
     }
-    const status = item.status as HeatTimeStatus;
+    const status = (lapNumber != null ? 'OK' : statusRaw) as HeatTimeStatus;
     let timeMilliseconds: number | null = null;
     if (item.timeMilliseconds != null) {
       if (
@@ -149,7 +163,10 @@ export function parseHeatTimesBody(body: unknown): ParsedHeatTimes {
       }
       timeMilliseconds = item.timeMilliseconds;
     }
-    if (status === 'OK' && timeMilliseconds == null) {
+    if (lapNumber != null && timeMilliseconds == null) {
+      throw new BadRequestException(`entries[${index}] needs timeMilliseconds for the lap.`);
+    }
+    if (status === 'OK' && lapNumber == null && timeMilliseconds == null) {
       throw new BadRequestException(`entries[${index}] needs timeMilliseconds when status is OK.`);
     }
     return {
@@ -157,6 +174,7 @@ export function parseHeatTimesBody(body: unknown): ParsedHeatTimes {
       heatNumber: item.heatNumber,
       status,
       timeMilliseconds: status === 'OK' ? timeMilliseconds : null,
+      lapNumber: status === 'OK' ? lapNumber : null,
     };
   });
   return { commit: body.commit === true, entries };

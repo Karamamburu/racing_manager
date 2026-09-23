@@ -8,9 +8,9 @@ import {
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { Button, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { Button, Collapse, Select, Space, Table, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { classCompetitionsService } from '../../../features/class-competitions/classCompetitionsService';
 import type {
   AddableStageKind,
@@ -40,6 +40,7 @@ const ADDABLE: Array<{ kind: AddableStageKind; id: string; title: string }> = [
   { kind: 'PROLOGUE', id: 'prologue', title: 'Пролог' },
   { kind: 'EIGHTHFINAL', id: 'eighth', title: '1/8 финала' },
   { kind: 'QUARTERFINAL', id: 'qf', title: '1/4 финала' },
+  { kind: 'SEMIFINAL', id: 'sf', title: '1/2 финала' },
 ];
 
 const STATUS_OPTIONS: Array<{ value: HeatResultStatus; label: string }> = [
@@ -57,6 +58,7 @@ type ClassCompetitionPanelProps = {
   eventLaps: EventLap[];
   canManage: boolean;
   registrationClosed: boolean;
+  categoryHasResults: boolean;
   onChanged: () => Promise<void> | void;
 };
 
@@ -68,18 +70,37 @@ export function ClassCompetitionPanel({
   eventLaps,
   canManage,
   registrationClosed,
+  categoryHasResults,
   onChanged,
 }: ClassCompetitionPanelProps) {
   const [pending, setPending] = useState<string | null>(null);
+  const [openStageIds, setOpenStageIds] = useState(() => seededStageIds(competition));
+  const seenSeededRef = useRef(new Set(seededStageIds(competition)));
+  const seededKey = seededStageIds(competition).join('|');
 
-  const run = async (key: string, action: () => Promise<void>, success: string) => {
+  useEffect(() => {
+    if (!seededKey) return;
+    const newcomers = seededKey.split('|').filter((id) => !seenSeededRef.current.has(id));
+    if (newcomers.length === 0) return;
+    for (const id of newcomers) seenSeededRef.current.add(id);
+    setOpenStageIds((current) => [...current, ...newcomers]);
+  }, [seededKey]);
+
+  const run = async (
+    key: string,
+    action: () => Promise<void>,
+    success: string,
+    options?: { rethrow?: boolean },
+  ) => {
     setPending(key);
     try {
       await action();
       message.success(success);
       await onChanged();
     } catch (error) {
-      message.error(classCompetitionsService.getErrorMessage(error));
+      const text = classCompetitionsService.getErrorMessage(error);
+      if (options?.rethrow) throw new Error(text);
+      message.error(text);
     } finally {
       setPending(null);
     }
@@ -87,7 +108,7 @@ export function ClassCompetitionPanel({
 
   if (!competition) {
     const classGender = gender === 'M' || gender === 'F' ? gender : null;
-    if (!canManage || !registrationClosed || !classGender) return null;
+    if (!canManage || !registrationClosed || !classGender || categoryHasResults) return null;
     return (
       <Button
         style={{ marginBottom: 12 }}
@@ -116,7 +137,7 @@ export function ClassCompetitionPanel({
   return (
     <Space direction="vertical" size={16} style={{ width: '100%', marginBottom: 16 }}>
       <Space wrap>
-        <Tag>{competition.status === 'DONE' ? 'Сетка завершена' : competition.status === 'DRAFT' ? 'Черновик сетки' : 'Сетка в работе'}</Tag>
+        <Tag>{competition.status === 'DONE' ? 'Гонка завершена' : competition.status === 'DRAFT' ? 'Черновик сетки' : 'Сетка в работе'}</Tag>
         {editable
           ? ADDABLE.filter((item) => !stageById.has(item.id) && canAddStage(competition, item.kind)).map(
               (item) => (
@@ -146,7 +167,18 @@ export function ClassCompetitionPanel({
           key={stage.stageId}
           stage={stage}
           eventLaps={eventLaps}
+          open={openStageIds.includes(stage.stageId)}
+          onOpenChange={(open) =>
+            setOpenStageIds((current) =>
+              open
+                ? current.includes(stage.stageId)
+                  ? current
+                  : [...current, stage.stageId]
+                : current.filter((id) => id !== stage.stageId),
+            )
+          }
           editable={editable}
+          finishesRace={stageFinishesRace(competition, stage.stageId)}
           previousCompleted={
             stage.sourceStageId != null &&
             competition.stages.find((item) => item.stageId === stage.sourceStageId)?.status ===
@@ -200,9 +232,11 @@ export function ClassCompetitionPanel({
               'Состав заездов обновлён',
             )
           }
-          onSaveTime={(slot, timeMilliseconds) =>
+          onSaveTime={(slot, timeMilliseconds, lapNumber) =>
             run(
-              `time-${slot.registrationId}`,
+              lapNumber != null
+                ? `time-${slot.registrationId}-${lapNumber}`
+                : `time-${slot.registrationId}`,
               () =>
                 classCompetitionsService
                   .recordHeatTimes(eventId, competition.id, stage.stageId, {
@@ -213,11 +247,13 @@ export function ClassCompetitionPanel({
                         heatNumber: heatNumberOf(stage, slot.registrationId),
                         status: 'OK',
                         timeMilliseconds,
+                        ...(lapNumber != null ? { lapNumber } : {}),
                       },
                     ],
                   })
                   .then(() => undefined),
               'Время заезда записано',
+              { rethrow: true },
             )
           }
           onSaveStatus={(slot, status) =>
@@ -252,7 +288,9 @@ export function ClassCompetitionPanel({
                     entries: [],
                   })
                   .then(() => undefined),
-              'Этап зафиксирован. Проверьте статусы перед сеткой следующего этапа',
+              stageFinishesRace(competition, stage.stageId)
+                ? 'Гонка завершена'
+                : 'Этап зафиксирован. Проверьте статусы перед сеткой следующего этапа',
             )
           }
         />
@@ -261,15 +299,38 @@ export function ClassCompetitionPanel({
   );
 }
 
+function stageFinishesRace(competition: ClassCompetitionView, stageId: string): boolean {
+  return competition.stages.every(
+    (stage) => stage.stageId === stageId || stage.status === 'COMPLETED',
+  );
+}
+
+function seededStageIds(competition: ClassCompetitionView | null): string[] {
+  return (competition?.stages ?? [])
+    .filter((stage) => stage.status === 'SEEDED')
+    .map((stage) => stage.stageId);
+}
+
 function canRemoveStage(competition: ClassCompetitionView, stage: ClassCompetitionStage): boolean {
-  if (!['prologue', 'eighth', 'qf', 'final_b'].includes(stage.stageId)) return false;
+  if (!['prologue', 'eighth', 'qf', 'sf', 'final_b'].includes(stage.stageId)) return false;
   if (stage.status !== 'PENDING') return false;
   if (competition.status === 'DRAFT') return true;
   return stage.entries.length === 0;
 }
 
+function canAddSemifinal(competition: ClassCompetitionView): boolean {
+  const final = competition.stages.find(
+    (stage) => stage.stageId === 'final' || stage.stageId === 'final_a',
+  );
+  if (!final || final.status !== 'PENDING') return false;
+  if (!final.sourceStageId) return true;
+  const source = competition.stages.find((stage) => stage.stageId === final.sourceStageId);
+  return source != null && source.status !== 'COMPLETED';
+}
+
 function canAddStage(competition: ClassCompetitionView, kind: AddableStageKind): boolean {
   if (kind === 'PROLOGUE') return competition.status === 'DRAFT';
+  if (kind === 'SEMIFINAL') return canAddSemifinal(competition);
   const afterId = kind === 'EIGHTHFINAL'
     ? competition.stages.some((stage) => stage.stageId === 'prologue')
       ? 'prologue'
@@ -291,9 +352,14 @@ function heatNumberOf(stage: ClassCompetitionStage, registrationId: string): num
   return heat?.heatNumber ?? 1;
 }
 
-function slotFilled(slot: ClassHeatSlot): boolean {
+function slotFilled(slot: ClassHeatSlot, eventLaps: EventLap[]): boolean {
   if (slot.resultStatus === 'DNS' || slot.resultStatus === 'DNF' || slot.resultStatus === 'DSQ') {
     return true;
+  }
+  if (eventLaps.length > 1) {
+    return eventLaps.every((lap) =>
+      (slot.laps ?? []).some((item) => item.lapNumber === lap.lapNumber),
+    );
   }
   return slot.resultStatus === 'OK' && slot.timeMilliseconds != null;
 }
@@ -301,7 +367,10 @@ function slotFilled(slot: ClassHeatSlot): boolean {
 function StageBoard({
   stage,
   eventLaps,
+  open,
+  onOpenChange,
   editable,
+  finishesRace,
   previousCompleted,
   qualifierStatus,
   pending,
@@ -315,7 +384,10 @@ function StageBoard({
 }: {
   stage: ClassCompetitionStage;
   eventLaps: EventLap[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   editable: boolean;
+  finishesRace: boolean;
   previousCompleted: boolean;
   qualifierStatus: 'QQ' | 'NQ' | null;
   pending: string | null;
@@ -323,7 +395,7 @@ function StageBoard({
   onRemove: (() => void) | null;
   onSeed: () => void;
   onReassign: (heats: Array<{ heatNumber: number; registrationIds: string[] }>) => void;
-  onSaveTime: (slot: ClassHeatSlot, timeMilliseconds: number) => void;
+  onSaveTime: (slot: ClassHeatSlot, timeMilliseconds: number, lapNumber?: number) => void;
   onSaveStatus: (slot: ClassHeatSlot, status: HeatResultStatus) => void;
   onCommit: () => void;
 }) {
@@ -334,7 +406,7 @@ function StageBoard({
   const readyToCommit =
     canTime &&
     stage.heats.length > 0 &&
-    stage.heats.every((heat) => heat.slots.length > 0 && heat.slots.every(slotFilled));
+    stage.heats.every((heat) => heat.slots.length > 0 && heat.slots.every((slot) => slotFilled(slot, eventLaps)));
   const title = STAGE_LABELS[stage.kind] ?? stage.label ?? stage.stageId;
 
   const onDragEnd = (event: DragEndEvent) => {
@@ -381,77 +453,102 @@ function StageBoard({
     );
   };
 
+  const canSeed =
+    editable &&
+    stage.status === 'PENDING' &&
+    stage.heats.length === 0 &&
+    (stage.entries.length > 0 || previousCompleted);
+  const stageActions = (
+    <Space wrap onClick={(event) => event.stopPropagation()}>
+      {onRemove ? (
+        <Button size="small" danger loading={pending === `remove-${stage.stageId}`} onClick={onRemove}>
+          Убрать этап
+        </Button>
+      ) : null}
+      {canSeed ? (
+        <Button size="small" type="primary" loading={pending === `seed-${stage.stageId}`} onClick={onSeed}>
+          {isTerminalStage(stage.kind) ? 'Сформировать заезд' : 'Сформировать заезды'}
+        </Button>
+      ) : null}
+      {canArrange && !isTerminalStage(stage.kind) ? (
+        <Button size="small" loading={pending === `move-${stage.stageId}`} onClick={addHeat}>
+          Добавить заезд
+        </Button>
+      ) : null}
+      {readyToCommit ? (
+        <Button size="small" type="primary" loading={pending === `commit-${stage.stageId}`} onClick={onCommit}>
+          {finishesRace ? 'Завершить гонку' : 'Зафиксировать этап'}
+        </Button>
+      ) : null}
+    </Space>
+  );
+
   return (
-    <div>
-      <Space wrap style={{ marginBottom: 8 }}>
-        <Typography.Text strong>{title}</Typography.Text>
-        <Tag>{stageStatusLabel(stage.status)}</Tag>
-        {onRemove ? (
-          <Button size="small" danger loading={pending === `remove-${stage.stageId}`} onClick={onRemove}>
-            Убрать этап
-          </Button>
-        ) : null}
-        {editable &&
-        stage.status === 'PENDING' &&
-        stage.heats.length === 0 &&
-        (stage.entries.length > 0 || previousCompleted) ? (
-          <Button size="small" type="primary" loading={pending === `seed-${stage.stageId}`} onClick={onSeed}>
-            {isTerminalStage(stage.kind) ? 'Сформировать заезд' : 'Сформировать заезды'}
-          </Button>
-        ) : null}
-        {canArrange && !isTerminalStage(stage.kind) ? (
-          <Button size="small" loading={pending === `move-${stage.stageId}`} onClick={addHeat}>
-            Добавить заезд
-          </Button>
-        ) : null}
-        {readyToCommit ? (
-          <Button size="small" type="primary" loading={pending === `commit-${stage.stageId}`} onClick={onCommit}>
-            Зафиксировать этап
-          </Button>
-        ) : null}
-      </Space>
-      {stage.status === 'COMPLETED' && stage.heats.length > 0 ? (
-        <CompletedStageResults
-          stage={stage}
-          eventLaps={eventLaps}
-          canEditStatus={editable}
-          pending={pending}
-          onChangeRegistrationStatus={onChangeRegistrationStatus}
-        />
-      ) : stage.heats.length === 0 ? (
-        <Typography.Text type="secondary">
-          {previousCompleted
-            ? qualifierStatus === 'NQ'
-              ? 'Финал B собирается из участников со статусом NQ. Сформируйте заезд, когда состав готов'
-              : isTerminalStage(stage.kind)
-                ? 'Отметьте квалифицированных и сформируйте заезд'
-                : 'Отметьте квалифицированных и сформируйте заезды'
-            : stage.entries.length > 0
-              ? `${stage.entries.length} участников ждут распределения по заездам`
-              : 'Участники появятся после предыдущего этапа'}
-        </Typography.Text>
-      ) : (
-        <DndContext sensors={sensors} onDragEnd={onDragEnd}>
-          <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4 }}>
-            {stage.heats.map((heat) => (
-              <HeatColumn
-                key={heat.heatNumber}
-                stageId={stage.stageId}
-                heatNumber={heat.heatNumber}
-                slots={heat.slots}
-                canDrag={canDrag}
-                canTime={canTime}
-                canDelete={canArrange && heat.slots.length === 0 && stage.heats.length > 1}
+    <Collapse
+      activeKey={open ? [stage.stageId] : []}
+      onChange={(keys) => {
+        const list = Array.isArray(keys) ? keys : [keys];
+        onOpenChange(list.includes(stage.stageId));
+      }}
+      items={[
+        {
+          key: stage.stageId,
+          label: (
+            <Space size={8}>
+              <Typography.Text strong>{title}</Typography.Text>
+              <Tag>{stageStatusLabel(stage.status)}</Tag>
+            </Space>
+          ),
+          extra:
+            onRemove || canSeed || (canArrange && !isTerminalStage(stage.kind)) || readyToCommit
+              ? stageActions
+              : undefined,
+          children:
+            stage.status === 'COMPLETED' && stage.heats.length > 0 ? (
+              <CompletedStageResults
+                stage={stage}
+                eventLaps={eventLaps}
+                canEditStatus={editable}
                 pending={pending}
-                onDelete={() => deleteHeat(heat.heatNumber)}
-                onSaveTime={onSaveTime}
-                onSaveStatus={onSaveStatus}
+                onChangeRegistrationStatus={onChangeRegistrationStatus}
               />
-            ))}
-          </div>
-        </DndContext>
-      )}
-    </div>
+            ) : stage.heats.length === 0 ? (
+              <Typography.Text type="secondary">
+                {previousCompleted
+                  ? qualifierStatus === 'NQ'
+                    ? 'Финал B собирается из участников со статусом NQ. Сформируйте заезд, когда состав готов'
+                    : isTerminalStage(stage.kind)
+                      ? 'Отметьте квалифицированных и сформируйте заезд'
+                      : 'Отметьте квалифицированных и сформируйте заезды'
+                  : stage.entries.length > 0
+                    ? `${stage.entries.length} участников ждут распределения по заездам`
+                    : 'Участники появятся после предыдущего этапа'}
+              </Typography.Text>
+            ) : (
+              <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+                <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4 }}>
+                  {stage.heats.map((heat) => (
+                    <HeatColumn
+                      key={heat.heatNumber}
+                      stageId={stage.stageId}
+                      heatNumber={heat.heatNumber}
+                      slots={heat.slots}
+                      eventLaps={eventLaps}
+                      canDrag={canDrag}
+                      canTime={canTime}
+                      canDelete={canArrange && heat.slots.length === 0 && stage.heats.length > 1}
+                      pending={pending}
+                      onDelete={() => deleteHeat(heat.heatNumber)}
+                      onSaveTime={onSaveTime}
+                      onSaveStatus={onSaveStatus}
+                    />
+                  ))}
+                </div>
+              </DndContext>
+            ),
+        },
+      ]}
+    />
   );
 }
 
@@ -468,6 +565,7 @@ function HeatColumn({
   stageId,
   heatNumber,
   slots,
+  eventLaps,
   canDrag,
   canTime,
   canDelete,
@@ -479,12 +577,13 @@ function HeatColumn({
   stageId: string;
   heatNumber: number;
   slots: ClassHeatSlot[];
+  eventLaps: EventLap[];
   canDrag: boolean;
   canTime: boolean;
   canDelete: boolean;
   pending: string | null;
   onDelete: () => void;
-  onSaveTime: (slot: ClassHeatSlot, timeMilliseconds: number) => void;
+  onSaveTime: (slot: ClassHeatSlot, timeMilliseconds: number, lapNumber?: number) => void;
   onSaveStatus: (slot: ClassHeatSlot, status: HeatResultStatus) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `heat:${heatNumber}`, disabled: !canDrag });
@@ -517,6 +616,7 @@ function HeatColumn({
             key={slot.registrationId}
             stageId={stageId}
             slot={slot}
+            eventLaps={eventLaps}
             canDrag={canDrag}
             canTime={canTime}
             pending={pending}
@@ -532,6 +632,7 @@ function HeatColumn({
 function StarterCard({
   stageId,
   slot,
+  eventLaps,
   canDrag,
   canTime,
   pending,
@@ -540,10 +641,11 @@ function StarterCard({
 }: {
   stageId: string;
   slot: ClassHeatSlot;
+  eventLaps: EventLap[];
   canDrag: boolean;
   canTime: boolean;
   pending: string | null;
-  onSaveTime: (slot: ClassHeatSlot, timeMilliseconds: number) => void;
+  onSaveTime: (slot: ClassHeatSlot, timeMilliseconds: number, lapNumber?: number) => void;
   onSaveStatus: (slot: ClassHeatSlot, status: HeatResultStatus) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -602,15 +704,44 @@ function StarterCard({
             (slot.resultStatus !== 'DNS' &&
               slot.resultStatus !== 'DNF' &&
               slot.resultStatus !== 'DSQ') ? (
-              <FinishTimeCell
-                value={slot.timeMilliseconds}
-                canEdit={canTime}
-                saving={pending === `time-${slot.registrationId}`}
-                onSave={(timeMilliseconds) => onSaveTime(slot, timeMilliseconds)}
-                onInvalid={() =>
-                  message.error('Введите время цифрами. Минуты и секунды — до 59, например 13215 → 01:32:15')
-                }
-              />
+              eventLaps.length > 1 ? (
+                <Space direction="vertical" size={4}>
+                  {eventLaps.map((lap) => (
+                    <Space key={lap.lapNumber} size={6}>
+                      <Typography.Text type="secondary" style={{ fontSize: 12, width: 52 }}>
+                        Круг {lap.lapNumber}
+                      </Typography.Text>
+                      <FinishTimeCell
+                        value={
+                          (slot.laps ?? []).find((item) => item.lapNumber === lap.lapNumber)
+                            ?.timeMilliseconds ?? null
+                        }
+                        canEdit={canTime}
+                        saving={pending === `time-${slot.registrationId}-${lap.lapNumber}`}
+                        onSave={(timeMilliseconds) => onSaveTime(slot, timeMilliseconds, lap.lapNumber)}
+                      />
+                    </Space>
+                  ))}
+                </Space>
+              ) : (
+                <FinishTimeCell
+                  value={slot.timeMilliseconds}
+                  canEdit={canTime}
+                  saving={
+                    pending ===
+                    (eventLaps.length === 1
+                      ? `time-${slot.registrationId}-${eventLaps[0].lapNumber}`
+                      : `time-${slot.registrationId}`)
+                  }
+                  onSave={(timeMilliseconds) =>
+                    onSaveTime(
+                      slot,
+                      timeMilliseconds,
+                      eventLaps.length === 1 ? eventLaps[0].lapNumber : undefined,
+                    )
+                  }
+                />
+              )
             ) : null}
           </Space>
         </div>
@@ -620,6 +751,15 @@ function StarterCard({
 }
 
 type RankedSlot = ClassHeatSlot & { place: number | null; heatNumber: number };
+
+function competitionPlaces(times: number[]): number[] {
+  const places: number[] = [];
+  for (let index = 0; index < times.length; index += 1) {
+    const tiedWithPrevious = index > 0 && times[index] === times[index - 1];
+    places.push(tiedWithPrevious ? places[index - 1] : index + 1);
+  }
+  return places;
+}
 
 function rankStageSlots(stage: ClassCompetitionStage): RankedSlot[] {
   const slots = stage.heats.flatMap((heat) =>
@@ -632,6 +772,7 @@ function rankStageSlots(stage: ClassCompetitionStage): RankedSlot[] {
       if (byTime !== 0) return byTime;
       return (a.startNumber ?? Number.POSITIVE_INFINITY) - (b.startNumber ?? Number.POSITIVE_INFINITY);
     });
+  const places = competitionPlaces(finished.map((slot) => slot.timeMilliseconds ?? 0));
   const rest = slots
     .filter((slot) => slot.resultStatus !== 'OK' || slot.timeMilliseconds == null)
     .sort((a, b) => {
@@ -640,7 +781,7 @@ function rankStageSlots(stage: ClassCompetitionStage): RankedSlot[] {
       return (a.startNumber ?? Number.POSITIVE_INFINITY) - (b.startNumber ?? Number.POSITIVE_INFINITY);
     });
   return [
-    ...finished.map((slot, index) => ({ ...slot, place: index + 1 })),
+    ...finished.map((slot, index) => ({ ...slot, place: places[index] })),
     ...rest.map((slot) => ({ ...slot, place: null })),
   ];
 }
@@ -678,10 +819,14 @@ function CompletedStageResults({
     ),
     key: `lap-${lap.lapNumber}`,
     width: 120,
-    render: (_value: unknown, record) =>
-      record.resultStatus === 'OK' && eventLaps.length === 1
-        ? formatFinishTime(record.timeMilliseconds)
-        : '—',
+    render: (_value: unknown, record) => {
+      const saved = (record.laps ?? []).find((item) => item.lapNumber === lap.lapNumber);
+      if (saved) return formatFinishTime(saved.timeMilliseconds);
+      if (record.resultStatus === 'OK' && eventLaps.length === 1) {
+        return formatFinishTime(record.timeMilliseconds);
+      }
+      return '—';
+    },
   }));
   const columns: ColumnsType<RankedSlot> = [
     {

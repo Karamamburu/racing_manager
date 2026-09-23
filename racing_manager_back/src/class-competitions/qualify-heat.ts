@@ -1,6 +1,6 @@
 export type QualificationStatus = 'QQ' | 'NQ' | 'DNS' | 'DNF' | 'DSQ';
 
-export type StageOutcomeStatus = QualificationStatus | 'CONFIRMED';
+export type StageOutcomeStatus = QualificationStatus | 'FINISHED';
 
 export type QualificationSlot = {
   registrationId: string;
@@ -41,7 +41,7 @@ export function outcomeForHeat(
   const assigned = new Map<string, StageOutcomeStatus>();
   for (const slot of slots) {
     if (slot.status === 'OK' && slot.timeMilliseconds != null) {
-      assigned.set(slot.registrationId, 'CONFIRMED');
+      assigned.set(slot.registrationId, 'FINISHED');
       continue;
     }
     if (slot.status === 'DNS' || slot.status === 'DNF' || slot.status === 'DSQ') {

@@ -4,7 +4,7 @@ export type ClassStageStatus = 'PENDING' | 'SEEDED' | 'COMPLETED';
 
 export type HeatResultStatus = 'OK' | 'DNS' | 'DNF' | 'DSQ';
 
-export type AddableStageKind = 'PROLOGUE' | 'EIGHTHFINAL' | 'QUARTERFINAL';
+export type AddableStageKind = 'PROLOGUE' | 'EIGHTHFINAL' | 'QUARTERFINAL' | 'SEMIFINAL';
 
 export type ClassHeatSlot = {
   position: number;
@@ -15,6 +15,7 @@ export type ClassHeatSlot = {
   registrationStatus: string;
   timeMilliseconds: number | null;
   resultStatus: HeatResultStatus | null;
+  laps: Array<{ lapNumber: number; timeMilliseconds: number }>;
 };
 
 export type ClassCompetitionStage = {

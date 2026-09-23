@@ -197,4 +197,79 @@ describe('revisePlan', () => {
       routes: [{ cut: { type: 'TOP_N', n: 12 }, toStageId: 'sf' }],
     });
   });
+
+  it('drops the semifinal and sends the whole field to final A', () => {
+    const revised = revisePlan({
+      format: proposePlan({ participantCount: 12 }).format,
+      participantCount: 12,
+      removeStageIds: ['sf'],
+    });
+    expect(ids(revised)).toEqual(['prologue', 'final_a']);
+    const prologue = revised.format.stages.find((stage) => stage.id === 'prologue');
+    expect(prologue?.advancement).toEqual({
+      type: 'ROUTES',
+      routes: [{ cut: { type: 'TOP_N', n: 12 }, toStageId: 'final_a' }],
+    });
+    const finalA = heatSpec(revised, 'final_a');
+    expect(finalA.heatCount).toBe(1);
+    expect(finalA.heatSize).toBeGreaterThanOrEqual(12);
+  });
+
+  it('drops a semifinal that advances only to final A', () => {
+    const withoutFinalB = revisePlan({
+      format: proposePlan({ participantCount: 12 }).format,
+      participantCount: 12,
+      removeStageIds: ['final_b'],
+    });
+    const revised = revisePlan({
+      format: withoutFinalB.format,
+      participantCount: 12,
+      removeStageIds: ['sf'],
+    });
+    expect(ids(revised)).toEqual(['prologue', 'final_a']);
+    expect(revised.format.stages.find((stage) => stage.id === 'prologue')?.advancement).toEqual({
+      type: 'ROUTES',
+      routes: [{ cut: { type: 'TOP_N', n: 12 }, toStageId: 'final_a' }],
+    });
+  });
+
+  it('inserts a semifinal between the prologue and a single final', () => {
+    const base = proposePlan({ participantCount: 6 });
+    expect(ids(base)).toEqual(['prologue', 'final']);
+    const revised = revisePlan({
+      format: base.format,
+      participantCount: 6,
+      addStages: [
+        {
+          afterStageId: 'prologue',
+          stage: {
+            id: 'sf',
+            kind: 'SEMIFINAL',
+            label: '1/2 final',
+            heats: {
+              type: 'HEATS',
+              heatCount: 2,
+              heatSize: 6,
+              remainder: 'BALANCED',
+              seeding: { type: 'SNAKE' },
+            },
+            ranking: { type: 'BY_PLACE' },
+            advancement: {
+              type: 'ROUTES',
+              routes: [{ cut: { type: 'FIRST_HALF' }, toStageId: 'final' }],
+            },
+          },
+        },
+      ],
+    });
+    expect(ids(revised)).toEqual(['prologue', 'sf', 'final']);
+    expect(revised.format.stages.find((stage) => stage.id === 'prologue')?.advancement).toEqual({
+      type: 'ROUTES',
+      routes: [{ cut: { type: 'TOP_N', n: 6 }, toStageId: 'sf' }],
+    });
+    expect(revised.format.stages.find((stage) => stage.id === 'sf')?.advancement).toEqual({
+      type: 'ROUTES',
+      routes: [{ cut: { type: 'FIRST_HALF' }, toStageId: 'final' }],
+    });
+  });
 });

@@ -21,6 +21,8 @@ import {
   ACTIVE_REGISTRATION_STATUSES,
   RegistrationStatusCode,
 } from '../registrations/registration-status';
+import { competitionPlaces } from '../ranking/competition-places';
+import { categoryIsFinished } from '../events/category-finish';
 import { classifyBracket, lastOkTimes } from './classify-bracket';
 import { CmsClient } from './cms.client';
 import { outcomeForHeat } from './qualify-heat';
@@ -60,6 +62,10 @@ type StoredHeatTime = {
   timeMilliseconds: number | null;
   status: ClassHeatResultStatus;
   qualificationStatus: RegistrationStatus | null;
+  laps: Array<{
+    timeMilliseconds: number;
+    eventLap: { lapNumber: number };
+  }>;
 };
 
 type StoredClassCompetition = {
@@ -91,6 +97,12 @@ const classCompetitionInclude = {
       timeMilliseconds: true,
       status: true,
       qualificationStatus: true,
+      laps: {
+        select: {
+          timeMilliseconds: true,
+          eventLap: { select: { lapNumber: true } },
+        },
+      },
     },
   },
 } satisfies Prisma.ClassCompetitionInclude;
@@ -119,6 +131,7 @@ export type ClassCompetitionView = {
         registrationStatus: string;
         timeMilliseconds: number | null;
         resultStatus: string | null;
+        laps: Array<{ lapNumber: number; timeMilliseconds: number }>;
       }>;
     }>;
     entries: Array<{
@@ -197,6 +210,23 @@ export class ClassCompetitionsService {
     });
     if (existing) {
       throw new ConflictException('Для этой категории многоэтапная гонка уже создана.');
+    }
+    const protocolResults = await this.prisma.result.count({
+      where: {
+        registration: {
+          eventId,
+          gender: parsed.gender,
+          formatId: parsed.formatId,
+        },
+      },
+    });
+    if (protocolResults > 0) {
+      throw new ConflictException(
+        'В этой категории уже есть результаты в итоговом протоколе.',
+      );
+    }
+    if (await categoryIsFinished(this.prisma, eventId, parsed.formatId, parsed.gender)) {
+      throw new ConflictException('Гонка в этой категории уже завершена.');
     }
 
     const formatName = event.eventFormats.find((item) => item.formatId === parsed.formatId);
@@ -330,7 +360,12 @@ export class ClassCompetitionsService {
       }
     }
     this.assertEntriesMatchHeats(parsed, heatByRegistration);
-    await this.upsertHeatTimes(row.id, stageId, parsed);
+    const eventLaps = await this.prisma.eventLap.findMany({
+      where: { eventId },
+      select: { id: true, lapNumber: true },
+      orderBy: { lapNumber: 'asc' },
+    });
+    await this.upsertHeatTimes(row.id, stageId, parsed, eventLaps);
 
     if (!parsed.commit) {
       return this.present(
@@ -370,7 +405,10 @@ export class ClassCompetitionsService {
             (startNumbers.get(b.registrationId) ?? Number.POSITIVE_INFINITY)
           );
         });
-      const placeById = new Map(finished.map((item, index) => [item.registrationId, index + 1]));
+      const places = competitionPlaces(finished, (item) => item.timeMilliseconds ?? 0);
+      const placeById = new Map(
+        finished.map((item, index) => [item.registrationId, places[index]]),
+      );
       return {
         heatNumber: heat.heatNumber,
         results: heat.slots.map((slot) => {
@@ -522,10 +560,20 @@ export class ClassCompetitionsService {
     classCompetitionId: string,
     stageId: string,
     parsed: ParsedHeatTimes,
+    eventLaps: { id: string; lapNumber: number }[],
   ) {
+    const lapByNumber = new Map(eventLaps.map((lap) => [lap.lapNumber, lap]));
     await this.prisma.$transaction(async (tx) => {
       for (const entry of parsed.entries) {
-        await tx.classHeatTime.upsert({
+        if (eventLaps.length > 0 && entry.status === 'OK' && entry.lapNumber == null) {
+          throw new BadRequestException(
+            'Это мероприятие учитывает время по кругам. Укажите номер круга.',
+          );
+        }
+        if (eventLaps.length === 0 && entry.lapNumber != null) {
+          throw new BadRequestException('У мероприятия нет кругов. Укажите общее время.');
+        }
+        const heatTime = await tx.classHeatTime.upsert({
           where: {
             classCompetitionId_stageId_heatNumber_registrationId: {
               classCompetitionId,
@@ -540,12 +588,50 @@ export class ClassCompetitionsService {
             heatNumber: entry.heatNumber,
             registrationId: entry.registrationId,
             status: entry.status,
+            timeMilliseconds: entry.lapNumber == null ? entry.timeMilliseconds : null,
+          },
+          update:
+            entry.lapNumber == null
+              ? { status: entry.status, timeMilliseconds: entry.timeMilliseconds }
+              : { status: 'OK' },
+        });
+        if (entry.status !== 'OK') {
+          await tx.classHeatLapTime.deleteMany({ where: { classHeatTimeId: heatTime.id } });
+          continue;
+        }
+        if (entry.lapNumber == null || entry.timeMilliseconds == null) continue;
+        const eventLap = lapByNumber.get(entry.lapNumber);
+        if (!eventLap) {
+          throw new BadRequestException(
+            `Круг ${entry.lapNumber} не заявлен на этом мероприятии.`,
+          );
+        }
+        await tx.classHeatLapTime.upsert({
+          where: {
+            classHeatTimeId_eventLapId: {
+              classHeatTimeId: heatTime.id,
+              eventLapId: eventLap.id,
+            },
+          },
+          create: {
+            classHeatTimeId: heatTime.id,
+            eventLapId: eventLap.id,
             timeMilliseconds: entry.timeMilliseconds,
           },
-          update: {
-            status: entry.status,
-            timeMilliseconds: entry.timeMilliseconds,
-          },
+          update: { timeMilliseconds: entry.timeMilliseconds },
+        });
+        const stored = await tx.classHeatLapTime.findMany({
+          where: { classHeatTimeId: heatTime.id },
+          select: { timeMilliseconds: true, eventLap: { select: { lapNumber: true } } },
+        });
+        const byLap = new Map(stored.map((lap) => [lap.eventLap.lapNumber, lap.timeMilliseconds]));
+        const complete = eventLaps.every((lap) => byLap.has(lap.lapNumber));
+        const total = complete
+          ? eventLaps.reduce((sum, lap) => sum + (byLap.get(lap.lapNumber) ?? 0), 0)
+          : null;
+        await tx.classHeatTime.update({
+          where: { id: heatTime.id },
+          data: { status: 'OK', timeMilliseconds: total },
         });
       }
     });
@@ -558,6 +644,7 @@ export class ClassCompetitionsService {
   ) {
     const existing = await this.prisma.classHeatTime.findMany({
       where: { classCompetitionId, stageId },
+      include: { laps: true },
     });
     const byRegistration = new Map(existing.map((row) => [row.registrationId, row]));
     const next = heats.flatMap((heat) =>
@@ -573,28 +660,48 @@ export class ClassCompetitionsService {
             status: previous.status,
             timeMilliseconds: previous.timeMilliseconds,
             qualificationStatus: previous.qualificationStatus,
+            laps: previous.laps,
           },
         ];
       }),
     );
     await this.prisma.$transaction(async (tx) => {
       await tx.classHeatTime.deleteMany({ where: { classCompetitionId, stageId } });
-      if (next.length > 0) {
-        await tx.classHeatTime.createMany({ data: next });
+      for (const row of next) {
+        const created = await tx.classHeatTime.create({
+          data: {
+            classCompetitionId: row.classCompetitionId,
+            stageId: row.stageId,
+            heatNumber: row.heatNumber,
+            registrationId: row.registrationId,
+            status: row.status,
+            timeMilliseconds: row.timeMilliseconds,
+            qualificationStatus: row.qualificationStatus,
+          },
+        });
+        if (row.laps.length > 0) {
+          await tx.classHeatLapTime.createMany({
+            data: row.laps.map((lap) => ({
+              classHeatTimeId: created.id,
+              eventLapId: lap.eventLapId,
+              timeMilliseconds: lap.timeMilliseconds,
+            })),
+          });
+        }
       }
     });
   }
 
   private async persistOutcome(id: string, cms: CmsCompetition) {
-    const places = cms.status === 'DONE' ? classifyBracket(cms) : null;
+    const times = await this.prisma.classHeatTime.findMany({ where: { classCompetitionId: id } });
+    const timeByRegistration = lastOkTimes(cms, times);
+    const places = cms.status === 'DONE' ? classifyBracket(cms, timeByRegistration) : null;
     await this.prisma.$transaction(async (tx) => {
       await tx.classCompetition.update({
         where: { id },
         data: { status: cms.status },
       });
       if (!places) return;
-      const times = await tx.classHeatTime.findMany({ where: { classCompetitionId: id } });
-      const timeByRegistration = lastOkTimes(cms, times);
       for (const [registrationId, place] of places) {
         const timeMilliseconds = timeByRegistration.get(registrationId);
         if (timeMilliseconds == null) continue;
@@ -698,7 +805,8 @@ export class ClassCompetitionsService {
     );
     const runs = new Map(cms.stages.map((stage) => [stage.stageId, stage]));
     const timeByRegistration = lastOkTimes(cms, row.heatTimes);
-    const places = cms.status === 'DONE' ? classifyBracket(cms) : new Map<string, number>();
+    const places =
+      cms.status === 'DONE' ? classifyBracket(cms, timeByRegistration) : new Map<string, number>();
 
     return {
       id: row.id,
@@ -757,7 +865,14 @@ export class ClassCompetitionsService {
             registrationStatus: stageStatus(slot.participantId, stored),
             position: slot.position,
             timeMilliseconds: stored?.timeMilliseconds ?? null,
-            resultStatus: stored?.status ?? null,
+            resultStatus:
+              stored == null || (stored.status === 'OK' && stored.timeMilliseconds == null)
+                ? null
+                : stored.status,
+            laps: (stored?.laps ?? []).map((lap) => ({
+              lapNumber: lap.eventLap.lapNumber,
+              timeMilliseconds: lap.timeMilliseconds,
+            })),
           };
         }),
       })),
@@ -792,7 +907,7 @@ export class ClassCompetitionsService {
       status: RegistrationStatus;
     }> = [];
     const clearQualification: Array<{ stageId: string; registrationId: string }> = [];
-    const confirmRegistrations = new Set<string>();
+    const finishRegistrations = new Set<string>();
 
     for (const run of cms.stages) {
       if (run.status !== 'COMPLETED') continue;
@@ -801,20 +916,21 @@ export class ClassCompetitionsService {
       const stageTimes = heatTimes.filter((item) => item.stageId === run.stageId);
       if (terminal) {
         for (const item of stageTimes) {
-          if (
-            item.qualificationStatus !== RegistrationStatus.QQ &&
-            item.qualificationStatus !== RegistrationStatus.NQ
-          ) {
-            continue;
-          }
-          item.qualificationStatus = RegistrationStatus.CONFIRMED;
+          const closedAsQualifier =
+            item.qualificationStatus === RegistrationStatus.QQ ||
+            item.qualificationStatus === RegistrationStatus.NQ;
+          const closedAsConfirmed = item.qualificationStatus === RegistrationStatus.CONFIRMED;
+          if (!closedAsQualifier && !closedAsConfirmed) continue;
+          item.qualificationStatus = RegistrationStatus.FINISHED;
           clearQualification.push({ stageId: run.stageId, registrationId: item.registrationId });
           const current = registrationStatus.get(item.registrationId);
           if (
-            (current === RegistrationStatusCode.QQ || current === RegistrationStatusCode.NQ) &&
+            (current === RegistrationStatusCode.QQ ||
+              current === RegistrationStatusCode.NQ ||
+              current === RegistrationStatusCode.CONFIRMED) &&
             !appearedOnLaterStage(cms, run.stageId, item.registrationId)
           ) {
-            confirmRegistrations.add(item.registrationId);
+            finishRegistrations.add(item.registrationId);
           }
         }
       }
@@ -853,16 +969,18 @@ export class ClassCompetitionsService {
         updates.push({ stageId: run.stageId, registrationId: item.registrationId, status });
         if (
           terminal &&
-          status === RegistrationStatusCode.CONFIRMED &&
-          (current === RegistrationStatusCode.QQ || current === RegistrationStatusCode.NQ) &&
+          status === RegistrationStatusCode.FINISHED &&
+          (current === RegistrationStatusCode.QQ ||
+            current === RegistrationStatusCode.NQ ||
+            current === RegistrationStatusCode.CONFIRMED) &&
           !appearedOnLaterStage(cms, run.stageId, item.registrationId)
         ) {
-          confirmRegistrations.add(item.registrationId);
+          finishRegistrations.add(item.registrationId);
         }
       }
     }
 
-    if (updates.length > 0 || clearQualification.length > 0 || confirmRegistrations.size > 0) {
+    if (updates.length > 0 || clearQualification.length > 0 || finishRegistrations.size > 0) {
       await this.prisma.$transaction(async (tx) => {
         for (const update of updates) {
           await tx.classHeatTime.updateMany({
@@ -881,18 +999,26 @@ export class ClassCompetitionsService {
               classCompetitionId: row.id,
               stageId: update.stageId,
               registrationId: update.registrationId,
-              qualificationStatus: { in: [RegistrationStatus.QQ, RegistrationStatus.NQ] },
+              qualificationStatus: {
+                in: [
+                  RegistrationStatus.QQ,
+                  RegistrationStatus.NQ,
+                  RegistrationStatus.CONFIRMED,
+                ],
+              },
             },
-            data: { qualificationStatus: RegistrationStatus.CONFIRMED },
+            data: { qualificationStatus: RegistrationStatus.FINISHED },
           });
         }
-        for (const registrationId of confirmRegistrations) {
+        for (const registrationId of finishRegistrations) {
           await tx.registration.updateMany({
             where: {
               id: registrationId,
-              status: { in: [RegistrationStatus.QQ, RegistrationStatus.NQ] },
+              status: {
+                in: [RegistrationStatus.QQ, RegistrationStatus.NQ, RegistrationStatus.CONFIRMED],
+              },
             },
-            data: { status: RegistrationStatus.CONFIRMED },
+            data: { status: RegistrationStatus.FINISHED },
           });
         }
       });

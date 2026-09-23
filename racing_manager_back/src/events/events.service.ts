@@ -1,11 +1,12 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { RoleCode } from '../auth/role-codes';
+import { ADMIN_ROLE_CODES, RoleCode } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
 import { ALESHKINO_TRACK_ID } from '../tracks/aleshkino';
 import { UsersService } from '../users/users.service';
@@ -13,6 +14,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   LISTED_REGISTRATION_STATUSES,
   RegistrationStatusCode,
+  isRankedRegistrationStatus,
 } from '../registrations/registration-status';
 import {
   parseCreateEventBody,
@@ -26,10 +28,13 @@ import {
 } from './event-status';
 import { EventStatusSyncService } from './event-status-sync.service';
 import { freezeEventPlaces } from './freeze-event-places';
+import { parseFinishCategoryBody } from './parse-finish-category';
+import { categoryIsFinished } from './category-finish';
 import { parseEventDateRange } from './parse-event-date-range';
 import { parseUpdateEventStatusBody } from './parse-update-event-status';
 import {
   hasStoredPlaces,
+  isCompleteResult,
   rankRegistrations,
 } from './rank-registrations';
 
@@ -111,6 +116,12 @@ export type EventDetails = {
   formats: EventFormatRef[];
   laps: EventLapRef[];
   registrations: EventParticipant[];
+  finishedCategories: CategoryFinishRef[];
+};
+
+export type CategoryFinishRef = {
+  formatId: number | null;
+  gender: string;
 };
 
 export type EventParticipant = {
@@ -524,6 +535,12 @@ export class EventsService {
       throw new NotFoundException('Event not found.');
     }
 
+    const finishedCategories = await this.prisma.categoryFinish.findMany({
+      where: { eventId: id },
+      select: { formatId: true, gender: true },
+      orderBy: [{ formatId: 'asc' }, { gender: 'asc' }],
+    });
+
     return {
       id: event.id,
       name: event.name,
@@ -556,7 +573,110 @@ export class EventsService {
         event.laps.length,
         event.status,
       ),
+      finishedCategories,
     };
+  }
+
+  async finishCategory(
+    authentikId: string | undefined,
+    eventId: string,
+    body: unknown,
+  ): Promise<EventDetails> {
+    await this.rolesService.assertHasAnyRole(authentikId, ADMIN_ROLE_CODES);
+    const parsed = parseFinishCategoryBody(body);
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: {
+        id: true,
+        status: true,
+        eventDate: true,
+        eventFormats: { select: { formatId: true } },
+        laps: { select: { id: true } },
+      },
+    });
+    if (!event) throw new NotFoundException('Event not found.');
+    if (event.status === 'CANCELLED') {
+      throw new BadRequestException('Нельзя завершить гонку отменённого мероприятия.');
+    }
+    if (isPastCompletedEvent(event.status, event.eventDate)) {
+      throw new BadRequestException(PAST_COMPLETED_EVENT_LOCKED_MESSAGE);
+    }
+    const formats = event.eventFormats.map((row) => row.formatId);
+    if (formats.length === 0) {
+      if (parsed.formatId != null) {
+        throw new BadRequestException('У мероприятия нет форматов участия.');
+      }
+    } else if (parsed.formatId == null || !formats.includes(parsed.formatId)) {
+      throw new BadRequestException('Такой формат не заявлен на этом мероприятии.');
+    }
+
+    const bracket = await this.prisma.classCompetition.findFirst({
+      where: { eventId, gender: parsed.gender, formatId: parsed.formatId },
+      select: { id: true },
+    });
+    if (bracket) {
+      throw new BadRequestException(
+        'Это многоэтапная гонка. Она завершается на последнем этапе.',
+      );
+    }
+    if (await categoryIsFinished(this.prisma, eventId, parsed.formatId, parsed.gender)) {
+      throw new ConflictException('Гонка в этой категории уже завершена.');
+    }
+
+    const lapCount = event.laps.length;
+    await this.prisma.$transaction(async (tx) => {
+      const registrations = await tx.registration.findMany({
+        where: {
+          eventId,
+          gender: parsed.gender,
+          formatId: parsed.formatId,
+          status: { in: [...LISTED_REGISTRATION_STATUSES] },
+        },
+        select: {
+          id: true,
+          formatId: true,
+          gender: true,
+          startNumber: true,
+          status: true,
+          registeredAt: true,
+          result: {
+            select: {
+              timeMilliseconds: true,
+              laps: { select: { id: true } },
+            },
+          },
+        },
+      });
+      const missing = registrations.some(
+        (row) => isRankedRegistrationStatus(row.status) && !isCompleteResult(row, lapCount),
+      );
+      if (missing) {
+        throw new BadRequestException(
+          'Перед завершением гонки укажите результат каждому участнику, который занимает место, либо поставьте DNS, DNF, DSQ или NQ.',
+        );
+      }
+      const ranked = rankRegistrations(registrations, lapCount);
+      for (const { registration, place } of ranked) {
+        if (!registration.result || place == null) continue;
+        await tx.result.update({
+          where: { registrationId: registration.id },
+          data: { place },
+        });
+        await tx.registration.update({
+          where: { id: registration.id },
+          data: { status: RegistrationStatusCode.FINISHED },
+        });
+      }
+      await tx.categoryFinish.create({
+        data: {
+          eventId,
+          formatId: parsed.formatId,
+          gender: parsed.gender,
+        },
+      });
+    });
+
+    return this.findById(eventId, { syncStatuses: false });
   }
 
   async update(

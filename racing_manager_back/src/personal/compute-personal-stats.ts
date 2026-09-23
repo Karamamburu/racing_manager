@@ -1,4 +1,5 @@
 import { isRankedRegistrationStatus } from '../registrations/registration-status';
+import { competitionPlaces } from '../ranking/competition-places';
 
 export type PersonalStats = {
   starts: number;
@@ -40,10 +41,6 @@ export function isCompleteStatsResult(row: StatsRegistration): boolean {
   return row.result.lapCount === row.event.lapCount;
 }
 
-export function hasFrozenPlace(row: StatsRegistration): boolean {
-  return row.event.status === 'DONE' && row.result?.place != null;
-}
-
 export function computePersonalStats(
   own: StatsRegistration[],
   competitors: StatsRegistration[],
@@ -67,14 +64,14 @@ export function computePersonalStats(
   let wins = 0;
   let podiums = 0;
   for (const row of completeOwn) {
-    let place: number;
-    if (hasFrozenPlace(row) && row.result?.place != null) {
-      place = row.result.place;
-    } else {
-      const group = byClass.get(classKey(row)) ?? [row];
-      const sorted = [...group].sort(compareCompleteResults);
-      place = sorted.findIndex((item) => item.id === row.id) + 1;
-    }
+    const group = byClass.get(classKey(row)) ?? [row];
+    const sorted = [...group].sort(compareCompleteResults);
+    const places = competitionPlaces(
+      sorted,
+      (item) => item.result?.timeMilliseconds ?? 0,
+    );
+    const index = sorted.findIndex((item) => item.id === row.id);
+    const place = index >= 0 ? places[index] : 0;
     if (place <= 0) continue;
     if (place === 1) wins += 1;
     if (place <= 3) podiums += 1;

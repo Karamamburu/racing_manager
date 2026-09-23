@@ -8,6 +8,7 @@ export const RegistrationStatusCode = {
   QQ: 'QQ',
   NQ: 'NQ',
   DSQ: 'DSQ',
+  FINISHED: 'FINISHED',
 } as const;
 
 export type RegistrationStatusCode =
@@ -23,6 +24,7 @@ export const REGISTRATION_STATUSES = [
   RegistrationStatusCode.QQ,
   RegistrationStatusCode.NQ,
   RegistrationStatusCode.DSQ,
+  RegistrationStatusCode.FINISHED,
 ] as const;
 
 export const ACTIVE_REGISTRATION_STATUSES: RegistrationStatusCode[] = [
@@ -38,6 +40,7 @@ export const LISTED_REGISTRATION_STATUSES: RegistrationStatusCode[] = [
   RegistrationStatusCode.QQ,
   RegistrationStatusCode.NQ,
   RegistrationStatusCode.DSQ,
+  RegistrationStatusCode.FINISHED,
 ];
 
 export const MANAGEABLE_REGISTRATION_STATUSES: RegistrationStatusCode[] = [
@@ -101,3 +104,4 @@ export function clearsRegistrationOnStatus(status: string): boolean {
     status === RegistrationStatusCode.WITHDRAWN
   );
 }
+

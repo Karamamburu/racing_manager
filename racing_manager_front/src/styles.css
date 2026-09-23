@@ -158,6 +158,10 @@ body {
   line-height: 0;
 }
 
+.field-error-bubble .ant-popover-inner {
+  box-shadow: 0 8px 22px rgba(168, 7, 26, 0.35);
+}
+
 .news-headline__fallback {
   flex-shrink: 0;
   width: 40px;

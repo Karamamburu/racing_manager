@@ -8,34 +8,51 @@ type StoredHeatTime = {
   status: string;
 };
 
-export function classifyBracket(competition: CmsCompetition): Map<string, number> {
+type ClassifiedRow = {
+  participantId: string;
+  stageKey: string;
+  heatPlace: number | null;
+};
+
+export function classifyBracket(
+  competition: CmsCompetition,
+  timeByParticipant: Map<string, number> = new Map(),
+): Map<string, number> {
   const byStage = new Map(competition.stages.map((stage) => [stage.stageId, stage]));
   const placed = new Map<string, number>();
-  let place = 0;
 
   const assignOk = (stageId: string) => {
     const stage = byStage.get(stageId);
     if (!stage) return;
     const rows = stage.ranking
       .filter((row) => row.status === 'OK')
-      .sort((a, b) => a.rank - b.rank);
-    for (const row of rows) {
-      if (placed.has(row.participantId)) continue;
-      place += 1;
-      placed.set(row.participantId, place);
-    }
+      .sort((a, b) => a.rank - b.rank)
+      .map((row) => ({
+        participantId: row.participantId,
+        stageKey: stageId,
+        heatPlace: row.place,
+      }));
+    takePlaces(rows, placed, timeByParticipant);
   };
 
   if (byStage.has('final_a')) assignOk('final_a');
   else assignOk('final');
   assignOk('final_b');
 
-  const latest = new Map<string, { index: number; rank: number }>();
+  const latest = new Map<
+    string,
+    { index: number; rank: number; place: number | null; stageId: string }
+  >();
   competition.format.stages.forEach((stage, index) => {
     const run = byStage.get(stage.id);
     if (!run) return;
     for (const row of run.ranking) {
-      latest.set(row.participantId, { index, rank: row.rank });
+      latest.set(row.participantId, {
+        index,
+        rank: row.rank,
+        place: row.place,
+        stageId: stage.id,
+      });
     }
   });
 
@@ -44,13 +61,43 @@ export function classifyBracket(competition: CmsCompetition): Map<string, number
     .sort((a, b) => {
       if (a[1].index !== b[1].index) return b[1].index - a[1].index;
       return a[1].rank - b[1].rank;
-    });
-  for (const [id] of rest) {
-    place += 1;
-    placed.set(id, place);
-  }
+    })
+    .map(
+      ([participantId, row]): ClassifiedRow => ({
+        participantId,
+        stageKey: row.stageId,
+        heatPlace: row.place,
+      }),
+    );
+  takePlaces(rest, placed, timeByParticipant);
 
   return placed;
+}
+
+function takePlaces(
+  rows: ClassifiedRow[],
+  placed: Map<string, number>,
+  timeByParticipant: Map<string, number>,
+) {
+  const shared = new Map<string, number>();
+  for (const row of rows) {
+    if (placed.has(row.participantId)) continue;
+    const time = timeByParticipant.get(row.participantId);
+    const tieKey =
+      time != null
+        ? `${row.stageKey}:t:${time}`
+        : row.heatPlace != null
+          ? `${row.stageKey}:p:${row.heatPlace}`
+          : null;
+    const known = tieKey != null ? shared.get(tieKey) : undefined;
+    if (known != null) {
+      placed.set(row.participantId, known);
+      continue;
+    }
+    const place = placed.size + 1;
+    placed.set(row.participantId, place);
+    if (tieKey != null) shared.set(tieKey, place);
+  }
 }
 
 export function lastOkTimes(

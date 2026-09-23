@@ -55,6 +55,13 @@ export class EventsService {
     return apiClient.postResult<EventDetails>(`/admin/events/${id}/cancel`);
   }
 
+  public async finishCategory(
+    id: string,
+    payload: { formatId: number | null; gender: 'M' | 'F' },
+  ): Promise<EventDetails> {
+    return apiClient.post<EventDetails>(`/admin/events/${id}/categories/finish`, payload);
+  }
+
   public getStatus(error: unknown): number | undefined {
     if (error instanceof AxiosError) return error.response?.status;
     return undefined;

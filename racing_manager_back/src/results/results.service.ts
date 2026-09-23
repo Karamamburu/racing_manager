@@ -10,6 +10,7 @@ import {
   isPastCompletedEvent,
 } from '../events/event-status';
 import { PrismaService } from '../prisma/prisma.service';
+import { categoryIsFinished, CATEGORY_FINISHED_MESSAGE } from '../events/category-finish';
 import { isRecordableRegistrationStatus } from '../registrations/registration-status';
 import { parseUpsertResultBody } from './parse-upsert-result';
 
@@ -98,6 +99,16 @@ export class ResultsService {
       throw new BadRequestException(
         'Это многоэтапная гонка. Время записывается в заезд, а не общим результатом.',
       );
+    }
+    if (
+      await categoryIsFinished(
+        this.prisma,
+        eventId,
+        registration.formatId,
+        registration.gender,
+      )
+    ) {
+      throw new BadRequestException(CATEGORY_FINISHED_MESSAGE);
     }
     this.assertRecordableRegistration(registration);
 
