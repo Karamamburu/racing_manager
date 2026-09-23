@@ -103,8 +103,8 @@ export function AppSiderMenu() {
           collapse();
         }}
       >
-        <div className="app-logo" title="Racing Manager">
-          {collapsed ? 'RM' : 'Racing Manager'}
+        <div className="app-logo" title="Все на старт">
+          {collapsed ? 'Старт' : 'Все на старт'}
         </div>
         <Menu
           theme="light"

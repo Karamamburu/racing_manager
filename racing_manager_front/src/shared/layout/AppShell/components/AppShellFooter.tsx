@@ -9,7 +9,7 @@ export function AppShellFooter() {
 
   return (
     <Footer style={{ textAlign: 'center' }}>
-      <div>Racing Manager Platform © 2026</div>
+      <div>Все на старт © 2026</div>
       <Space size="middle" style={{ marginTop: 8 }}>
         <Button type="link" onClick={() => navigate('/policy')} style={{ paddingInline: 0 }}>
           Политики

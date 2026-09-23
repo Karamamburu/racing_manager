@@ -25,7 +25,7 @@ export class MainService {
 
     return {
       page: {
-        title: 'Racing Manager',
+        title: 'Все на старт',
         message: 'Main page stub',
       },
       authenticated: Boolean(userSub),
