@@ -1,4 +1,4 @@
-import { Input } from 'antd';
+import { Input, theme } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import {
   appendDurationDigit,
@@ -24,6 +24,7 @@ export function FinishTimeCell({
   saving,
   onSave,
 }: FinishTimeCellProps) {
+  const { token } = theme.useToken();
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [digits, setDigits] = useState(value == null ? '' : finishTimeMsToDigits(value));
@@ -46,7 +47,7 @@ export function FinishTimeCell({
           padding: 0,
           border: 'none',
           background: 'none',
-          color: '#177ddc',
+          color: token.colorPrimary,
           cursor: 'pointer',
           textDecoration: 'underline',
           textUnderlineOffset: 2,

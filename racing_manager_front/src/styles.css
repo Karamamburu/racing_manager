@@ -1,7 +1,7 @@
 :root {
   font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  color: #111827;
-  background: #f3f5f8;
+  color: #1c2b2a;
+  background: #f3f7f5;
 }
 
 body {
@@ -14,9 +14,13 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: #0f766e;
   font-size: 18px;
   font-weight: 700;
+}
+
+.ant-layout-sider-light {
+  box-shadow: inset -1px 0 0 #dce7e3;
 }
 
 .app-header {
@@ -25,7 +29,7 @@ body {
   align-items: center;
   background: #fff;
   padding: 0 24px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid #dce7e3;
   line-height: 0;
 }
 
@@ -76,7 +80,7 @@ body {
 }
 
 .event-calendar-item:hover {
-  color: #177ddc;
+  color: #0f766e;
 }
 
 .event-track-map {
@@ -131,7 +135,7 @@ body {
   display: block;
   overflow: hidden;
   border-radius: 12px;
-  background: #e8edf3;
+  background: #e7f3f0;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
@@ -170,8 +174,8 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: 10px;
-  background: #eef3f8;
-  color: #177ddc;
+  background: #e7f3f0;
+  color: #0f766e;
   font-size: 20px;
 }
 
@@ -232,7 +236,7 @@ body {
 
 .news-article-body td,
 .news-article-body th {
-  border: 1px solid #e5e7eb;
+  border: 1px solid #dce7e3;
   padding: 8px;
 }
 
@@ -246,22 +250,73 @@ body {
   border-radius: 10px;
 }
 
+.ant-tag.ant-tag-blue,
+.ant-tag.ant-tag-green,
+.ant-tag.ant-tag-orange,
+.ant-tag.ant-tag-red,
+.ant-tag.ant-tag-cyan,
+.ant-tag.ant-tag-gold,
+.ant-tag.ant-tag-purple,
+.ant-tag.ant-tag-magenta {
+  border-color: transparent !important;
+}
+
+.ant-tag.ant-tag-blue {
+  background: #e4f2fb !important;
+  color: #1d5f8a !important;
+}
+
+.ant-tag.ant-tag-green {
+  background: #e5f6ec !important;
+  color: #1b6b3a !important;
+}
+
+.ant-tag.ant-tag-orange {
+  background: #fff4d6 !important;
+  color: #8a5a00 !important;
+}
+
+.ant-tag.ant-tag-red {
+  background: #fdecec !important;
+  color: #9f2d2d !important;
+}
+
+.ant-tag.ant-tag-cyan {
+  background: #e6f7f5 !important;
+  color: #0f766e !important;
+}
+
+.ant-tag.ant-tag-gold {
+  background: #fff6e0 !important;
+  color: #8a5a00 !important;
+}
+
+.ant-tag.ant-tag-purple {
+  background: #f3eef8 !important;
+  color: #6b4c9a !important;
+}
+
+.ant-tag.ant-tag-magenta {
+  background: #fdecf4 !important;
+  color: #9d3b6a !important;
+}
+
 #cc-main {
   --cc-font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --cc-modal-border-radius: 10px;
   --cc-btn-border-radius: 10px;
-  --cc-btn-primary-bg: #177ddc;
-  --cc-btn-primary-border-color: #177ddc;
-  --cc-btn-primary-hover-bg: #4096ff;
-  --cc-btn-primary-hover-border-color: #4096ff;
+  --cc-btn-primary-bg: #0f766e;
+  --cc-btn-primary-border-color: #0f766e;
+  --cc-btn-primary-hover-bg: #14988c;
+  --cc-btn-primary-hover-border-color: #14988c;
   --cc-btn-secondary-bg: #fff;
-  --cc-btn-secondary-color: #374151;
-  --cc-btn-secondary-border-color: #d1d5db;
-  --cc-btn-secondary-hover-bg: #f3f4f6;
-  --cc-btn-secondary-hover-color: #111827;
-  --cc-btn-secondary-hover-border-color: #d1d5db;
-  --cc-toggle-on-bg: #177ddc;
-  --cc-link-color: #177ddc;
+  --cc-btn-secondary-color: #1c2b2a;
+  --cc-btn-secondary-border-color: #dce7e3;
+  --cc-btn-secondary-hover-bg: #e7f3f0;
+  --cc-btn-secondary-hover-color: #0f766e;
+  --cc-btn-secondary-hover-border-color: #dce7e3;
+  --cc-toggle-on-bg: #0f766e;
+  --cc-link-color: #0f766e;
 }
 
 @media (max-width: 768px) {

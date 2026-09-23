@@ -1,5 +1,6 @@
 import { Avatar, Button, Card, Progress, Space, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { portalPalette } from '../../../shared/theme/portalTheme';
 import type { SportDiscipline, TrackRow } from '../../../shared/types/tracks';
 
 type TracksTableProps = {
@@ -54,7 +55,7 @@ const trackColumns: ColumnsType<TrackRow> = [
       <Progress
         percent={load}
         size="small"
-        strokeColor={load > 80 ? '#fa8c16' : '#1677ff'}
+        strokeColor={load > 80 ? portalPalette.loadHigh : portalPalette.primary}
       />
     ),
   },

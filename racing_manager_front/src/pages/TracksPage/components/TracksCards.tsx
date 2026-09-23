@@ -57,7 +57,7 @@ export function TracksCards({ tracks }: TracksCardsProps) {
                     {sport}
                   </Tag>
                 ))}
-                <Tag color="geekblue-inverse">{track.distanceKm} км</Tag>
+                <Tag>{track.distanceKm} км</Tag>
               </Space>
             </Space>
           </Card>

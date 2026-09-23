@@ -1,4 +1,5 @@
 import { Carousel, Typography } from 'antd';
+import { portalPalette } from '../../theme/portalTheme';
 import type { MainSlide } from '../../types/main';
 
 type PromoSliderProps = {
@@ -13,13 +14,13 @@ export function PromoSlider({ slides }: PromoSliderProps) {
           <div
             className="hero-slide"
             style={{
-              backgroundImage: `linear-gradient(120deg, rgba(8, 21, 45, 0.85), rgba(24, 144, 255, 0.35)), url(${slide.image})`,
+              backgroundImage: `linear-gradient(120deg, ${portalPalette.heroWashStart}, ${portalPalette.heroWashEnd}), url(${slide.image})`,
             }}
           >
-            <Typography.Title level={2} style={{ color: '#fff', marginBottom: 8 }}>
+            <Typography.Title level={2} style={{ color: portalPalette.heroText, marginBottom: 8 }}>
               {slide.title}
             </Typography.Title>
-            <Typography.Paragraph style={{ color: 'rgba(255,255,255,0.85)', margin: 0 }}>
+            <Typography.Paragraph style={{ color: portalPalette.heroTextMuted, margin: 0 }}>
               {slide.subtitle}
             </Typography.Paragraph>
           </div>

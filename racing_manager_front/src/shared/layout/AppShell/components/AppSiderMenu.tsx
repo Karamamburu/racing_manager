@@ -58,9 +58,9 @@ export function AppSiderMenu() {
   const location = useLocation();
 
   return (
-    <Sider breakpoint="lg" collapsedWidth="0" width={250}>
+    <Sider breakpoint="lg" collapsedWidth="0" theme="light" width={250}>
       <div className="app-logo">Racing Manager</div>
-      <Menu theme="dark" mode="inline" selectedKeys={[selectedMenuKey(location.pathname)]} items={navItems} />
+      <Menu theme="light" mode="inline" selectedKeys={[selectedMenuKey(location.pathname)]} items={navItems} />
     </Sider>
   );
 }
