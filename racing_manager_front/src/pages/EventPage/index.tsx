@@ -5,7 +5,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { canChangeEventStatus, canCreateEvents, canManageCreatedEvent, isAdministrator } from '../../features/auth/canCreateEvents';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
-import type { ClassCompetitionView } from '../../features/class-competitions/types';
+import type {
+  ClassCompetitionStage,
+  ClassCompetitionView,
+} from '../../features/class-competitions/types';
 import {
   classCompetitionsQueryKey,
   useClassCompetitionsQuery,
@@ -106,6 +109,36 @@ function participantLapTime(participant: EventParticipant, lapNumber: number): n
   return (participant.laps ?? []).find((lap) => lap.lapNumber === lapNumber)?.timeMilliseconds ?? null;
 }
 
+const REACHED_STAGE_LABELS: Record<string, string> = {
+  PROLOGUE: 'Пролог',
+  EIGHTHFINAL: '1/8',
+  QUARTERFINAL: '1/4',
+  SEMIFINAL: '1/2',
+  FINAL: 'Финал',
+  FINAL_A: 'Финал A',
+  FINAL_B: 'Финал B',
+};
+
+function reachedStageLabel(stage: ClassCompetitionStage): string {
+  return REACHED_STAGE_LABELS[stage.kind] ?? stage.label ?? stage.stageId;
+}
+
+function lastReachedStage(
+  competition: ClassCompetitionView,
+  registrationId: string,
+): { label: string; laps: EventParticipant['laps'] } | null {
+  let reached: { label: string; laps: EventParticipant['laps'] } | null = null;
+  for (const stage of competition.stages) {
+    if (stage.status === 'PENDING') continue;
+    for (const heat of stage.heats) {
+      const slot = heat.slots.find((item) => item.registrationId === registrationId);
+      if (!slot) continue;
+      reached = { label: reachedStageLabel(stage), laps: slot.laps };
+    }
+  }
+  return reached;
+}
+
 function competitionForRows(
   rows: EventParticipant[],
   competitions: ClassCompetitionView[],
@@ -121,10 +154,12 @@ function competitionForRows(
   );
 }
 
+type ProtocolParticipant = EventParticipant & { reachedStage?: string | null };
+
 function rowsWithClassification(
   rows: EventParticipant[],
   competition: ClassCompetitionView | null,
-): EventParticipant[] {
+): ProtocolParticipant[] {
   if (!competition || competition.status !== 'DONE') return rows;
   const placed = new Map(
     competition.classification.map((item) => [item.registrationId, item]),
@@ -132,11 +167,17 @@ function rowsWithClassification(
   return rows
     .map((row) => {
       const result = placed.get(row.id);
-      if (!result) return row;
+      const reached = lastReachedStage(competition, row.id);
       return {
         ...row,
-        place: result.place,
-        finishTimeMs: result.timeMilliseconds ?? row.finishTimeMs,
+        ...(result
+          ? {
+              place: result.place,
+              finishTimeMs: result.timeMilliseconds ?? row.finishTimeMs,
+            }
+          : {}),
+        laps: reached?.laps ?? [],
+        reachedStage: reached?.label ?? null,
       };
     })
     .sort((a, b) => (a.place ?? Number.POSITIVE_INFINITY) - (b.place ?? Number.POSITIVE_INFINITY));
@@ -225,6 +266,7 @@ function groupParticipants(
 
 function getParticipantColumns(options: {
   eventLaps: EventLap[];
+  showReachedStage?: boolean;
   canAssignNumbers: boolean;
   canAssignResults: boolean;
   canChangeStatus: boolean;
@@ -240,7 +282,7 @@ function getParticipantColumns(options: {
     timeMilliseconds: number,
   ) => Promise<void>;
   onAssignResult: (participant: EventParticipant, timeMilliseconds: number) => Promise<void>;
-}): ColumnsType<EventParticipant> {
+}): ColumnsType<ProtocolParticipant> {
   const recordsByLaps = options.eventLaps.length > 0;
   const lapColumns: ColumnsType<EventParticipant> = options.eventLaps.map((lap) => ({
     title: (
@@ -293,6 +335,16 @@ function getParticipantColumns(options: {
         />
       ),
     },
+    ...(options.showReachedStage
+      ? [
+          {
+            title: 'Этап гонки',
+            key: 'reachedStage',
+            width: 120,
+            render: (_value: unknown, record: ProtocolParticipant) => record.reachedStage ?? '—',
+          },
+        ]
+      : []),
     ...lapColumns,
     {
       title: recordsByLaps ? (
@@ -868,6 +920,7 @@ export function EventPage() {
                       const readyToFinish = categoryReadyToFinish(section.rows);
                       const lockedColumns = getParticipantColumns({
                         eventLaps: event.laps ?? [],
+                        showReachedStage: competition != null,
                         canAssignNumbers: competition ? false : canAssignNumbers,
                         canAssignResults: false,
                         canChangeStatus: competition ? canChangeRegistrationStatus : false,
