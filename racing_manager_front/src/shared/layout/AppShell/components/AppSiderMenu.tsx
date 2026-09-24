@@ -14,6 +14,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { authService } from '../../../../features/auth/authService';
 import { openCookiePreferences } from '../../../cookieConsent';
+import logoUrl from '../../../assets/rm_logo.png';
+import logoMinUrl from '../../../assets/rm_logo_min.png';
 
 const { Sider } = Layout;
 
@@ -124,7 +126,17 @@ export function AppSiderMenu() {
         }}
       >
         <div className="app-logo" title="Все на старт">
-          {collapsed ? 'Старт' : 'Все на старт'}
+          <img
+            src={logoMinUrl}
+            alt=""
+            className="app-logo__image app-logo__image--min"
+            aria-hidden="true"
+          />
+          <img
+            src={logoUrl}
+            alt="Все на старт"
+            className="app-logo__image app-logo__image--full"
+          />
         </div>
         <div className="app-sider-nav">
           <Menu

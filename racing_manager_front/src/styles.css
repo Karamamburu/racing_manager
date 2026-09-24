@@ -10,15 +10,44 @@ body {
 }
 
 .app-logo {
+  position: relative;
   height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   overflow: hidden;
-  color: #0f766e;
-  font-size: 18px;
-  font-weight: 700;
-  white-space: nowrap;
+  flex-shrink: 0;
+  padding: 8px 14px;
+}
+
+.app-logo__image {
+  grid-area: 1 / 1;
+  display: block;
+  height: 48px;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.app-logo__image--min {
+  opacity: 0;
+}
+
+.app-logo__image--full {
+  opacity: 1;
+}
+
+.ant-layout-sider-collapsed .app-logo {
+  padding: 8px 6px;
+}
+
+.ant-layout-sider-collapsed .app-logo__image--min {
+  opacity: 1;
+}
+
+.ant-layout-sider-collapsed .app-logo__image--full {
+  opacity: 0;
 }
 
 .app-sider-slot {
@@ -38,6 +67,7 @@ body {
   height: 100vh;
   overflow: hidden;
   z-index: 20;
+  transition: all 0.18s ease !important;
 }
 
 .app-sider-slot .ant-layout-sider-light {
@@ -50,6 +80,20 @@ body {
     8px 0 24px rgba(28, 43, 42, 0.08);
 }
 
+.app-sider .ant-menu-item,
+.app-sider .ant-menu-submenu-title {
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    padding 0.12s ease !important;
+}
+
+.app-sider .ant-menu-item .ant-menu-title-content,
+.app-sider .ant-menu-item-icon + span,
+.app-sider .ant-menu-item .anticon + span {
+  transition: opacity 0.1s ease, color 0.15s ease !important;
+}
+
 .app-sider .ant-menu-inline-collapsed > .ant-menu-item {
   position: relative;
 }
@@ -58,6 +102,9 @@ body {
   position: absolute !important;
   inset: 0;
   width: auto !important;
+  opacity: 0 !important;
+  color: transparent !important;
+  transition: opacity 0.06s ease !important;
 }
 
 .app-sider .ant-menu-inline-collapsed > .ant-menu-item > .ant-menu-title-content a {
@@ -101,11 +148,19 @@ body {
   line-height: 22px;
   cursor: pointer;
   text-align: left;
+  transition: padding 0.12s ease, gap 0.1s ease, background 0.15s ease, color 0.15s ease;
 }
 
 .app-sider-logout:hover {
   background: #e7f3f0;
   color: #0f766e;
+}
+
+.app-sider-logout span {
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity 0.06s ease;
 }
 
 .ant-layout-sider-collapsed .app-sider-logout {
@@ -118,6 +173,7 @@ body {
   position: absolute;
   width: 1px;
   height: 1px;
+  opacity: 0;
   overflow: hidden;
   clip: rect(0 0 0 0);
 }
