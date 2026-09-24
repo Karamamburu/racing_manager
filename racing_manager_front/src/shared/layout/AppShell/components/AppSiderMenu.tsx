@@ -125,7 +125,7 @@ export function AppSiderMenu() {
           collapse();
         }}
       >
-        <div className="app-logo" title="Все на старт">
+        <Link to="/" className="app-logo" title="Все на старт" aria-label="На главную">
           <img
             src={logoMinUrl}
             alt=""
@@ -137,7 +137,7 @@ export function AppSiderMenu() {
             alt="Все на старт"
             className="app-logo__image app-logo__image--full"
           />
-        </div>
+        </Link>
         <div className="app-sider-nav">
           <Menu
             theme="light"

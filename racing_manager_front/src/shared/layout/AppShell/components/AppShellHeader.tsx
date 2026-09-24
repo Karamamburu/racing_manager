@@ -1,6 +1,7 @@
 import { UserOutlined } from '@ant-design/icons';
 import { Avatar, Button, Layout, Space, Typography } from 'antd';
 import type { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { authService } from '../../../../features/auth/authService';
 import { useSessionQuery } from '../../../../features/auth/useSessionQuery';
 
@@ -24,19 +25,19 @@ export function AppShellHeader({ title, subtitle, extra }: AppShellHeaderProps) 
 
   return (
     <Header className="app-header">
-      <Space size="middle" align="center">
-        <Avatar icon={<UserOutlined />} />
-        <div>
-          <Typography.Title level={5} style={{ margin: 0 }}>
-            {title}
-          </Typography.Title>
-          <Typography.Text type="secondary">{subtitle}</Typography.Text>
-        </div>
-      </Space>
+      <div>
+        <Typography.Title level={5} style={{ margin: 0 }}>
+          {title}
+        </Typography.Title>
+        <Typography.Text type="secondary">{subtitle}</Typography.Text>
+      </div>
 
-      <Space>
+      <Space size="middle" align="center">
         {extra}
         {authAction}
+        <Link to="/cabinet" className="app-header-avatar" title="Личный кабинет" aria-label="Личный кабинет">
+          <Avatar icon={<UserOutlined />} />
+        </Link>
       </Space>
     </Header>
   );
