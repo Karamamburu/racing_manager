@@ -1,4 +1,4 @@
-import { InputNumber } from 'antd';
+import { InputNumber, theme } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { errorBubbleText, FieldErrorBubble } from './FieldErrorBubble';
 
@@ -15,6 +15,7 @@ export function StartNumberCell({
   saving,
   onSave,
 }: StartNumberCellProps) {
+  const { token } = theme.useToken();
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<number | null>(value);
@@ -35,7 +36,7 @@ export function StartNumberCell({
           padding: 0,
           border: 'none',
           background: 'none',
-          color: '#177ddc',
+          color: token.colorPrimary,
           cursor: 'pointer',
           textDecoration: 'underline',
           textUnderlineOffset: 2,

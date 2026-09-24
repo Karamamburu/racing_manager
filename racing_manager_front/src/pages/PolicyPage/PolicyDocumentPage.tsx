@@ -33,7 +33,7 @@ export function PolicyDocumentPage() {
   }
 
   return (
-    <AppShell title={document.title} subtitle="Правовой документ портала Racing Manager">
+    <AppShell title={document.title} subtitle="Правовой документ портала «Все на старт»">
       <Card>
         {document.slug === 'cookies' ? <CookiesPolicyContent /> : null}
         {document.slug === 'privacy' ? <PrivacyPolicyContent /> : null}

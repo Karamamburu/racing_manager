@@ -1,5 +1,4 @@
 import {
-  Alert,
   Button,
   Card,
   Descriptions,
@@ -115,12 +114,6 @@ export function CabinetPage() {
       }
     >
       <Space direction="vertical" size={24} style={{ width: '100%' }}>
-        <Alert
-          type="info"
-          showIcon
-          message="Сессия активна"
-          description="Профиль загружен из endpoint /personal на основе текущей серверной сессии."
-        />
 
         <CabinetStats
           stats={

@@ -14,7 +14,7 @@ type AppShellProps = PropsWithChildren<{
 
 export function AppShell({ title, subtitle, extra, children }: AppShellProps) {
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout hasSider style={{ minHeight: '100vh' }}>
       <AppSiderMenu />
       <Layout>
         <AppShellHeader title={title} subtitle={subtitle} extra={extra} />

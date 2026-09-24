@@ -1,7 +1,7 @@
 :root {
   font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  color: #111827;
-  background: #f3f5f8;
+  color: #1c2b2a;
+  background: #f3f7f5;
 }
 
 body {
@@ -10,13 +10,175 @@ body {
 }
 
 .app-logo {
+  position: relative;
   height: 64px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  padding: 8px 14px;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.app-logo__image {
+  grid-area: 1 / 1;
+  display: block;
+  height: 48px;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.app-logo__image--min {
+  opacity: 0;
+}
+
+.app-logo__image--full {
+  opacity: 1;
+}
+
+.ant-layout-sider-collapsed .app-logo {
+  padding: 8px 6px;
+}
+
+.ant-layout-sider-collapsed .app-logo__image--min {
+  opacity: 1;
+}
+
+.ant-layout-sider-collapsed .app-logo__image--full {
+  opacity: 0;
+}
+
+.app-sider-slot {
+  position: relative;
+  flex: 0 0 80px;
+  width: 80px;
+  min-width: 80px;
+  max-width: 80px;
+  z-index: 20;
+}
+
+.app-sider-slot .app-sider {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  height: 100vh;
+  overflow: hidden;
+  z-index: 20;
+  transition: all 0.18s ease !important;
+}
+
+.app-sider-slot .ant-layout-sider-light {
+  box-shadow: inset -1px 0 0 #dce7e3;
+}
+
+.app-sider-slot .ant-layout-sider-light:not(.ant-layout-sider-collapsed) {
+  box-shadow:
+    inset -1px 0 0 #dce7e3,
+    8px 0 24px rgba(28, 43, 42, 0.08);
+}
+
+.app-sider .ant-menu-item,
+.app-sider .ant-menu-submenu-title {
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    padding 0.12s ease !important;
+}
+
+.app-sider .ant-menu-item .ant-menu-title-content,
+.app-sider .ant-menu-item-icon + span,
+.app-sider .ant-menu-item .anticon + span {
+  transition: opacity 0.1s ease, color 0.15s ease !important;
+}
+
+.app-sider .ant-menu-inline-collapsed > .ant-menu-item {
+  position: relative;
+}
+
+.app-sider .ant-menu-inline-collapsed > .ant-menu-item > .ant-menu-title-content {
+  position: absolute !important;
+  inset: 0;
+  width: auto !important;
+  opacity: 0 !important;
+  color: transparent !important;
+  transition: opacity 0.06s ease !important;
+}
+
+.app-sider .ant-menu-inline-collapsed > .ant-menu-item > .ant-menu-title-content a {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.app-sider .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-sider-nav {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.app-sider-footer {
+  margin-top: auto;
+  border-top: 1px solid #dce7e3;
+  padding-bottom: 8px;
+}
+
+.app-sider-logout {
+  position: relative;
   display: flex;
   align-items: center;
+  gap: 10px;
+  width: calc(100% - 16px);
+  margin: 0 8px;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #3d524f;
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  cursor: pointer;
+  text-align: left;
+  transition: padding 0.12s ease, gap 0.1s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.app-sider-logout:hover {
+  background: #e7f3f0;
+  color: #0f766e;
+}
+
+.app-sider-logout span {
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity 0.06s ease;
+}
+
+.ant-layout-sider-collapsed .app-sider-logout {
   justify-content: center;
-  color: #fff;
-  font-size: 18px;
-  font-weight: 700;
+  gap: 0;
+  padding-inline: 0;
+}
+
+.ant-layout-sider-collapsed .app-sider-logout span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
 }
 
 .app-header {
@@ -25,8 +187,19 @@ body {
   align-items: center;
   background: #fff;
   padding: 0 24px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid #dce7e3;
   line-height: 0;
+}
+
+.app-header-avatar {
+  display: inline-flex;
+  line-height: 0;
+  cursor: pointer;
+}
+
+.app-header-avatar:hover .ant-avatar {
+  background: #d5f0ea;
+  color: #0f766e;
 }
 
 .app-content {
@@ -76,7 +249,7 @@ body {
 }
 
 .event-calendar-item:hover {
-  color: #177ddc;
+  color: #0f766e;
 }
 
 .event-track-map {
@@ -131,7 +304,7 @@ body {
   display: block;
   overflow: hidden;
   border-radius: 12px;
-  background: #e8edf3;
+  background: #e7f3f0;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
@@ -170,8 +343,8 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: 10px;
-  background: #eef3f8;
-  color: #177ddc;
+  background: #e7f3f0;
+  color: #0f766e;
   font-size: 20px;
 }
 
@@ -232,7 +405,7 @@ body {
 
 .news-article-body td,
 .news-article-body th {
-  border: 1px solid #e5e7eb;
+  border: 1px solid #dce7e3;
   padding: 8px;
 }
 
@@ -246,22 +419,73 @@ body {
   border-radius: 10px;
 }
 
+.ant-tag.ant-tag-blue,
+.ant-tag.ant-tag-green,
+.ant-tag.ant-tag-orange,
+.ant-tag.ant-tag-red,
+.ant-tag.ant-tag-cyan,
+.ant-tag.ant-tag-gold,
+.ant-tag.ant-tag-purple,
+.ant-tag.ant-tag-magenta {
+  border-color: transparent !important;
+}
+
+.ant-tag.ant-tag-blue {
+  background: #e4f2fb !important;
+  color: #1d5f8a !important;
+}
+
+.ant-tag.ant-tag-green {
+  background: #e5f6ec !important;
+  color: #1b6b3a !important;
+}
+
+.ant-tag.ant-tag-orange {
+  background: #fff4d6 !important;
+  color: #8a5a00 !important;
+}
+
+.ant-tag.ant-tag-red {
+  background: #fdecec !important;
+  color: #9f2d2d !important;
+}
+
+.ant-tag.ant-tag-cyan {
+  background: #e6f7f5 !important;
+  color: #0f766e !important;
+}
+
+.ant-tag.ant-tag-gold {
+  background: #fff6e0 !important;
+  color: #8a5a00 !important;
+}
+
+.ant-tag.ant-tag-purple {
+  background: #f3eef8 !important;
+  color: #6b4c9a !important;
+}
+
+.ant-tag.ant-tag-magenta {
+  background: #fdecf4 !important;
+  color: #9d3b6a !important;
+}
+
 #cc-main {
   --cc-font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --cc-modal-border-radius: 10px;
   --cc-btn-border-radius: 10px;
-  --cc-btn-primary-bg: #177ddc;
-  --cc-btn-primary-border-color: #177ddc;
-  --cc-btn-primary-hover-bg: #4096ff;
-  --cc-btn-primary-hover-border-color: #4096ff;
+  --cc-btn-primary-bg: #0f766e;
+  --cc-btn-primary-border-color: #0f766e;
+  --cc-btn-primary-hover-bg: #14988c;
+  --cc-btn-primary-hover-border-color: #14988c;
   --cc-btn-secondary-bg: #fff;
-  --cc-btn-secondary-color: #374151;
-  --cc-btn-secondary-border-color: #d1d5db;
-  --cc-btn-secondary-hover-bg: #f3f4f6;
-  --cc-btn-secondary-hover-color: #111827;
-  --cc-btn-secondary-hover-border-color: #d1d5db;
-  --cc-toggle-on-bg: #177ddc;
-  --cc-link-color: #177ddc;
+  --cc-btn-secondary-color: #1c2b2a;
+  --cc-btn-secondary-border-color: #dce7e3;
+  --cc-btn-secondary-hover-bg: #e7f3f0;
+  --cc-btn-secondary-hover-color: #0f766e;
+  --cc-btn-secondary-hover-border-color: #dce7e3;
+  --cc-toggle-on-bg: #0f766e;
+  --cc-link-color: #0f766e;
 }
 
 @media (max-width: 768px) {
