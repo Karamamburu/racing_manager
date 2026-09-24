@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -324,6 +325,7 @@ function mapParticipantLaps(
 
 @Injectable()
 export class EventsService {
+  private readonly logger = new Logger(EventsService.name);
   private readonly store: EventsStore;
 
   constructor(
@@ -392,6 +394,12 @@ export class EventsService {
       },
     });
 
+    this.logger.log({
+      event: 'event.created',
+      eventId: created.id,
+      userSub: authentikId,
+      status: created.status,
+    });
     return this.toResponse(
       created,
       mapEventFormats(created.eventFormats),
@@ -805,6 +813,11 @@ export class EventsService {
           ]),
     ]);
 
+    this.logger.log({
+      event: 'event.updated',
+      eventId,
+      userSub: authentikId,
+    });
     return this.findById(eventId);
   }
 
@@ -847,6 +860,13 @@ export class EventsService {
       });
     }
 
+    this.logger.log({
+      event: 'event.status_changed',
+      eventId,
+      fromStatus: event.status,
+      toStatus: status,
+      userSub: authentikId,
+    });
     return this.findById(eventId, { syncStatuses: false });
   }
 
@@ -856,6 +876,11 @@ export class EventsService {
   ): Promise<EventDetails> {
     await this.assertCanManageCreatedEvent(authentikId, eventId);
     await this.applyCancel(eventId);
+    this.logger.log({
+      event: 'event.cancelled',
+      eventId,
+      userSub: authentikId,
+    });
     return this.findById(eventId, { syncStatuses: false });
   }
 

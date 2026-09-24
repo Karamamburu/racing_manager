@@ -1,4 +1,4 @@
-import { Controller, Get, Req, Res } from '@nestjs/common';
+import { Controller, Get, Logger, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { Session } from 'express-session';
 import { UsersService } from '../users/users.service';
@@ -20,6 +20,8 @@ function clearLocalhostCookie(
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private readonly authService: AuthService,
     private readonly usersService: UsersService,
@@ -71,6 +73,7 @@ export class AuthController {
   @Get('logout')
   logout(@Req() req: Request, @Res() res: Response) {
     const postLogoutRedirectUri = this.authService.getPostLogoutRedirectUri();
+    const userSub = req.session?.userSub;
 
     const finish = () => {
       clearLocalhostCookie(res, 'connect.sid', true);
@@ -80,11 +83,13 @@ export class AuthController {
 
     const session = req.session as Session | undefined;
     if (!session) {
+      this.logger.log({ event: 'auth.logout', userSub });
       finish();
       return res.redirect(postLogoutRedirectUri);
     }
 
     session.destroy(() => {
+      this.logger.log({ event: 'auth.logout', userSub });
       finish();
       return res.redirect(postLogoutRedirectUri);
     });

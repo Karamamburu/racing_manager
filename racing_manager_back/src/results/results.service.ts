@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ADMIN_ROLE_CODES } from '../auth/role-codes';
@@ -58,6 +59,8 @@ type RegistrationForResult = {
 
 @Injectable()
 export class ResultsService {
+  private readonly logger = new Logger(ResultsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly rolesService: RolesService,
@@ -118,7 +121,15 @@ export class ResultsService {
           'This event records results by lap. Send laps instead of timeMilliseconds.',
         );
       }
-      return this.upsertLapTimes(registration.id, event.laps, parsed.laps);
+      const saved = await this.upsertLapTimes(registration.id, event.laps, parsed.laps);
+      this.logger.log({
+        event: 'result.upserted',
+        eventId,
+        registrationId,
+        mode: 'laps',
+        userSub: authentikId,
+      });
+      return saved;
     }
 
     if (parsed.mode !== 'total') {
@@ -136,6 +147,14 @@ export class ResultsService {
       update: { timeMilliseconds: parsed.timeMilliseconds },
     });
 
+    this.logger.log({
+      event: 'result.upserted',
+      eventId,
+      registrationId,
+      mode: 'total',
+      timeMilliseconds: parsed.timeMilliseconds,
+      userSub: authentikId,
+    });
     return this.toResponse(saved, []);
   }
 

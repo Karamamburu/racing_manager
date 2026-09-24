@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Client, Issuer, TokenSet, generators } from 'openid-client';
 import type { Request } from 'express';
@@ -38,6 +38,7 @@ type SessionUser = {
 
 @Injectable()
 export class AuthService implements OnModuleInit {
+  private readonly logger = new Logger(AuthService.name);
   private client: Client;
 
   constructor(
@@ -165,6 +166,14 @@ export class AuthService implements OnModuleInit {
     }
 
     delete req.session.oidc;
+
+    if (user) {
+      this.logger.log({
+        event: 'auth.login_success',
+        userSub: user.sub,
+        registrationStatus,
+      });
+    }
 
     return { tokenSet, user, registrationStatus };
   }

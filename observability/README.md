@@ -59,3 +59,27 @@ LOG_FILE_PATH=../observability/logs/competition_managment_service.log
 {job="docker"}
 {job="nest"}
 ```
+
+## Business events
+
+Structured Nest logs include an `event` field. Parse JSON in Explore:
+
+```logql
+{service="racing_manager_back"} | json | event=~"registration.*"
+{service="racing_manager_back"} | json | event="auth.login_success"
+{service="racing_manager_back"} | json | event="event.status_changed"
+{service="racing_manager_back"} | json | event="cms.request_failed"
+{service="racing_manager_back"} | json | event=~"class_competition.*"
+{service="competition_managment_service"} | json | event="domain_error"
+{service="competition_managment_service"} | json | event=~"stage\\..*"
+{service="competition_managment_service"} | json | event=~"competition\\..*"
+```
+
+Notable `event` values:
+
+| Service | Events |
+|---------|--------|
+| back | `auth.login_success`, `auth.logout`, `registration.created` / `.cancelled` / `.status_changed`, `event.created` / `.updated` / `.status_changed` / `.cancelled` / `.status_auto_synced`, `class_competition.*`, `cms.request_failed`, `result.upserted` |
+| CMS | `domain_error`, `competition.created` / `.plan_updated`, `stage.seeded` / `.results_recorded` / `.completed` / `.advanced` |
+
+Auth HTTP routes (`/auth/*`) are **not** access-logged — only the business events above go to Loki. Successful GETs stay at `debug` on the console and are omitted from the log file (default `LOG_FILE_LEVEL=info`).

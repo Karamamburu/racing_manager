@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma';
 import { advanceStage } from '../domain/advance-stage';
 import { buildStartLists } from '../domain/build-start-lists';
@@ -103,6 +103,8 @@ export type UpdatePlanInput = {
 
 @Injectable()
 export class CompetitionsService {
+  private readonly logger = new Logger(CompetitionsService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async create(input: CreateCompetitionInput) {
@@ -152,6 +154,12 @@ export class CompetitionsService {
       ),
     });
 
+    this.logger.log({
+      event: 'competition.created',
+      competitionId: created.id,
+      participantCount: participants.length,
+      formatId: resolved.formatId,
+    });
     return this.getById(created.id);
   }
 
@@ -262,6 +270,11 @@ export class CompetitionsService {
     } else {
       await this.replaceDraftFormat(competition, nextFormat);
     }
+    this.logger.log({
+      event: 'competition.plan_updated',
+      competitionId: competition.id,
+      started,
+    });
     return this.getById(competition.id);
   }
 
@@ -313,6 +326,13 @@ export class CompetitionsService {
       }
     });
 
+    this.logger.log({
+      event: 'stage.seeded',
+      competitionId: competition.id,
+      stageId,
+      heatCount: startLists.heats.length,
+      participantCount: entries.length,
+    });
     return this.getById(competition.id);
   }
 
@@ -424,6 +444,12 @@ export class CompetitionsService {
       }
     });
 
+    this.logger.log({
+      event: 'stage.results_recorded',
+      competitionId: competition.id,
+      stageId,
+      heatCount: heatResults.length,
+    });
     return this.getById(competition.id);
   }
 
@@ -487,6 +513,12 @@ export class CompetitionsService {
       }
     });
 
+    this.logger.log({
+      event: 'stage.completed',
+      competitionId: competition.id,
+      stageId,
+      rankingCount: ranking.length,
+    });
     return this.getById(competition.id);
   }
 
@@ -675,6 +707,12 @@ export class CompetitionsService {
       }
     });
 
+    this.logger.log({
+      event: 'stage.advanced',
+      competitionId: competition.id,
+      stageId,
+      routeCount: plan.routes.length,
+    });
     return this.getById(competition.id);
   }
 

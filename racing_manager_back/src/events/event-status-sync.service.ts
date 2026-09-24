@@ -73,11 +73,23 @@ export class EventStatusSyncService implements OnModuleInit, OnModuleDestroy {
             await freezeEventPlaces(tx, id);
           });
         }
+        this.logger.log({
+          event: 'event.status_auto_synced',
+          toStatus: EventStatusCode.DONE,
+          eventIds: readyIds,
+          count: readyIds.length,
+        });
       }
       if (inProgressIds.length > 0) {
         await this.prisma.event.updateMany({
           where: { id: { in: inProgressIds } },
           data: { status: EventStatusCode.IN_PROGRESS },
+        });
+        this.logger.log({
+          event: 'event.status_auto_synced',
+          toStatus: EventStatusCode.IN_PROGRESS,
+          eventIds: inProgressIds,
+          count: inProgressIds.length,
         });
       }
     } catch (error) {

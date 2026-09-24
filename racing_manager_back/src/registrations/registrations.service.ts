@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -148,6 +149,7 @@ function isUniqueViolation(error: unknown): boolean {
 
 @Injectable()
 export class RegistrationsService {
+  private readonly logger = new Logger(RegistrationsService.name);
   private readonly store: RegistrationsStore;
 
   constructor(
@@ -205,6 +207,13 @@ export class RegistrationsService {
             registeredAt: new Date(),
           },
         });
+        this.logger.log({
+          event: 'registration.created',
+          eventId,
+          registrationId: restored.id,
+          userId: actor.id,
+          restored: true,
+        });
         return this.toResponse(restored);
       }
     } else {
@@ -222,6 +231,12 @@ export class RegistrationsService {
           ...payload,
           status: RegistrationStatusCode.REGISTERED,
         },
+      });
+      this.logger.log({
+        event: 'registration.created',
+        eventId,
+        registrationId: created.id,
+        userId: actor?.id ?? null,
       });
       return this.toResponse(created);
     } catch (error) {
@@ -335,6 +350,13 @@ export class RegistrationsService {
         startNumber: null,
       },
     });
+    this.logger.log({
+      event: 'registration.cancelled',
+      eventId,
+      registrationId: withdrawn.id,
+      userId: actor.id,
+      userSub: authentikId,
+    });
     return this.toResponse(withdrawn);
   }
 
@@ -427,12 +449,28 @@ export class RegistrationsService {
           startNumber: null,
         },
       });
+      this.logger.log({
+        event: 'registration.status_changed',
+        eventId,
+        registrationId: cancelled.id,
+        fromStatus: existing.status,
+        toStatus: status,
+        userSub: authentikId,
+      });
       return this.toResponse(cancelled);
     }
 
     const updated = await this.store.registration.update({
       where: { id: existing.id },
       data: { status },
+    });
+    this.logger.log({
+      event: 'registration.status_changed',
+      eventId,
+      registrationId: updated.id,
+      fromStatus: existing.status,
+      toStatus: status,
+      userSub: authentikId,
     });
     return this.toResponse(updated);
   }
