@@ -1,0 +1,71 @@
+// Discover Docker containers and keep only racing_manager stack targets.
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "racing_manager_containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(racing_manager_db|racing_manager_minio|racing_manager_minio_init|competition_managment_db)"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "docker"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.racing_manager_containers.output
+  labels        = { "job" = "docker" }
+  relabel_rules = discovery.relabel.racing_manager_containers.rules
+  forward_to    = [loki.write.grafana_cloud.receiver]
+}
+
+// NestJS backends write JSON lines into ./logs (mounted at /var/log/racing-manager).
+local.file_match "nest_apps" {
+  path_targets = [
+    {
+      __path__ = "/var/log/racing-manager/racing_manager_back.log",
+      job      = "nest",
+      service  = "racing_manager_back",
+    },
+    {
+      __path__ = "/var/log/racing-manager/competition_managment_service.log",
+      job      = "nest",
+      service  = "competition_managment_service",
+    },
+  ]
+}
+
+loki.source.file "nest_apps" {
+  targets       = local.file_match.nest_apps.targets
+  forward_to    = [loki.write.grafana_cloud.receiver]
+  tail_from_end = true
+}
+
+loki.write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_LOKI_URL")
+
+    basic_auth {
+      username = sys.env("GRAFANA_LOKI_USERNAME")
+      password = sys.env("GRAFANA_LOKI_TOKEN")
+    }
+  }
+}
