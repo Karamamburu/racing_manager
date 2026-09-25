@@ -14,6 +14,7 @@ import { StorageModule } from './storage/storage.module';
 import { TracksModule } from './tracks/tracks.module';
 import { UsersModule } from './users/users.module';
 import { MainModule } from './main/main.module';
+import { HealthModule } from './health/health.module';
 import { buildPinoParams } from './logging/pino.config';
 
 @Module({
@@ -33,6 +34,7 @@ import { buildPinoParams } from './logging/pino.config';
     RegistrationsModule,
     ResultsModule,
     MainModule,
+    HealthModule,
   ],
 })
 export class AppModule {}
