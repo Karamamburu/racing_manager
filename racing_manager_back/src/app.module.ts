@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { LoggerModule } from 'nestjs-pino';
 import { AdminModule } from './admin/admin.module';
 import { ClassCompetitionsModule } from './class-competitions/class-competitions.module';
 import { AuthModule } from './auth/auth.module';
@@ -13,10 +14,12 @@ import { StorageModule } from './storage/storage.module';
 import { TracksModule } from './tracks/tracks.module';
 import { UsersModule } from './users/users.module';
 import { MainModule } from './main/main.module';
+import { buildPinoParams } from './logging/pino.config';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    LoggerModule.forRoot(buildPinoParams('racing_manager_back')),
     PrismaModule,
     StorageModule,
     UsersModule,

@@ -6,6 +6,7 @@ import {
   dueEventStatus,
 } from './event-status';
 import { freezeEventPlaces } from './freeze-event-places';
+import { logEvent } from '../logging/log-event';
 
 const SYNC_INTERVAL_MS = 60_000;
 
@@ -73,11 +74,23 @@ export class EventStatusSyncService implements OnModuleInit, OnModuleDestroy {
             await freezeEventPlaces(tx, id);
           });
         }
+        logEvent(this.logger, {
+          event: 'event.status_auto_synced',
+          toStatus: EventStatusCode.DONE,
+          eventIds: readyIds,
+          count: readyIds.length,
+        });
       }
       if (inProgressIds.length > 0) {
         await this.prisma.event.updateMany({
           where: { id: { in: inProgressIds } },
           data: { status: EventStatusCode.IN_PROGRESS },
+        });
+        logEvent(this.logger, {
+          event: 'event.status_auto_synced',
+          toStatus: EventStatusCode.IN_PROGRESS,
+          eventIds: inProgressIds,
+          count: inProgressIds.length,
         });
       }
     } catch (error) {

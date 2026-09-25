@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -32,6 +33,7 @@ import { parseFinishCategoryBody } from './parse-finish-category';
 import { categoryIsFinished } from './category-finish';
 import { parseEventDateRange } from './parse-event-date-range';
 import { parseUpdateEventStatusBody } from './parse-update-event-status';
+import { logEvent } from '../logging/log-event';
 import {
   hasStoredPlaces,
   isCompleteResult,
@@ -324,6 +326,7 @@ function mapParticipantLaps(
 
 @Injectable()
 export class EventsService {
+  private readonly logger = new Logger(EventsService.name);
   private readonly store: EventsStore;
 
   constructor(
@@ -392,6 +395,12 @@ export class EventsService {
       },
     });
 
+    logEvent(this.logger, {
+      event: 'event.created',
+      eventId: created.id,
+      userSub: authentikId,
+      status: created.status,
+    });
     return this.toResponse(
       created,
       mapEventFormats(created.eventFormats),
@@ -805,6 +814,11 @@ export class EventsService {
           ]),
     ]);
 
+    logEvent(this.logger, {
+      event: 'event.updated',
+      eventId,
+      userSub: authentikId,
+    });
     return this.findById(eventId);
   }
 
@@ -847,6 +861,13 @@ export class EventsService {
       });
     }
 
+    logEvent(this.logger, {
+      event: 'event.status_changed',
+      eventId,
+      fromStatus: event.status,
+      toStatus: status,
+      userSub: authentikId,
+    });
     return this.findById(eventId, { syncStatuses: false });
   }
 
@@ -856,6 +877,11 @@ export class EventsService {
   ): Promise<EventDetails> {
     await this.assertCanManageCreatedEvent(authentikId, eventId);
     await this.applyCancel(eventId);
+    logEvent(this.logger, {
+      event: 'event.cancelled',
+      eventId,
+      userSub: authentikId,
+    });
     return this.findById(eventId, { syncStatuses: false });
   }
 

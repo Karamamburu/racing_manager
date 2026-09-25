@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -36,6 +37,7 @@ import {
   parseStageQualificationBody,
 } from './parse-class-competition';
 import { buildAddStageOp } from './stage-templates';
+import { logEvent } from '../logging/log-event';
 
 type StoredEvent = {
   id: string;
@@ -152,6 +154,8 @@ export type ClassCompetitionView = {
 
 @Injectable()
 export class ClassCompetitionsService {
+  private readonly logger = new Logger(ClassCompetitionsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly rolesService: RolesService,
@@ -249,6 +253,15 @@ export class ClassCompetitionsService {
         },
         include: classCompetitionInclude,
       });
+      logEvent(this.logger, {
+        event: 'class_competition.created',
+        eventId,
+        classCompetitionId: created.id,
+        cmsCompetitionId: cms.id,
+        formatId: parsed.formatId,
+        gender: parsed.gender,
+        userSub: authentikId,
+      });
       return this.present(created, cms, registrations);
     } catch (error) {
       if (isUniqueViolation(error)) {
@@ -280,6 +293,13 @@ export class ClassCompetitionsService {
           },
     );
     await this.persistOutcome(row.id, next);
+    logEvent(this.logger, {
+      event: 'class_competition.plan_updated',
+      eventId,
+      classCompetitionId,
+      cmsCompetitionId: row.cmsCompetitionId,
+      userSub: authentikId,
+    });
     return this.present(await this.reload(row.id), next, await this.loadRegistrations(eventId));
   }
 
@@ -310,6 +330,14 @@ export class ClassCompetitionsService {
     }
     const next = await this.cms.seedStage(row.cmsCompetitionId, stageId);
     await this.persistOutcome(row.id, next);
+    logEvent(this.logger, {
+      event: 'class_competition.stage_seeded',
+      eventId,
+      classCompetitionId,
+      cmsCompetitionId: row.cmsCompetitionId,
+      stageId,
+      userSub: authentikId,
+    });
     return this.present(await this.reload(row.id), next, registrations);
   }
 
@@ -334,6 +362,15 @@ export class ClassCompetitionsService {
     );
     await this.moveHeatTimes(row.id, stageId, parsed.heats);
     await this.persistOutcome(row.id, next);
+    logEvent(this.logger, {
+      event: 'class_competition.heats_updated',
+      eventId,
+      classCompetitionId,
+      cmsCompetitionId: row.cmsCompetitionId,
+      stageId,
+      heatCount: parsed.heats.length,
+      userSub: authentikId,
+    });
     return this.present(await this.reload(row.id), next, await this.loadRegistrations(eventId));
   }
 
@@ -478,6 +515,15 @@ export class ClassCompetitionsService {
         data: { status: parsed.status },
       });
     }
+    logEvent(this.logger, {
+      event: 'class_competition.qualification_updated',
+      eventId,
+      classCompetitionId,
+      stageId,
+      registrationId: parsed.registrationId,
+      qualificationStatus: parsed.status,
+      userSub: authentikId,
+    });
     return this.present(
       await this.reload(row.id),
       cms,
