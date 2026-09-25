@@ -4,6 +4,7 @@ import type { Session } from 'express-session';
 import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
 import { RolesService } from './roles.service';
+import { logEvent } from '../logging/log-event';
 
 function clearLocalhostCookie(
   res: Response,
@@ -83,13 +84,13 @@ export class AuthController {
 
     const session = req.session as Session | undefined;
     if (!session) {
-      this.logger.log({ event: 'auth.logout', userSub });
+      logEvent(this.logger, { event: 'auth.logout', userSub });
       finish();
       return res.redirect(postLogoutRedirectUri);
     }
 
     session.destroy(() => {
-      this.logger.log({ event: 'auth.logout', userSub });
+      logEvent(this.logger, { event: 'auth.logout', userSub });
       finish();
       return res.redirect(postLogoutRedirectUri);
     });

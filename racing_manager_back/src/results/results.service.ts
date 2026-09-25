@@ -14,6 +14,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { categoryIsFinished, CATEGORY_FINISHED_MESSAGE } from '../events/category-finish';
 import { isRecordableRegistrationStatus } from '../registrations/registration-status';
 import { parseUpsertResultBody } from './parse-upsert-result';
+import { logEvent } from '../logging/log-event';
 
 export type ResultLapResponse = {
   lapNumber: number;
@@ -122,7 +123,7 @@ export class ResultsService {
         );
       }
       const saved = await this.upsertLapTimes(registration.id, event.laps, parsed.laps);
-      this.logger.log({
+      logEvent(this.logger, {
         event: 'result.upserted',
         eventId,
         registrationId,
@@ -147,7 +148,7 @@ export class ResultsService {
       update: { timeMilliseconds: parsed.timeMilliseconds },
     });
 
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'result.upserted',
       eventId,
       registrationId,

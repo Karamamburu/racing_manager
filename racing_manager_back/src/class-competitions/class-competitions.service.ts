@@ -37,6 +37,7 @@ import {
   parseStageQualificationBody,
 } from './parse-class-competition';
 import { buildAddStageOp } from './stage-templates';
+import { logEvent } from '../logging/log-event';
 
 type StoredEvent = {
   id: string;
@@ -252,7 +253,7 @@ export class ClassCompetitionsService {
         },
         include: classCompetitionInclude,
       });
-      this.logger.log({
+      logEvent(this.logger, {
         event: 'class_competition.created',
         eventId,
         classCompetitionId: created.id,
@@ -292,7 +293,7 @@ export class ClassCompetitionsService {
           },
     );
     await this.persistOutcome(row.id, next);
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'class_competition.plan_updated',
       eventId,
       classCompetitionId,
@@ -329,7 +330,7 @@ export class ClassCompetitionsService {
     }
     const next = await this.cms.seedStage(row.cmsCompetitionId, stageId);
     await this.persistOutcome(row.id, next);
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'class_competition.stage_seeded',
       eventId,
       classCompetitionId,
@@ -361,7 +362,7 @@ export class ClassCompetitionsService {
     );
     await this.moveHeatTimes(row.id, stageId, parsed.heats);
     await this.persistOutcome(row.id, next);
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'class_competition.heats_updated',
       eventId,
       classCompetitionId,
@@ -514,7 +515,7 @@ export class ClassCompetitionsService {
         data: { status: parsed.status },
       });
     }
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'class_competition.qualification_updated',
       eventId,
       classCompetitionId,

@@ -83,3 +83,7 @@ Notable `event` values:
 | CMS | `domain_error`, `competition.created` / `.plan_updated`, `stage.seeded` / `.results_recorded` / `.completed` / `.advanced` |
 
 Auth HTTP routes (`/auth/*`) are **not** access-logged — only the business events above go to Loki. Successful GETs stay at `debug` on the console and are omitted from the log file (default `LOG_FILE_LEVEL=info`).
+
+Pino writes `level` as a string (`info` / `warn` / `error`) so Grafana Explore shows the correct severity instead of **UNK**.
+
+Docker/Postgres logs go through Alloy `loki.process`: Postgres `LOG`/`WARNING`/`ERROR`/… are mapped to Grafana levels (`info`/`warn`/`error`/…).

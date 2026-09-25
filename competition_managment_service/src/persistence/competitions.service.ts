@@ -34,6 +34,7 @@ import {
 } from './mappers';
 import { PrismaService } from './prisma.service';
 import { sourceStageIds } from './stage-graph';
+import { logEvent } from '../logging/log-event';
 
 function advancementKept(
   stage: CompetitionFormat['stages'][number],
@@ -154,7 +155,7 @@ export class CompetitionsService {
       ),
     });
 
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'competition.created',
       competitionId: created.id,
       participantCount: participants.length,
@@ -270,7 +271,7 @@ export class CompetitionsService {
     } else {
       await this.replaceDraftFormat(competition, nextFormat);
     }
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'competition.plan_updated',
       competitionId: competition.id,
       started,
@@ -326,7 +327,7 @@ export class CompetitionsService {
       }
     });
 
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'stage.seeded',
       competitionId: competition.id,
       stageId,
@@ -444,7 +445,7 @@ export class CompetitionsService {
       }
     });
 
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'stage.results_recorded',
       competitionId: competition.id,
       stageId,
@@ -513,7 +514,7 @@ export class CompetitionsService {
       }
     });
 
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'stage.completed',
       competitionId: competition.id,
       stageId,
@@ -707,7 +708,7 @@ export class CompetitionsService {
       }
     });
 
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'stage.advanced',
       competitionId: competition.id,
       stageId,

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { DomainError, ErrorCodes } from '../domain/errors';
+import { logEvent } from '../logging/log-event';
 
 const NOT_FOUND_CODES = new Set<string>([
   ErrorCodes.PRESET_NOT_FOUND,
@@ -39,7 +40,7 @@ export class DomainExceptionFilter implements ExceptionFilter {
     );
     const stageMatch = urlPath.match(/\/stages\/([^/]+)/);
 
-    this.logger.warn({
+    logEvent(this.logger, {
       event: 'domain_error',
       code: exception.code,
       path: exception.path,
@@ -48,8 +49,8 @@ export class DomainExceptionFilter implements ExceptionFilter {
       method: request.method,
       url: urlPath,
       status,
-      msg: exception.message,
-    });
+      detail: exception.message,
+    }, 'warn');
 
     response.status(status).json(body);
   }

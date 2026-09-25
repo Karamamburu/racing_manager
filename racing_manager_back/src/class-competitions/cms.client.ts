@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CmsCompetition, CmsHeatResult } from './cms.types';
+import { logEvent } from '../logging/log-event';
 
 type CmsErrorBody = { message?: string };
 
@@ -101,24 +102,24 @@ export class CmsClient {
         signal: AbortSignal.timeout(10_000),
       });
     } catch {
-      this.logger.warn({
+      logEvent(this.logger, {
         event: 'cms.request_failed',
         method,
         path,
         reason: 'network',
-      });
+      }, 'warn');
       throw new BadGatewayException('Сервис сеток недоступен.');
     }
 
     const text = await response.text();
     const payload = text ? (JSON.parse(text) as T & CmsErrorBody) : null;
     if (!response.ok) {
-      this.logger.warn({
+      logEvent(this.logger, {
         event: 'cms.request_failed',
         method,
         path,
         status: response.status,
-      });
+      }, 'warn');
       const message = payload?.message || `Competition service returned ${response.status}.`;
       if (response.status === 404) throw new NotFoundException(message);
       throw new BadRequestException(message);

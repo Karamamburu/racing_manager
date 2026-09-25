@@ -33,6 +33,7 @@ import { parseFinishCategoryBody } from './parse-finish-category';
 import { categoryIsFinished } from './category-finish';
 import { parseEventDateRange } from './parse-event-date-range';
 import { parseUpdateEventStatusBody } from './parse-update-event-status';
+import { logEvent } from '../logging/log-event';
 import {
   hasStoredPlaces,
   isCompleteResult,
@@ -394,7 +395,7 @@ export class EventsService {
       },
     });
 
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'event.created',
       eventId: created.id,
       userSub: authentikId,
@@ -813,7 +814,7 @@ export class EventsService {
           ]),
     ]);
 
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'event.updated',
       eventId,
       userSub: authentikId,
@@ -860,7 +861,7 @@ export class EventsService {
       });
     }
 
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'event.status_changed',
       eventId,
       fromStatus: event.status,
@@ -876,7 +877,7 @@ export class EventsService {
   ): Promise<EventDetails> {
     await this.assertCanManageCreatedEvent(authentikId, eventId);
     await this.applyCancel(eventId);
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'event.cancelled',
       eventId,
       userSub: authentikId,

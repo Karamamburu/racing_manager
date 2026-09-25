@@ -1,5 +1,7 @@
 import { resolve } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import pino from 'pino';
+import pretty from 'pino-pretty';
 import type { Params } from 'nestjs-pino';
 
 const DEFAULT_LOG_FILE = resolve(
@@ -23,27 +25,22 @@ export function buildPinoParams(service: string): Params {
   const logFilePath = resolve(rawPath);
 
   const isProd = process.env.NODE_ENV === 'production';
-  const consoleLevel = process.env.LOG_LEVEL ?? (isProd ? 'info' : 'debug');
-  // Alloy tails the file — keep it lean (no debug GET spam).
+  // Default info: skip noisy HTTP "request completed" DEBUG lines on console and in file.
+  const consoleLevel = process.env.LOG_LEVEL ?? 'info';
   const fileLevel = process.env.LOG_FILE_LEVEL ?? 'info';
 
-  const targets: Array<{
-    target: string;
-    level: string;
-    options: Record<string, unknown>;
-  }> = [
+  // multistream (not transport.targets) so formatters.level is allowed by Pino.
+  const streams: pino.StreamEntry[] = [
     {
-      target: 'pino/file',
-      level: fileLevel,
-      options: { destination: logFilePath, mkdir: true },
+      level: fileLevel as pino.Level,
+      stream: pino.destination({ dest: logFilePath, mkdir: true, sync: false }),
     },
   ];
 
   if (!isProd) {
-    targets.unshift({
-      target: 'pino-pretty',
-      level: consoleLevel,
-      options: { singleLine: true, colorize: true },
+    streams.unshift({
+      level: consoleLevel as pino.Level,
+      stream: pretty({ colorize: true, singleLine: true, sync: true }),
     });
   }
 
@@ -51,7 +48,11 @@ export function buildPinoParams(service: string): Params {
     pinoHttp: {
       level: consoleLevel,
       base: { service },
-      transport: { targets },
+      // Grafana/Loki expect textual levels (info/warn/error), not Pino numbers (30/40/50).
+      formatters: {
+        level: (label: string) => ({ level: label }),
+      },
+      stream: pino.multistream(streams),
       autoLogging: {
         ignore: (req: IncomingMessage) => shouldIgnorePath(req.url),
       },

@@ -6,6 +6,7 @@ import {
   dueEventStatus,
 } from './event-status';
 import { freezeEventPlaces } from './freeze-event-places';
+import { logEvent } from '../logging/log-event';
 
 const SYNC_INTERVAL_MS = 60_000;
 
@@ -73,7 +74,7 @@ export class EventStatusSyncService implements OnModuleInit, OnModuleDestroy {
             await freezeEventPlaces(tx, id);
           });
         }
-        this.logger.log({
+        logEvent(this.logger, {
           event: 'event.status_auto_synced',
           toStatus: EventStatusCode.DONE,
           eventIds: readyIds,
@@ -85,7 +86,7 @@ export class EventStatusSyncService implements OnModuleInit, OnModuleDestroy {
           where: { id: { in: inProgressIds } },
           data: { status: EventStatusCode.IN_PROGRESS },
         });
-        this.logger.log({
+        logEvent(this.logger, {
           event: 'event.status_auto_synced',
           toStatus: EventStatusCode.IN_PROGRESS,
           eventIds: inProgressIds,

@@ -24,6 +24,7 @@ import {
 import { parseUpdateRegistrationBody } from './parse-update-registration';
 import { parseUpdateRegistrationStatusBody } from './parse-update-registration-status';
 import { buildTestPeople, guestPersonKey } from './seed-test-people';
+import { logEvent } from '../logging/log-event';
 import {
   ACTIVE_REGISTRATION_STATUSES,
   LISTED_REGISTRATION_STATUSES,
@@ -207,7 +208,7 @@ export class RegistrationsService {
             registeredAt: new Date(),
           },
         });
-        this.logger.log({
+        logEvent(this.logger, {
           event: 'registration.created',
           eventId,
           registrationId: restored.id,
@@ -232,7 +233,7 @@ export class RegistrationsService {
           status: RegistrationStatusCode.REGISTERED,
         },
       });
-      this.logger.log({
+      logEvent(this.logger, {
         event: 'registration.created',
         eventId,
         registrationId: created.id,
@@ -350,7 +351,7 @@ export class RegistrationsService {
         startNumber: null,
       },
     });
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'registration.cancelled',
       eventId,
       registrationId: withdrawn.id,
@@ -449,7 +450,7 @@ export class RegistrationsService {
           startNumber: null,
         },
       });
-      this.logger.log({
+      logEvent(this.logger, {
         event: 'registration.status_changed',
         eventId,
         registrationId: cancelled.id,
@@ -464,7 +465,7 @@ export class RegistrationsService {
       where: { id: existing.id },
       data: { status },
     });
-    this.logger.log({
+    logEvent(this.logger, {
       event: 'registration.status_changed',
       eventId,
       registrationId: updated.id,

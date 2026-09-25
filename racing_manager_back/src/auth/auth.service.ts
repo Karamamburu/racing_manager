@@ -4,6 +4,7 @@ import { Client, Issuer, TokenSet, generators } from 'openid-client';
 import type { Request } from 'express';
 import type { Session, SessionData } from 'express-session';
 import { UsersService } from '../users/users.service';
+import { logEvent } from '../logging/log-event';
 import {
   mergeConsentRequestMeta,
   readConsentRequestMeta,
@@ -168,7 +169,7 @@ export class AuthService implements OnModuleInit {
     delete req.session.oidc;
 
     if (user) {
-      this.logger.log({
+      logEvent(this.logger, {
         event: 'auth.login_success',
         userSub: user.sub,
         registrationStatus,

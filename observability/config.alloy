@@ -29,12 +29,34 @@ discovery.relabel "racing_manager_containers" {
   }
 }
 
+// Map Postgres / container log severities so Grafana shows info/warn/error instead of UNK.
+loki.process "docker_logs" {
+  forward_to = [loki.write.grafana_cloud.receiver]
+
+  // Postgres: "2026-09-25 08:42:59.812 UTC [26] LOG:  checkpoint starting"
+  // Also matches MinIO-style "... INFO ..." / "... ERROR ..."
+  stage.regex {
+    expression = `(?P<raw_severity>\b(?:DEBUG|INFO|NOTICE|WARNING|ERROR|LOG|FATAL|PANIC|WARN|CRITICAL|TRACE)\b)`
+  }
+
+  stage.template {
+    source = "level"
+    template = `{{ $s := default "" .raw_severity | ToUpper }}{{ if eq $s "" }}info{{ else if or (eq $s "LOG") (eq $s "INFO") (eq $s "NOTICE") }}info{{ else if or (eq $s "WARNING") (eq $s "WARN") }}warn{{ else if eq $s "ERROR" }}error{{ else if eq $s "FATAL" }}fatal{{ else if or (eq $s "PANIC") (eq $s "CRITICAL") }}critical{{ else if eq $s "DEBUG" }}debug{{ else if eq $s "TRACE" }}trace{{ else }}info{{ end }}`
+  }
+
+  stage.structured_metadata {
+    values = {
+      level = "level",
+    }
+  }
+}
+
 loki.source.docker "containers" {
   host          = "unix:///var/run/docker.sock"
   targets       = discovery.relabel.racing_manager_containers.output
   labels        = { "job" = "docker" }
   relabel_rules = discovery.relabel.racing_manager_containers.rules
-  forward_to    = [loki.write.grafana_cloud.receiver]
+  forward_to    = [loki.process.docker_logs.receiver]
 }
 
 // NestJS backends write JSON lines into ./logs (mounted at /var/log/racing-manager).
@@ -53,9 +75,31 @@ local.file_match "nest_apps" {
   ]
 }
 
+// Promote Nest JSON "level" into Loki structured metadata for Explore coloring.
+loki.process "nest_logs" {
+  forward_to = [loki.write.grafana_cloud.receiver]
+
+  stage.json {
+    expressions = {
+      level = "level",
+    }
+  }
+
+  stage.template {
+    source   = "level"
+    template = `{{ if .level }}{{ .level | ToLower }}{{ else }}info{{ end }}`
+  }
+
+  stage.structured_metadata {
+    values = {
+      level = "level",
+    }
+  }
+}
+
 loki.source.file "nest_apps" {
   targets       = local.file_match.nest_apps.targets
-  forward_to    = [loki.write.grafana_cloud.receiver]
+  forward_to    = [loki.process.nest_logs.receiver]
   tail_from_end = true
 }
 
