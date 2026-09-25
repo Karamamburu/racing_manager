@@ -87,3 +87,34 @@ Auth HTTP routes (`/auth/*`) are **not** access-logged — only the business eve
 Pino writes `level` as a string (`info` / `warn` / `error`) so Grafana Explore shows the correct severity instead of **UNK**.
 
 Docker/Postgres logs go through Alloy `loki.process`: Postgres `LOG`/`WARNING`/`ERROR`/… are mapped to Grafana levels (`info`/`warn`/`error`/…).
+
+## Sentry Uptime
+
+[Sentry Uptime Monitoring](https://docs.sentry.io/product/monitors-and-alerts/monitors/uptime-monitoring/) probes public HTTP URLs from Sentry’s cloud (not a local Docker service). No DSN or `.env` secrets are required for uptime — monitors live in the Sentry UI.
+
+### Probe endpoints
+
+| Service | Path | Local check |
+|---------|------|-------------|
+| `racing_manager_back` | `GET /health` → `{ "status": "ok" }` | `curl http://localhost:4000/health` |
+| `competition_managment_service` | `GET /health` → `{ "status": "ok" }` | `curl http://localhost:4100/health` |
+| Frontend | `GET /health` → `{ "status": "ok" }` | `curl http://localhost:5173/health` |
+
+Liveness only (no DB/MinIO checks). Access logs for `/health` are skipped on both Nest apps.
+
+### Create monitors in Sentry
+
+1. Open your org on [sentry.io](https://sentry.io/) and create a project if needed.
+2. **Alerts** → **Create Alert Rule** → **Uptime Monitor**.
+3. Add one monitor per public URL (once staging/prod hosts exist):
+
+| Monitor | URL | Method | Interval |
+|---------|-----|--------|----------|
+| API | `https://<api-host>/health` | GET | 1 minute |
+| CMS | `https://<cms-host>/health` | GET | 1 minute |
+| Front | `https://<front-host>/health` | GET | 1 minute |
+
+4. Expect HTTP 2xx. Optionally wire notifications (email / Slack) for downtime issues.
+5. If a firewall sits in front of the apps, allow User-Agent `SentryUptimeBot/1.0` ([docs](https://docs.sentry.io/product/monitors-and-alerts/monitors/uptime-monitoring/troubleshooting/)).
+
+Sentry cannot reach `localhost`. Before deploy, you can temporarily expose a health URL with ngrok or Cloudflare Tunnel and point a monitor at that URL.
