@@ -38,7 +38,7 @@ if [ "$(date -u +%u)" = "7" ]; then
   docker run --rm --network container:racing_manager_minio \
     -v "${DEST}/minio:/backup" \
     -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD -e MINIO_BUCKET \
-    quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z \
+    minio/mc:RELEASE.2025-08-13T08-35-41Z \
     /bin/sh -c '
       mc alias set local http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
       mc mirror --overwrite "local/$MINIO_BUCKET" /backup
