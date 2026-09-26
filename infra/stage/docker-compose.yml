@@ -1,0 +1,279 @@
+# Stage: single VPS with the full stack (HTTP; enable TLS the same way as prod app).
+# Usage:
+#   cp .env.example .env
+#   docker compose up -d --build
+#   ./scripts/init-certs.sh   # optional, after DNS
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: racing_manager_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+      AUTH_DOMAIN: ${AUTH_DOMAIN}
+      MEDIA_DOMAIN: ${MEDIA_DOMAIN}
+      UPSTREAM_FRONT: front:80
+      UPSTREAM_API: api:4000
+      UPSTREAM_AUTHENTIK: authentik_server:9000
+      UPSTREAM_MINIO: minio:9000
+      UPSTREAM_MINIO_HOST: minio
+      TLS_ENABLED: ${TLS_ENABLED:-false}
+    volumes:
+      - ../app/nginx/nginx.http.conf.template:/etc/nginx/nginx.http.conf.template:ro
+      - ../app/nginx/nginx.tls.conf.template:/etc/nginx/nginx.tls.conf.template:ro
+      - ../app/nginx/docker-entrypoint.sh:/docker-entrypoint-custom.sh:ro
+      - certbot_www:/var/www/certbot:ro
+      - certbot_certs:/etc/letsencrypt:ro
+    entrypoint: ["/bin/sh", "/docker-entrypoint-custom.sh"]
+    depends_on:
+      - front
+      - api
+      - authentik_server
+      - minio
+
+  front:
+    build:
+      context: ../../racing_manager_front
+      dockerfile: Dockerfile
+    container_name: racing_manager_front
+    restart: unless-stopped
+    expose:
+      - "80"
+
+  api:
+    build:
+      context: ../../racing_manager_back
+      dockerfile: Dockerfile
+    container_name: racing_manager_back
+    restart: unless-stopped
+    expose:
+      - "4000"
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      APP_HOST: https://${DOMAIN}
+      SESSION_SECRET: ${SESSION_SECRET}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
+      DATABASE_URL: postgresql://${POSTGRES_MAIN_USER}:${POSTGRES_MAIN_PASSWORD}@postgres_main:5432/${POSTGRES_MAIN_DB}?schema=public
+      CLIENT_ID: ${OIDC_CLIENT_ID}
+      CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      AUTHENTIK_ISSUER_URL: https://${AUTH_DOMAIN}/application/o/${OIDC_APP_SLUG}/
+      AUTH_CALLBACK_URL: https://${DOMAIN}/api/auth/callback
+      POST_LOGIN_REDIRECT_URI: https://${DOMAIN}/cabinet
+      POST_LOGOUT_REDIRECT_URI: https://${DOMAIN}/
+      CMS_BASE_URL: http://cms:4100
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${MINIO_BUCKET}
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      S3_FORCE_PATH_STYLE: "true"
+      S3_PUBLIC_BASE_URL: https://${MEDIA_DOMAIN}/${MINIO_BUCKET}
+      S3_CREATE_BUCKET: "false"
+      S3_PUBLIC_READ: "true"
+      S3_MAX_UPLOAD_BYTES: "83886080"
+      LOG_FILE_PATH: /var/log/racing-manager/racing_manager_back.log
+    volumes:
+      - nest_logs:/var/log/racing-manager
+    depends_on:
+      postgres_main:
+        condition: service_healthy
+      cms:
+        condition: service_started
+      minio:
+        condition: service_started
+
+  cms:
+    build:
+      context: ../../competition_managment_service
+      dockerfile: Dockerfile
+    container_name: competition_managment_service
+    restart: unless-stopped
+    expose:
+      - "4100"
+    environment:
+      NODE_ENV: production
+      PORT: 4100
+      DATABASE_URL: postgresql://${POSTGRES_CMS_USER}:${POSTGRES_CMS_PASSWORD}@postgres_cms:5432/${POSTGRES_CMS_DB}?schema=public
+      LOG_FILE_PATH: /var/log/racing-manager/competition_managment_service.log
+    volumes:
+      - nest_logs:/var/log/racing-manager
+    depends_on:
+      postgres_cms:
+        condition: service_healthy
+
+  postgres_main:
+    image: postgres:16
+    container_name: racing_manager_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_MAIN_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_MAIN_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_MAIN_DB}
+      TZ: Europe/Moscow
+      PGTZ: Europe/Moscow
+    command: ["postgres", "-c", "timezone=Europe/Moscow"]
+    volumes:
+      - postgres_main_data:/var/lib/postgresql/data
+      - ../../racing_manager_db/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_MAIN_USER} -d ${POSTGRES_MAIN_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres_cms:
+    image: postgres:16
+    container_name: competition_managment_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_CMS_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_CMS_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_CMS_DB}
+      TZ: Europe/Moscow
+      PGTZ: Europe/Moscow
+    command: ["postgres", "-c", "timezone=Europe/Moscow"]
+    volumes:
+      - postgres_cms_data:/var/lib/postgresql/data
+      - ../../competition_managment_service/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_CMS_USER} -d ${POSTGRES_CMS_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres_authentik:
+    image: postgres:16-alpine
+    container_name: racing_manager_authentik_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_AUTHENTIK_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_AUTHENTIK_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_AUTHENTIK_DB}
+    volumes:
+      - postgres_authentik_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_AUTHENTIK_USER} -d ${POSTGRES_AUTHENTIK_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: racing_manager_minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    expose:
+      - "9000"
+
+  minio_init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    container_name: racing_manager_minio_init
+    depends_on:
+      - minio
+    restart: on-failure
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do
+          sleep 1
+        done
+        mc mb -p "local/$$MINIO_BUCKET" || true
+        mc anonymous set download "local/$$MINIO_BUCKET"
+
+  authentik_server:
+    image: ghcr.io/goauthentik/server:2025.10.4
+    container_name: racing_manager_authentik_server
+    restart: unless-stopped
+    command: server
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_POSTGRESQL__HOST: postgres_authentik
+      AUTHENTIK_POSTGRESQL__PORT: 5432
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_AUTHENTIK_USER}
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_AUTHENTIK_DB}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_AUTHENTIK_PASSWORD}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+    expose:
+      - "9000"
+    volumes:
+      - authentik_media:/media
+      - authentik_templates:/templates
+    depends_on:
+      postgres_authentik:
+        condition: service_healthy
+
+  authentik_worker:
+    image: ghcr.io/goauthentik/server:2025.10.4
+    container_name: racing_manager_authentik_worker
+    restart: unless-stopped
+    command: worker
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_POSTGRESQL__HOST: postgres_authentik
+      AUTHENTIK_POSTGRESQL__PORT: 5432
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_AUTHENTIK_USER}
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_AUTHENTIK_DB}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_AUTHENTIK_PASSWORD}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+    volumes:
+      - authentik_media:/media
+      - authentik_templates:/templates
+    depends_on:
+      postgres_authentik:
+        condition: service_healthy
+
+  certbot:
+    image: certbot/certbot:v3.1.0
+    container_name: racing_manager_certbot
+    volumes:
+      - certbot_www:/var/www/certbot
+      - certbot_certs:/etc/letsencrypt
+    profiles:
+      - certs
+    entrypoint: certbot
+
+  alloy:
+    image: grafana/alloy:v1.9.1
+    container_name: racing_manager_alloy
+    restart: unless-stopped
+    volumes:
+      - ../observability/config.stage.alloy:/etc/alloy/config.alloy:ro
+      - nest_logs:/var/log/racing-manager:ro
+      - alloy_data:/var/lib/alloy/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      GRAFANA_LOKI_URL: ${GRAFANA_LOKI_URL}
+      GRAFANA_LOKI_USERNAME: ${GRAFANA_LOKI_USERNAME}
+      GRAFANA_LOKI_TOKEN: ${GRAFANA_LOKI_TOKEN}
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+
+volumes:
+  postgres_main_data:
+  postgres_cms_data:
+  postgres_authentik_data:
+  minio_data:
+  nest_logs:
+  authentik_media:
+  authentik_templates:
+  certbot_www:
+  certbot_certs:
+  alloy_data:

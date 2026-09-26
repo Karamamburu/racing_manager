@@ -1,0 +1,109 @@
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "racing_manager_containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(racing_manager_db|racing_manager_minio|racing_manager_minio_init|competition_managment_db|racing_manager_authentik_db|racing_manager_nginx|racing_manager_front|racing_manager_back|competition_managment_service|racing_manager_authentik_server|racing_manager_authentik_worker)"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "docker"
+  }
+
+  rule {
+    target_label = "host_role"
+    replacement  = "stage"
+  }
+}
+
+loki.process "docker_logs" {
+  forward_to = [loki.write.grafana_cloud.receiver]
+
+  stage.regex {
+    expression = `(?P<raw_severity>\b(?:DEBUG|INFO|NOTICE|WARNING|ERROR|LOG|FATAL|PANIC|WARN|CRITICAL|TRACE)\b)`
+  }
+
+  stage.template {
+    source   = "level"
+    template = `{{ $s := default "" .raw_severity | ToUpper }}{{ if eq $s "" }}info{{ else if or (eq $s "LOG") (eq $s "INFO") (eq $s "NOTICE") }}info{{ else if or (eq $s "WARNING") (eq $s "WARN") }}warn{{ else if eq $s "ERROR" }}error{{ else if eq $s "FATAL" }}fatal{{ else if or (eq $s "PANIC") (eq $s "CRITICAL") }}critical{{ else if eq $s "DEBUG" }}debug{{ else if eq $s "TRACE" }}trace{{ else }}info{{ end }}`
+  }
+
+  stage.structured_metadata {
+    values = {
+      level = "level",
+    }
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.racing_manager_containers.output
+  labels        = { "job" = "docker" }
+  relabel_rules = discovery.relabel.racing_manager_containers.rules
+  forward_to    = [loki.process.docker_logs.receiver]
+}
+
+local.file_match "nest_apps" {
+  path_targets = [
+    {
+      __path__ = "/var/log/racing-manager/racing_manager_back.log",
+      job      = "nest",
+      service  = "racing_manager_back",
+    },
+    {
+      __path__ = "/var/log/racing-manager/competition_managment_service.log",
+      job      = "nest",
+      service  = "competition_managment_service",
+    },
+  ]
+}
+
+loki.process "nest_logs" {
+  forward_to = [loki.write.grafana_cloud.receiver]
+
+  stage.json {
+    expressions = {
+      level = "level",
+    }
+  }
+
+  stage.template {
+    source   = "level"
+    template = `{{ if .level }}{{ .level | ToLower }}{{ else }}info{{ end }}`
+  }
+
+  stage.structured_metadata {
+    values = {
+      level = "level",
+    }
+  }
+}
+
+loki.source.file "nest_apps" {
+  targets       = local.file_match.nest_apps.targets
+  forward_to    = [loki.process.nest_logs.receiver]
+  tail_from_end = true
+}
+
+loki.write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_LOKI_URL")
+
+    basic_auth {
+      username = sys.env("GRAFANA_LOKI_USERNAME")
+      password = sys.env("GRAFANA_LOKI_TOKEN")
+    }
+  }
+}

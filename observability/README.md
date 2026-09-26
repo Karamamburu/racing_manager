@@ -94,11 +94,13 @@ Docker/Postgres logs go through Alloy `loki.process`: Postgres `LOG`/`WARNING`/`
 
 ### Probe endpoints
 
-| Service | Path | Local check |
-|---------|------|-------------|
-| `racing_manager_back` | `GET /health` → `{ "status": "ok" }` | `curl http://localhost:4000/health` |
-| `competition_managment_service` | `GET /health` → `{ "status": "ok" }` | `curl http://localhost:4100/health` |
-| Frontend | `GET /health` → `{ "status": "ok" }` | `curl http://localhost:5173/health` |
+| Service | Path | Local check | Prod (after deploy) |
+|---------|------|-------------|---------------------|
+| `racing_manager_back` | `GET /health` → `{ "status": "ok" }` | `curl http://localhost:4000/health` | `https://DOMAIN/api/health` |
+| `competition_managment_service` | `GET /health` → `{ "status": "ok" }` | `curl http://localhost:4100/health` | private (not on public edge) |
+| Frontend | `GET /health` → `{ "status": "ok" }` | `curl http://localhost:5173/health` | `https://DOMAIN/health` |
+
+See also [infra/backups/README.md](../infra/backups/README.md) for production Alloy + Sentry Uptime.
 
 Liveness only (no DB/MinIO checks). Access logs for `/health` are skipped on both Nest apps.
 

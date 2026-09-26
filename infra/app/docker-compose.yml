@@ -1,0 +1,172 @@
+# App host: edge nginx (TLS), SPA, Nest API/CMS, Authentik, Alloy.
+# Build context paths are relative to this file → repo root via ../..
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: racing_manager_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+      AUTH_DOMAIN: ${AUTH_DOMAIN}
+      MEDIA_DOMAIN: ${MEDIA_DOMAIN}
+      UPSTREAM_FRONT: front:80
+      UPSTREAM_API: api:4000
+      UPSTREAM_AUTHENTIK: authentik_server:9000
+      UPSTREAM_MINIO: ${DATA_HOST}:9000
+      UPSTREAM_MINIO_HOST: ${DATA_HOST}
+      TLS_ENABLED: ${TLS_ENABLED:-false}
+    volumes:
+      - ./nginx/nginx.http.conf.template:/etc/nginx/nginx.http.conf.template:ro
+      - ./nginx/nginx.tls.conf.template:/etc/nginx/nginx.tls.conf.template:ro
+      - ./nginx/docker-entrypoint.sh:/docker-entrypoint-custom.sh:ro
+      - certbot_www:/var/www/certbot:ro
+      - certbot_certs:/etc/letsencrypt:ro
+    entrypoint: ["/bin/sh", "/docker-entrypoint-custom.sh"]
+    depends_on:
+      - front
+      - api
+      - authentik_server
+
+  front:
+    build:
+      context: ../../racing_manager_front
+      dockerfile: Dockerfile
+    container_name: racing_manager_front
+    restart: unless-stopped
+    expose:
+      - "80"
+
+  api:
+    build:
+      context: ../../racing_manager_back
+      dockerfile: Dockerfile
+    container_name: racing_manager_back
+    restart: unless-stopped
+    expose:
+      - "4000"
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      APP_HOST: https://${DOMAIN}
+      SESSION_SECRET: ${SESSION_SECRET}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
+      DATABASE_URL: postgresql://${POSTGRES_MAIN_USER}:${POSTGRES_MAIN_PASSWORD}@${DATA_HOST}:5432/${POSTGRES_MAIN_DB}?schema=public
+      CLIENT_ID: ${OIDC_CLIENT_ID}
+      CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      AUTHENTIK_ISSUER_URL: https://${AUTH_DOMAIN}/application/o/${OIDC_APP_SLUG}/
+      AUTH_CALLBACK_URL: https://${DOMAIN}/api/auth/callback
+      POST_LOGIN_REDIRECT_URI: https://${DOMAIN}/cabinet
+      POST_LOGOUT_REDIRECT_URI: https://${DOMAIN}/
+      CMS_BASE_URL: http://cms:4100
+      S3_ENDPOINT: http://${DATA_HOST}:9000
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${MINIO_BUCKET}
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      S3_FORCE_PATH_STYLE: "true"
+      S3_PUBLIC_BASE_URL: https://${MEDIA_DOMAIN}/${MINIO_BUCKET}
+      S3_CREATE_BUCKET: "false"
+      S3_PUBLIC_READ: "true"
+      S3_MAX_UPLOAD_BYTES: "83886080"
+      LOG_FILE_PATH: /var/log/racing-manager/racing_manager_back.log
+      LOG_LEVEL: info
+      LOG_FILE_LEVEL: info
+    volumes:
+      - nest_logs:/var/log/racing-manager
+    depends_on:
+      - cms
+
+  cms:
+    build:
+      context: ../../competition_managment_service
+      dockerfile: Dockerfile
+    container_name: competition_managment_service
+    restart: unless-stopped
+    expose:
+      - "4100"
+    environment:
+      NODE_ENV: production
+      PORT: 4100
+      DATABASE_URL: postgresql://${POSTGRES_CMS_USER}:${POSTGRES_CMS_PASSWORD}@${DATA_HOST}:5433/${POSTGRES_CMS_DB}?schema=public
+      LOG_FILE_PATH: /var/log/racing-manager/competition_managment_service.log
+      LOG_LEVEL: info
+      LOG_FILE_LEVEL: info
+    volumes:
+      - nest_logs:/var/log/racing-manager
+
+  authentik_server:
+    image: ghcr.io/goauthentik/server:2025.10.4
+    container_name: racing_manager_authentik_server
+    restart: unless-stopped
+    command: server
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_POSTGRESQL__HOST: ${DATA_HOST}
+      AUTHENTIK_POSTGRESQL__PORT: 5434
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_AUTHENTIK_USER}
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_AUTHENTIK_DB}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_AUTHENTIK_PASSWORD}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+    expose:
+      - "9000"
+    volumes:
+      - authentik_media:/media
+      - authentik_templates:/templates
+
+  authentik_worker:
+    image: ghcr.io/goauthentik/server:2025.10.4
+    container_name: racing_manager_authentik_worker
+    restart: unless-stopped
+    command: worker
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_POSTGRESQL__HOST: ${DATA_HOST}
+      AUTHENTIK_POSTGRESQL__PORT: 5434
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_AUTHENTIK_USER}
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_AUTHENTIK_DB}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_AUTHENTIK_PASSWORD}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+    volumes:
+      - authentik_media:/media
+      - authentik_templates:/templates
+
+  certbot:
+    image: certbot/certbot:v3.1.0
+    container_name: racing_manager_certbot
+    volumes:
+      - certbot_www:/var/www/certbot
+      - certbot_certs:/etc/letsencrypt
+    profiles:
+      - certs
+    entrypoint: certbot
+
+  alloy:
+    image: grafana/alloy:v1.9.1
+    container_name: racing_manager_alloy_app
+    restart: unless-stopped
+    volumes:
+      - ../observability/config.app.alloy:/etc/alloy/config.alloy:ro
+      - nest_logs:/var/log/racing-manager:ro
+      - alloy_data:/var/lib/alloy/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      GRAFANA_LOKI_URL: ${GRAFANA_LOKI_URL}
+      GRAFANA_LOKI_USERNAME: ${GRAFANA_LOKI_USERNAME}
+      GRAFANA_LOKI_TOKEN: ${GRAFANA_LOKI_TOKEN}
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+
+volumes:
+  nest_logs:
+  authentik_media:
+  authentik_templates:
+  certbot_www:
+  certbot_certs:
+  alloy_data:

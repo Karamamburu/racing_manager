@@ -1,0 +1,124 @@
+# Data host: Postgres (main, CMS, Authentik) + MinIO.
+# Bind only on the private interface (DATA_BIND_ADDRESS). Never publish to 0.0.0.0 in prod.
+
+services:
+  postgres_main:
+    image: postgres:16
+    container_name: racing_manager_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_MAIN_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_MAIN_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_MAIN_DB}
+      TZ: Europe/Moscow
+      PGTZ: Europe/Moscow
+    command: ["postgres", "-c", "timezone=Europe/Moscow"]
+    ports:
+      - "${DATA_BIND_ADDRESS}:5432:5432"
+    volumes:
+      - postgres_main_data:/var/lib/postgresql/data
+      - ../../racing_manager_db/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_MAIN_USER} -d ${POSTGRES_MAIN_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres_cms:
+    image: postgres:16
+    container_name: competition_managment_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_CMS_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_CMS_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_CMS_DB}
+      TZ: Europe/Moscow
+      PGTZ: Europe/Moscow
+    command: ["postgres", "-c", "timezone=Europe/Moscow"]
+    ports:
+      - "${DATA_BIND_ADDRESS}:5433:5432"
+    volumes:
+      - postgres_cms_data:/var/lib/postgresql/data
+      - ../../competition_managment_service/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_CMS_USER} -d ${POSTGRES_CMS_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres_authentik:
+    image: postgres:16-alpine
+    container_name: racing_manager_authentik_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_AUTHENTIK_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_AUTHENTIK_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_AUTHENTIK_DB}
+    ports:
+      - "${DATA_BIND_ADDRESS}:5434:5432"
+    volumes:
+      - postgres_authentik_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_AUTHENTIK_USER} -d ${POSTGRES_AUTHENTIK_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: racing_manager_minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "${DATA_BIND_ADDRESS}:9000:9000"
+    volumes:
+      - minio_data:/data
+    # Console (9001) intentionally not published — use SSH tunnel if needed.
+
+  minio_init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    container_name: racing_manager_minio_init
+    depends_on:
+      - minio
+    restart: on-failure
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do
+          sleep 1
+        done
+        mc mb -p "local/$$MINIO_BUCKET" || true
+        mc anonymous set download "local/$$MINIO_BUCKET"
+
+  alloy:
+    image: grafana/alloy:v1.9.1
+    container_name: racing_manager_alloy_data
+    restart: unless-stopped
+    volumes:
+      - ../observability/config.data.alloy:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      GRAFANA_LOKI_URL: ${GRAFANA_LOKI_URL}
+      GRAFANA_LOKI_USERNAME: ${GRAFANA_LOKI_USERNAME}
+      GRAFANA_LOKI_TOKEN: ${GRAFANA_LOKI_TOKEN}
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+
+volumes:
+  postgres_main_data:
+  postgres_cms_data:
+  postgres_authentik_data:
+  minio_data:
+  alloy_data:
