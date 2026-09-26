@@ -22,7 +22,9 @@ async function bootstrap() {
       cookie: {
         httpOnly: true,
         sameSite: 'lax',
-        secure: false,
+        secure:
+          process.env.SESSION_COOKIE_SECURE === 'true' ||
+          process.env.NODE_ENV === 'production',
       },
     }),
   );

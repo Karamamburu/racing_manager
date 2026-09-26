@@ -1,0 +1,14 @@
+# node_modules
+node_modules
+npm-debug.log*
+dist
+coverage
+.env
+.env.*
+!.env.example
+*.md
+.git
+.gitignore
+.DS_Store
+test
+**/*.spec.ts

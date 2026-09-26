@@ -53,3 +53,4 @@ docker compose up -d
 ```
 
 TLS is out of scope for now (HTTP on container port 80 → host `8080`).
+`client_max_body_size` is **80m** (aligned with news media uploads).

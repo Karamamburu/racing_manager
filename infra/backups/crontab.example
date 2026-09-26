@@ -1,0 +1,10 @@
+# Install on the data host (crontab -e):
+#   15 2 * * * /opt/racing_manager/infra/backups/backup.sh >> /var/log/racing-manager-backup.log 2>&1
+#
+# Ensure DATA_ENV points at infra/data/.env if the script is copied elsewhere:
+#   15 2 * * * DATA_ENV=/opt/racing_manager/infra/data/.env /opt/racing_manager/infra/backups/backup.sh
+#
+# Optional offsite in data/.env:
+#   BACKUP_OFFSITE=backup@offsite.example:/var/backups/racing-manager
+#   BACKUP_ROOT=/var/backups/racing-manager
+#   RETENTION_DAYS=14
