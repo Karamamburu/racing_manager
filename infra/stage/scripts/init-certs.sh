@@ -23,11 +23,19 @@ docker compose --profile certs run --rm certbot certonly \
   -d "$AUTH_DOMAIN" \
   -d "$MEDIA_DOMAIN"
 
-if grep -q '^TLS_ENABLED=' .env; then
-  sed -i.bak 's/^TLS_ENABLED=.*/TLS_ENABLED=true/' .env
-else
-  echo 'TLS_ENABLED=true' >> .env
-fi
+set_env() {
+  local key="$1"
+  local value="$2"
+  if grep -q "^${key}=" .env; then
+    sed -i.bak "s|^${key}=.*|${key}=${value}|" .env
+  else
+    echo "${key}=${value}" >> .env
+  fi
+}
 
-docker compose up -d nginx
-echo "Stage TLS enabled."
+set_env TLS_ENABLED true
+set_env PUBLIC_SCHEME https
+set_env SESSION_COOKIE_SECURE true
+
+docker compose up -d --force-recreate nginx api
+echo "Stage TLS enabled (PUBLIC_SCHEME=https)."

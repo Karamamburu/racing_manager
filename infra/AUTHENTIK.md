@@ -13,25 +13,25 @@ Public entry: `https://AUTH_DOMAIN` (proxied by nginx). Do not publish Authentik
 | Field | Value |
 |-------|--------|
 | Application slug | `racing-manager` (must match `OIDC_APP_SLUG`) |
-| Redirect URI | `https://DOMAIN/api/auth/callback` |
+| Redirect URI | `http(s)://DOMAIN/api/auth/callback` (match `PUBLIC_SCHEME`) |
 | Client type | Confidential |
 | Signing key | default authentik self-signed (or your cert) |
 
 4. Copy Client ID / Client Secret into `infra/app/.env` as `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`.
 5. Restart API: `docker compose up -d api`.
 
-Issuer URL used by the API (already set in compose):
+Issuer URL used by the API (scheme follows `PUBLIC_SCHEME` in app `.env`):
 
 ```text
-https://AUTH_DOMAIN/application/o/OIDC_APP_SLUG/
+http(s)://AUTH_DOMAIN/application/o/OIDC_APP_SLUG/
 ```
 
 ## Logout / login redirects
 
-Configured on the API container:
+Configured on the API container (same scheme as `PUBLIC_SCHEME`):
 
-- `POST_LOGIN_REDIRECT_URI=https://DOMAIN/cabinet`
-- `POST_LOGOUT_REDIRECT_URI=https://DOMAIN/`
+- `POST_LOGIN_REDIRECT_URI=<scheme>://DOMAIN/cabinet`
+- `POST_LOGOUT_REDIRECT_URI=<scheme>://DOMAIN/`
 
 Add the same origins in Authentik if it validates post-logout URIs.
 

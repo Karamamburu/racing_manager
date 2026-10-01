@@ -51,16 +51,17 @@ services:
     environment:
       NODE_ENV: production
       PORT: 4000
-      APP_HOST: https://${DOMAIN}
+      # PUBLIC_SCHEME=http until TLS; set to https after ./scripts/init-certs.sh
+      APP_HOST: ${PUBLIC_SCHEME:-http}://${DOMAIN}
       SESSION_SECRET: ${SESSION_SECRET}
-      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       DATABASE_URL: postgresql://${POSTGRES_MAIN_USER}:${POSTGRES_MAIN_PASSWORD}@${DATA_HOST}:5432/${POSTGRES_MAIN_DB}?schema=public
       CLIENT_ID: ${OIDC_CLIENT_ID}
       CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
-      AUTHENTIK_ISSUER_URL: https://${AUTH_DOMAIN}/application/o/${OIDC_APP_SLUG}/
-      AUTH_CALLBACK_URL: https://${DOMAIN}/api/auth/callback
-      POST_LOGIN_REDIRECT_URI: https://${DOMAIN}/cabinet
-      POST_LOGOUT_REDIRECT_URI: https://${DOMAIN}/
+      AUTHENTIK_ISSUER_URL: ${PUBLIC_SCHEME:-http}://${AUTH_DOMAIN}/application/o/${OIDC_APP_SLUG}/
+      AUTH_CALLBACK_URL: ${PUBLIC_SCHEME:-http}://${DOMAIN}/api/auth/callback
+      POST_LOGIN_REDIRECT_URI: ${PUBLIC_SCHEME:-http}://${DOMAIN}/cabinet
+      POST_LOGOUT_REDIRECT_URI: ${PUBLIC_SCHEME:-http}://${DOMAIN}/
       CMS_BASE_URL: http://cms:4100
       S3_ENDPOINT: http://${DATA_HOST}:9000
       S3_REGION: ${S3_REGION:-us-east-1}
@@ -68,7 +69,7 @@ services:
       S3_ACCESS_KEY: ${MINIO_ROOT_USER}
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       S3_FORCE_PATH_STYLE: "true"
-      S3_PUBLIC_BASE_URL: https://${MEDIA_DOMAIN}/${MINIO_BUCKET}
+      S3_PUBLIC_BASE_URL: ${PUBLIC_SCHEME:-http}://${MEDIA_DOMAIN}/${MINIO_BUCKET}
       S3_CREATE_BUCKET: "false"
       S3_PUBLIC_READ: "true"
       S3_MAX_UPLOAD_BYTES: "83886080"
