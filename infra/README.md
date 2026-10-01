@@ -1,6 +1,6 @@
 # Racing Manager — production infra (year 1)
 
-Two-host Docker Compose layout: **data** (Postgres + MinIO) and **app** (nginx TLS + Nest + Authentik + front). See [VPS.md](VPS.md) for rental specs.
+Two-host Docker Compose layout: **data** (Postgres + MinIO) and **app** (nginx TLS + Nest + Authentik + front). SSH via jump — see [ACCESS.md](ACCESS.md). Specs: [VPS.md](VPS.md).
 
 ```text
 Users ──HTTPS──► app nginx
@@ -49,6 +49,7 @@ Local stacks under `racing_manager_db/`, `nginx/`, `observability/` stay for dev
 
 | Path | Purpose |
 |------|---------|
+| [ACCESS.md](ACCESS.md) | Host IPs, SSH jump, ufw, Beekeeper tunnel |
 | [VPS.md](VPS.md) | Rental specs + firewall checklist |
 | [data/](data/) | Data VPS compose (Postgres ×3, MinIO, Alloy) |
 | [app/](app/) | App VPS compose (nginx TLS, front, API, CMS, Authentik, Alloy) |
