@@ -22,9 +22,9 @@ async function bootstrap() {
       cookie: {
         httpOnly: true,
         sameSite: 'lax',
-        secure:
-          process.env.SESSION_COOKIE_SECURE === 'true' ||
-          process.env.NODE_ENV === 'production',
+        // Only when explicitly enabled (after TLS). Do not tie to NODE_ENV —
+        // production over plain HTTP must keep Secure=false or OIDC state is lost.
+        secure: process.env.SESSION_COOKIE_SECURE === 'true',
       },
     }),
   );
