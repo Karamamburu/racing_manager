@@ -25,7 +25,7 @@ export class MainService {
 
     return {
       page: {
-        title: 'Все на старт',
+        title: 'Все на гонку',
         message: 'Main page stub',
       },
       authenticated: Boolean(userSub),
