@@ -27,10 +27,11 @@ docker compose up -d
 
 ```bash
 cd infra/app
-cp .env.example .env   # set DATA_HOST, domains, secrets
+cp .env.example .env   # set DATA_HOST, domains, PUBLIC_SCHEME=http, secrets
 docker compose up -d --build
 ./scripts/init-certs.sh   # Let's Encrypt (after DNS points here)
-docker compose up -d      # reload nginx with certs
+# init-certs sets TLS_ENABLED=true, PUBLIC_SCHEME=https, SESSION_COOKIE_SECURE=true
+docker compose up -d --force-recreate nginx api
 ```
 
 4. Configure Authentik OIDC (see [AUTHENTIK.md](AUTHENTIK.md)).
