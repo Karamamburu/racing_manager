@@ -1,13 +1,13 @@
 # VPS rental checklist (year 1)
 
-Rent two VPS in the **same region** with a **private network** (or VPC). Do not expose DB ports on the public NIC. MinIO stays on the app host (docker network only).
+Rent two VPS in the **same region** with a **private network** (or VPC). Do not expose DB ports on the public NIC. Media files live in Timeweb Cloud S3 (`s3.twcstorage.ru`).
 
 ## Specs
 
 | Host | Role | vCPU | RAM | Disk | Public ports |
 |------|------|------|-----|------|--------------|
 | **jump** | Bastion (SSH entry) | 1–2 | 1–2 GB | 20 GB | 22 (admin) |
-| **app** | nginx TLS, front, API, CMS, Authentik, MinIO, Alloy | 4 | 8 GB | 80–120 GB SSD | 80, 443; 22/3389 from jump only |
+| **app** | nginx TLS, front, API, CMS, Authentik, Alloy | 4 | 8 GB | 40–80 GB SSD | 80, 443; 22/3389 from jump only |
 | **data** | Postgres ×3 (main, CMS, Authentik), Alloy (DB logs) | 2 | 4 GB | 40–80 GB SSD | 22/3389 from jump; DB only from app |
 
 Optional **stage**: one VPS 2–4 vCPU / 4–8 GB / 60 GB — use [`stage/`](stage/).
@@ -43,7 +43,7 @@ Internet ──► app:80/443 (nginx)
 ## Checklist
 
 - [ ] jump VPS created (bastion)
-- [ ] app VPS created (4/8, 80–120 GB)
+- [ ] app VPS created (4/8, 40–80 GB)
 - [ ] data VPS created (2/4, 40–80 GB)
 - [ ] Private network / VPC attached (or firewall restricts DB to app IP)
 - [ ] `~/.ssh/config` with ProxyJump (see [ACCESS.md](ACCESS.md))

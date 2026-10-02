@@ -9,8 +9,8 @@
 #   BACKUP_ROOT=/var/backups/racing-manager
 #   RETENTION_DAYS=14
 
-# App host — weekly MinIO mirror (Sunday UTC):
-#   30 3 * * 0 /opt/racing_manager/infra/backups/backup-minio.sh >> /var/log/racing-manager-minio-backup.log 2>&1
+# App host — weekly Timeweb S3 mirror (Sunday UTC):
+#   30 3 * * 0 /opt/racing_manager/infra/backups/backup-s3.sh >> /var/log/racing-manager-s3-backup.log 2>&1
 #
 # Ensure APP_ENV points at infra/app/.env if needed:
-#   30 3 * * 0 APP_ENV=/opt/racing_manager/infra/app/.env /opt/racing_manager/infra/backups/backup-minio.sh
+#   30 3 * * 0 APP_ENV=/opt/racing_manager/infra/app/.env /opt/racing_manager/infra/backups/backup-s3.sh

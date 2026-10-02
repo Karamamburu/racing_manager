@@ -7,8 +7,7 @@ set -eu
 : "${UPSTREAM_FRONT:?UPSTREAM_FRONT is required}"
 : "${UPSTREAM_API:?UPSTREAM_API is required}"
 : "${UPSTREAM_AUTHENTIK:?UPSTREAM_AUTHENTIK is required}"
-: "${UPSTREAM_MINIO:?UPSTREAM_MINIO is required}"
-: "${UPSTREAM_MINIO_HOST:?UPSTREAM_MINIO_HOST is required}"
+: "${UPSTREAM_S3_HOST:?UPSTREAM_S3_HOST is required}"
 
 TLS_ENABLED="${TLS_ENABLED:-false}"
 TEMPLATE="/etc/nginx/nginx.http.conf.template"
@@ -19,7 +18,7 @@ if [ "$TLS_ENABLED" = "true" ] \
   TEMPLATE="/etc/nginx/nginx.tls.conf.template"
 fi
 
-envsubst '${DOMAIN} ${AUTH_DOMAIN} ${MEDIA_DOMAIN} ${UPSTREAM_FRONT} ${UPSTREAM_API} ${UPSTREAM_AUTHENTIK} ${UPSTREAM_MINIO} ${UPSTREAM_MINIO_HOST}' \
+envsubst '${DOMAIN} ${AUTH_DOMAIN} ${MEDIA_DOMAIN} ${UPSTREAM_FRONT} ${UPSTREAM_API} ${UPSTREAM_AUTHENTIK} ${UPSTREAM_S3_HOST}' \
   < "$TEMPLATE" \
   > /etc/nginx/nginx.conf
 

@@ -1,15 +1,17 @@
 # Racing Manager — production infra (year 1)
 
-Two-host Docker Compose layout: **data** (Postgres) and **app** (nginx TLS + Nest + Authentik + front + MinIO). SSH via jump — see [ACCESS.md](ACCESS.md). Specs: [VPS.md](VPS.md).
+Two-host Docker Compose layout: **data** (Postgres) and **app** (nginx TLS + Nest + Authentik + front). Media: **Timeweb Cloud S3**. SSH via jump — see [ACCESS.md](ACCESS.md). Specs: [VPS.md](VPS.md).
 
 ```text
 Users ──HTTPS──► app nginx
                    ├─ /            → front (static)
                    ├─ /api /media  → racing_manager_back
                    ├─ auth.*       → Authentik
-                   └─ media.*      → MinIO (same host, docker network)
+                   └─ media.*      → Timeweb S3 proxy (optional; public URLs also hit s3.twcstorage.ru)
 
 app ──private──► data (Postgres main/CMS/Authentik)
+app ──HTTPS──► Timeweb S3 (s3.twcstorage.ru)
+
 ```
 
 ## Quick start (prod)
@@ -35,7 +37,7 @@ docker compose up -d --force-recreate nginx api
 ```
 
 4. Configure Authentik OIDC (see [AUTHENTIK.md](AUTHENTIK.md)).
-5. Enable backups: Postgres cron on **data**, MinIO cron on **app** ([backups/](backups/)).
+5. Enable backups: Postgres cron on **data**, optional S3 mirror on **app** ([backups/](backups/)).
 6. Sentry Uptime → `https://<DOMAIN>/health` and `https://<DOMAIN>/api/health`.
 
 ## Stage
@@ -53,8 +55,8 @@ Local stacks under `racing_manager_db/`, `nginx/`, `observability/` stay for dev
 | [ACCESS.md](ACCESS.md) | Host IPs, SSH jump, ufw, Beekeeper tunnel |
 | [VPS.md](VPS.md) | Rental specs + firewall checklist |
 | [data/](data/) | Data VPS compose (Postgres ×3, Alloy) |
-| [app/](app/) | App VPS compose (nginx TLS, front, API, CMS, Authentik, MinIO, Alloy) |
+| [app/](app/) | App VPS compose (nginx TLS, front, API, CMS, Authentik, Alloy) |
 | [stage/](stage/) | Single-VPS stage |
 | [AUTHENTIK.md](AUTHENTIK.md) | OIDC application setup |
-| [backups/](backups/) | pg_dump / MinIO / Sentry notes |
+| [backups/](backups/) | pg_dump / S3 mirror / Sentry notes |
 | [scripts/firewall.sh](scripts/firewall.sh) | Example ufw rules |
