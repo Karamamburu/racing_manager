@@ -17,21 +17,20 @@ Test restore on stage before you need it:
 ./infra/backups/restore.sh main /var/backups/racing-manager/latest/postgres_main.dump
 ```
 
-## MinIO
+## Object storage (Timeweb S3)
 
-On the **app** host (MinIO runs there):
+Media lives in Timeweb Cloud S3 (`s3.twcstorage.ru`). Optional weekly local mirror on the **app** host:
 
 ```bash
-# weekly — see crontab.example
-./infra/backups/backup-minio.sh
+./infra/backups/backup-s3.sh
 ```
 
-`backup-minio.sh` mirrors the media bucket into `/var/backups/racing-manager/minio/`, prunes after 14 days, and optionally `rsync`s to `BACKUP_OFFSITE`.
+Timeweb already keeps object durability; this script is an extra offsite/local copy via `aws s3 sync`.
 
 ## Alloy → Grafana Cloud Loki
 
 - **data** host: `infra/observability/config.data.alloy` (Postgres containers)
-- **app** host: `infra/observability/config.app.alloy` (Nest log files + app/MinIO containers)
+- **app** host: `infra/observability/config.app.alloy` (Nest log files + app containers)
 
 Credentials: same `GRAFANA_LOKI_*` as local [`observability/`](../observability/).
 

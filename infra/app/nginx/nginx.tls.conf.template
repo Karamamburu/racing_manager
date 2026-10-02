@@ -37,9 +37,7 @@ http {
     server ${UPSTREAM_AUTHENTIK};
   }
 
-  upstream minio {
-    server ${UPSTREAM_MINIO};
-  }
+  # media.* → Timeweb S3 (path-style). Public object URLs also use S3_PUBLIC_BASE_URL directly.
 
   # ACME + temporary HTTP until TLS certs exist
   server {
@@ -141,9 +139,10 @@ http {
     ssl_session_cache shared:SSL:10m;
 
     location / {
-      proxy_pass http://minio;
+      proxy_pass https://${UPSTREAM_S3_HOST};
       proxy_http_version 1.1;
-      proxy_set_header Host ${UPSTREAM_MINIO_HOST};
+      proxy_ssl_server_name on;
+      proxy_set_header Host ${UPSTREAM_S3_HOST};
       proxy_set_header X-Real-IP $remote_addr;
       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
       proxy_set_header X-Forwarded-Proto $scheme;

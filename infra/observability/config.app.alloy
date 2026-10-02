@@ -7,7 +7,7 @@ discovery.relabel "racing_manager_containers" {
 
   rule {
     source_labels = ["__meta_docker_container_name"]
-    regex         = "/(racing_manager_nginx|racing_manager_front|racing_manager_back|competition_managment_service|racing_manager_authentik_server|racing_manager_authentik_worker|racing_manager_minio|racing_manager_minio_init)"
+    regex         = "/(racing_manager_nginx|racing_manager_front|racing_manager_back|competition_managment_service|racing_manager_authentik_server|racing_manager_authentik_worker)"
     action        = "keep"
   }
 

@@ -17,7 +17,7 @@ Internet ──✗──► app/data :22 :3389 ; data :5432…5434
 | Alias | Role | Public IP | Linux user |
 |-------|------|-----------|------------|
 | `jump` | Bastion (SSH entry only) | `78.40.217.232` | `karamamburu` |
-| `app` | nginx, front, API, CMS, Authentik, MinIO | `77.91.95.235` | `karamamburu` |
+| `app` | nginx, front, API, CMS, Authentik | `77.91.95.235` | `karamamburu` |
 | `data` | Postgres ×3 | `141.105.68.153` | `karamamburu` |
 
 Key: `~/.ssh/id_ed25519` (same key on Mac and authorized on all three hosts).
