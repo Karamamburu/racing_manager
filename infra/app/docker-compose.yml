@@ -1,4 +1,4 @@
-# App host: edge nginx (TLS), SPA, Nest API/CMS, Authentik, Alloy.
+# App host: edge nginx (TLS), SPA, Nest API/CMS, Authentik, MinIO, Alloy.
 # Build context paths are relative to this file → repo root via ../..
 
 services:
@@ -16,8 +16,8 @@ services:
       UPSTREAM_FRONT: front:80
       UPSTREAM_API: api:4000
       UPSTREAM_AUTHENTIK: authentik_server:9000
-      UPSTREAM_MINIO: ${DATA_HOST}:9000
-      UPSTREAM_MINIO_HOST: ${DATA_HOST}
+      UPSTREAM_MINIO: minio:9000
+      UPSTREAM_MINIO_HOST: minio
       TLS_ENABLED: ${TLS_ENABLED:-false}
     volumes:
       - ./nginx/nginx.http.conf.template:/etc/nginx/nginx.http.conf.template:ro
@@ -30,6 +30,7 @@ services:
       - front
       - api
       - authentik_server
+      - minio
 
   front:
     build:
@@ -63,7 +64,7 @@ services:
       POST_LOGIN_REDIRECT_URI: ${PUBLIC_SCHEME:-http}://${DOMAIN}/cabinet
       POST_LOGOUT_REDIRECT_URI: ${PUBLIC_SCHEME:-http}://${DOMAIN}/
       CMS_BASE_URL: http://cms:4100
-      S3_ENDPOINT: http://${DATA_HOST}:9000
+      S3_ENDPOINT: http://minio:9000
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_BUCKET: ${MINIO_BUCKET}
       S3_ACCESS_KEY: ${MINIO_ROOT_USER}
@@ -80,6 +81,7 @@ services:
       - nest_logs:/var/log/racing-manager
     depends_on:
       - cms
+      - minio
 
   cms:
     build:
@@ -135,6 +137,39 @@ services:
       - authentik_media:/media
       - authentik_templates:/templates
 
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: racing_manager_minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    expose:
+      - "9000"
+    # API only on docker network (nginx/api). Console via SSH tunnel if needed.
+
+  minio_init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    container_name: racing_manager_minio_init
+    depends_on:
+      - minio
+    restart: on-failure
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do
+          sleep 1
+        done
+        mc mb -p "local/$$MINIO_BUCKET" || true
+        mc anonymous set download "local/$$MINIO_BUCKET"
+
   certbot:
     image: certbot/certbot:v3.1.0
     container_name: racing_manager_certbot
@@ -170,4 +205,5 @@ volumes:
   authentik_templates:
   certbot_www:
   certbot_certs:
+  minio_data:
   alloy_data:

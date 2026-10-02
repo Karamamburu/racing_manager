@@ -5,7 +5,7 @@
 # added BEFORE `ufw enable`, so you do not lock yourself out again.
 #
 # Usage (on the target host):
-#   export APP_PUBLIC_IP=77.91.95.235          # app → data (Postgres/MinIO)
+#   export APP_PUBLIC_IP=77.91.95.235          # app → data (Postgres)
 #   export ADMIN_CIDR=0.0.0.0/0                # or your home/VPN/Tailscale CIDR
 #   export ALLOW_RDP=1                         # Ubuntu Desktop xrdp
 #   sudo -E ./infra/scripts/firewall.sh data   # on db-server
@@ -22,7 +22,7 @@ ALLOW_RDP="${ALLOW_RDP:-1}"
 DRY_RUN="${DRY_RUN:-0}"
 
 if [[ "$ROLE" == "data" ]]; then
-  APP_PUBLIC_IP="${APP_PUBLIC_IP:?set APP_PUBLIC_IP to the app host public IP (source for Postgres/MinIO)}"
+  APP_PUBLIC_IP="${APP_PUBLIC_IP:?set APP_PUBLIC_IP to the app host public IP (source for Postgres)}"
 fi
 
 if ! command -v ufw >/dev/null; then
@@ -60,11 +60,10 @@ case "$ROLE" in
     run ufw allow 443/tcp comment 'https'
     ;;
   data)
-    # Postgres + MinIO only from app. Never from 0.0.0.0/0.
+    # Postgres only from app. Never from 0.0.0.0/0. MinIO is on the app host.
     run ufw allow from "$APP_PUBLIC_IP" to any port 5432 proto tcp comment 'postgres-main'
     run ufw allow from "$APP_PUBLIC_IP" to any port 5433 proto tcp comment 'postgres-cms'
     run ufw allow from "$APP_PUBLIC_IP" to any port 5434 proto tcp comment 'postgres-authentik'
-    run ufw allow from "$APP_PUBLIC_IP" to any port 9000 proto tcp comment 'minio-api'
     ;;
   *)
     echo "unknown role: $ROLE (expected app|data)" >&2
