@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Daily Postgres dumps + weekly MinIO mirror. Run on the data host.
+# Daily Postgres dumps. Run on the data host.
 # Usage: ./backup.sh
-# Env: copy from infra/data/.env or export BACKUP_ROOT / offsite rsync target.
+# Env: source infra/data/.env or set DATA_ENV / BACKUP_ROOT / BACKUP_OFFSITE.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,20 +30,6 @@ docker exec competition_managment_db \
 docker exec racing_manager_authentik_db \
   pg_dump -U "$POSTGRES_AUTHENTIK_USER" -d "$POSTGRES_AUTHENTIK_DB" --format=custom \
   > "${DEST}/postgres_authentik.dump"
-
-# Weekly MinIO mirror (Sunday UTC) — full bucket copy into backup tree.
-if [ "$(date -u +%u)" = "7" ]; then
-  echo "==> Weekly MinIO mirror"
-  mkdir -p "${DEST}/minio"
-  docker run --rm --network container:racing_manager_minio \
-    -v "${DEST}/minio:/backup" \
-    -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD -e MINIO_BUCKET \
-    minio/mc:RELEASE.2025-08-13T08-35-41Z \
-    /bin/sh -c '
-      mc alias set local http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
-      mc mirror --overwrite "local/$MINIO_BUCKET" /backup
-    '
-fi
 
 # Keep a "latest" pointer for easy restore drills
 ln -sfn "$DEST" "${BACKUP_ROOT}/latest"

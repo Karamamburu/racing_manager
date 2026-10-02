@@ -8,8 +8,8 @@ Mac ──SSH──► jump (78.40.217.232)
                └──SSH/RDP──► data (141.105.68.153)
 
 Internet ──80/443──► app
-app ──5432/5433/5434/9000──► data
-Internet ──✗──► app/data :22 :3389 ; data :5432…9000
+app ──5432/5433/5434──► data
+Internet ──✗──► app/data :22 :3389 ; data :5432…5434
 ```
 
 ## Inventory
@@ -17,8 +17,8 @@ Internet ──✗──► app/data :22 :3389 ; data :5432…9000
 | Alias | Role | Public IP | Linux user |
 |-------|------|-----------|------------|
 | `jump` | Bastion (SSH entry only) | `78.40.217.232` | `karamamburu` |
-| `app` | nginx, front, API, CMS, Authentik | `77.91.95.235` | `karamamburu` |
-| `data` | Postgres ×3, MinIO | `141.105.68.153` | `karamamburu` |
+| `app` | nginx, front, API, CMS, Authentik, MinIO | `77.91.95.235` | `karamamburu` |
+| `data` | Postgres ×3 | `141.105.68.153` | `karamamburu` |
 
 Key: `~/.ssh/id_ed25519` (same key on Mac and authorized on all three hosts).
 
@@ -74,7 +74,7 @@ Without aliases: `ssh -J karamamburu@78.40.217.232 karamamburu@77.91.95.235`.
 | Allow | From |
 |-------|------|
 | `22`, `3389` | `78.40.217.232` (jump) only |
-| `5432`, `5433`, `5434`, `9000` | `77.91.95.235` (app) only |
+| `5432`, `5433`, `5434` | `77.91.95.235` (app) only |
 
 Example on **app** (run over an existing session; verify a second login via jump before closing):
 
@@ -95,7 +95,6 @@ On **data**, same SSH/RDP-from-jump rules, plus:
 sudo ufw allow from 77.91.95.235 to any port 5432 proto tcp comment 'postgres-main'
 sudo ufw allow from 77.91.95.235 to any port 5433 proto tcp comment 'postgres-cms'
 sudo ufw allow from 77.91.95.235 to any port 5434 proto tcp comment 'postgres-authentik'
-sudo ufw allow from 77.91.95.235 to any port 9000 proto tcp comment 'minio'
 ```
 
 Safe rollout: add jump rules first, test `ssh app` / `ssh data`, then delete any leftover `Anywhere` rules for `22`/`3389`.

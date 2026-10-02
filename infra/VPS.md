@@ -1,14 +1,14 @@
 # VPS rental checklist (year 1)
 
-Rent two VPS in the **same region** with a **private network** (or VPC). Do not expose DB/MinIO ports on the public NIC.
+Rent two VPS in the **same region** with a **private network** (or VPC). Do not expose DB ports on the public NIC. MinIO stays on the app host (docker network only).
 
 ## Specs
 
 | Host | Role | vCPU | RAM | Disk | Public ports |
 |------|------|------|-----|------|--------------|
 | **jump** | Bastion (SSH entry) | 1–2 | 1–2 GB | 20 GB | 22 (admin) |
-| **app** | nginx TLS, front, API, CMS, Authentik, Alloy | 4 | 8 GB | 40–60 GB SSD | 80, 443; 22/3389 from jump only |
-| **data** | Postgres ×3 (main, CMS, Authentik), MinIO, Alloy (DB logs) | 2 | 4 GB | 80–160 GB SSD | 22/3389 from jump; DB/MinIO only from app |
+| **app** | nginx TLS, front, API, CMS, Authentik, MinIO, Alloy | 4 | 8 GB | 80–120 GB SSD | 80, 443; 22/3389 from jump only |
+| **data** | Postgres ×3 (main, CMS, Authentik), Alloy (DB logs) | 2 | 4 GB | 40–80 GB SSD | 22/3389 from jump; DB only from app |
 
 Optional **stage**: one VPS 2–4 vCPU / 4–8 GB / 60 GB — use [`stage/`](stage/).
 
@@ -37,14 +37,14 @@ Internet ──► app:80/443 (nginx)
                │
                ├── front / api / cms / authentik (localhost docker net)
                │
-               └── (restricted) ──► data:5432,5433,5434,9000
+               └── (restricted) ──► data:5432,5433,5434
 ```
 
 ## Checklist
 
 - [ ] jump VPS created (bastion)
-- [ ] app VPS created (4/8, 40–60 GB)
-- [ ] data VPS created (2/4, 80–160 GB)
+- [ ] app VPS created (4/8, 80–120 GB)
+- [ ] data VPS created (2/4, 40–80 GB)
 - [ ] Private network / VPC attached (or firewall restricts DB to app IP)
 - [ ] `~/.ssh/config` with ProxyJump (see [ACCESS.md](ACCESS.md))
 - [ ] Firewall: app/data admin only from jump; DB only from app
