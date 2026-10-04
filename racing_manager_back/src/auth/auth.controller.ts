@@ -54,6 +54,12 @@ export class AuthController {
     return res.redirect(url);
   }
 
+  @Get('register')
+  register(@Req() req: Request, @Res() res: Response) {
+    const url = this.authService.getRegistrationUrl(req);
+    return res.redirect(url);
+  }
+
   @Get('callback')
   async callback(@Req() req: Request, @Res() res: Response) {
     const appHost = process.env.APP_HOST ?? 'http://localhost:4000';

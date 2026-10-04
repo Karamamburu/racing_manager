@@ -94,6 +94,26 @@ export class AuthService implements OnModuleInit {
     });
   }
 
+  getRegistrationUrl(req: RequestWithSession): string {
+    const authorizationUrl = this.getAuthorizationUrl(req);
+    const authorize = new URL(authorizationUrl);
+    const flowSlug =
+      this.config.get<string>('AUTHENTIK_ENROLLMENT_FLOW') ??
+      'default-source-enrollment';
+    const enrollment = new URL(
+      `/if/flow/${encodeURIComponent(flowSlug)}/`,
+      authorize.origin,
+    );
+    authorize.searchParams.forEach((value, key) => {
+      enrollment.searchParams.append(key, value);
+    });
+    enrollment.searchParams.set(
+      'next',
+      `${authorize.pathname}${authorize.search}`,
+    );
+    return enrollment.toString();
+  }
+
   async handleCallback(
     req: RequestWithSession,
     fullUrl: string,

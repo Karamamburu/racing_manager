@@ -181,14 +181,29 @@ body {
   clip: rect(0 0 0 0);
 }
 
-.app-header {
+.ant-layout-header.app-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  column-gap: 16px;
+  row-gap: 8px;
+  height: auto;
+  min-height: 64px;
+  line-height: normal;
   background: #fff;
-  padding: 0 24px;
+  padding: 12px 24px;
   border-bottom: 1px solid #dce7e3;
-  line-height: 0;
+}
+
+.app-header-title {
+  flex: 1 1 12rem;
+  min-width: min(100%, 12rem);
+}
+
+.app-header-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .app-header-avatar {
@@ -489,8 +504,8 @@ body {
 }
 
 @media (max-width: 768px) {
-  .app-header {
-    padding: 0 16px;
+  .ant-layout-header.app-header {
+    padding: 12px 16px;
   }
 
   .app-content {
