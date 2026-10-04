@@ -41,7 +41,7 @@ export class RegistrationsService {
 
   public async createForUser(
     eventId: string,
-    payload: { userId: string; formatId?: number },
+    payload: { userId: string; formatId?: number; startNumber?: number },
   ): Promise<{ status: number; data: RegistrationResponse }> {
     return apiClient.postResult<RegistrationResponse>(
       `/events/${eventId}/registrations/for-user`,

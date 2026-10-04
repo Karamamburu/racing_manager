@@ -84,6 +84,7 @@ type RegistrationWritePayload = ParsedCreateRegistration & {
   eventId: string;
   userId: string | null;
   status: string;
+  startNumber: number | null;
 };
 
 type RegistrationsStore = {
@@ -144,6 +145,7 @@ const USER_ID_PATTERN =
 function parseStaffRegistrationBody(body: unknown): {
   userId: string;
   formatId: number | null;
+  startNumber: number | null;
 } {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new BadRequestException('Request body must be a JSON object.');
@@ -159,7 +161,23 @@ function parseStaffRegistrationBody(body: unknown): {
     }
     formatId = raw.formatId;
   }
-  return { userId: raw.userId, formatId };
+  let startNumber: number | null = null;
+  if (raw.startNumber != null && raw.startNumber !== '') {
+    const numeric = typeof raw.startNumber === 'number' ? raw.startNumber : Number(raw.startNumber);
+    if (!Number.isInteger(numeric) || numeric < 1) {
+      throw new BadRequestException('startNumber must be an integer greater than 0.');
+    }
+    startNumber = numeric;
+  }
+  return { userId: raw.userId, formatId, startNumber };
+}
+
+function uniqueConstraintName(error: unknown): string {
+  if (!error || typeof error !== 'object' || !('meta' in error)) return '';
+  const target = (error as { meta?: { target?: unknown } }).meta?.target;
+  if (typeof target === 'string') return target;
+  if (Array.isArray(target)) return target.map(String).join(' ');
+  return '';
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -262,6 +280,7 @@ export class RegistrationsService {
       target.id,
       { ...parsed, formatId },
       authentikId,
+      parsedBody.startNumber,
     );
   }
 
@@ -492,7 +511,12 @@ export class RegistrationsService {
     userId: string,
     payload: ParsedCreateRegistration,
     registeredBy?: string,
+    startNumber?: number | null,
   ): Promise<RegistrationResponse> {
+    const assignedNumber = startNumber ?? null;
+    const status = assignedNumber
+      ? RegistrationStatusCode.CONFIRMED
+      : RegistrationStatusCode.REGISTERED;
     const existing = await this.store.registration.findFirst({
       where: {
         eventId,
@@ -502,6 +526,14 @@ export class RegistrationsService {
     });
     if (existing) {
       throw new ConflictException('Already registered for this event.');
+    }
+    if (assignedNumber != null) {
+      const taken = await this.store.registration.findFirst({
+        where: { eventId, startNumber: assignedNumber },
+      });
+      if (taken) {
+        throw new ConflictException('Этот стартовый номер уже занят.');
+      }
     }
 
     const withdrawn = await this.store.registration.findFirst({
@@ -517,8 +549,8 @@ export class RegistrationsService {
         where: { id: withdrawn.id },
         data: {
           ...payload,
-          status: RegistrationStatusCode.REGISTERED,
-          startNumber: null,
+          status,
+          startNumber: assignedNumber,
           registeredAt: new Date(),
         },
       });
@@ -528,6 +560,7 @@ export class RegistrationsService {
         registrationId: restored.id,
         userId,
         restored: true,
+        startNumber: assignedNumber,
         ...(registeredBy ? { registeredBy } : {}),
       });
       return this.toResponse(restored);
@@ -539,7 +572,8 @@ export class RegistrationsService {
           eventId,
           userId,
           ...payload,
-          status: RegistrationStatusCode.REGISTERED,
+          status,
+          startNumber: assignedNumber,
         },
       });
       logEvent(this.logger, {
@@ -547,11 +581,16 @@ export class RegistrationsService {
         eventId,
         registrationId: created.id,
         userId,
+        startNumber: assignedNumber,
         ...(registeredBy ? { registeredBy } : {}),
       });
       return this.toResponse(created);
     } catch (error) {
       if (isUniqueViolation(error)) {
+        const constraint = uniqueConstraintName(error);
+        if (assignedNumber != null && constraint.includes('start_number')) {
+          throw new ConflictException('Этот стартовый номер уже занят.');
+        }
         throw new ConflictException('Already registered for this event.');
       }
       throw error;

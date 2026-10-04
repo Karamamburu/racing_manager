@@ -1,4 +1,4 @@
-import { Input, Modal, Radio, Select, Space, Spin, Typography, message } from 'antd';
+import { Input, InputNumber, Modal, Radio, Select, Space, Spin, Typography, message } from 'antd';
 import { useEffect, useState } from 'react';
 import {
   registrationsService,
@@ -32,6 +32,7 @@ export function RegisterParticipantModal({
   const [searchError, setSearchError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [formatId, setFormatId] = useState<number | undefined>(undefined);
+  const [startNumber, setStartNumber] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -45,6 +46,7 @@ export function RegisterParticipantModal({
     setSearching(false);
     setSelectedId(null);
     setFormatId(undefined);
+    setStartNumber(null);
   }, [formats, open]);
 
   useEffect(() => {
@@ -97,14 +99,24 @@ export function RegisterParticipantModal({
       await registrationsService.createForUser(eventId, {
         userId: selected.id,
         ...(formatId != null ? { formatId } : {}),
+        ...(startNumber != null ? { startNumber } : {}),
       });
-      message.success(`${displayName(selected)} зарегистрирован`);
+      message.success(
+        startNumber != null
+          ? `${displayName(selected)} зарегистрирован, номер ${startNumber} выдан`
+          : `${displayName(selected)} зарегистрирован`,
+      );
       await onRegistered();
       onClose();
     } catch (error) {
       const statusCode = registrationsService.getStatus(error);
       if (statusCode === 409) {
-        message.error('Участник уже зарегистрирован на это мероприятие.');
+        const text = registrationsService.getErrorMessage(error);
+        message.error(
+          text === 'Already registered for this event.'
+            ? 'Участник уже зарегистрирован на это мероприятие.'
+            : text,
+        );
       } else if (statusCode === 403) {
         message.error('Недостаточно прав. Заявку может создать организатор или администратор.');
       } else {
@@ -192,6 +204,19 @@ export function RegisterParticipantModal({
                 label: format.name,
               }))}
               onChange={setFormatId}
+            />
+          </div>
+        ) : null}
+        {selected ? (
+          <div>
+            <Typography.Text>Стартовый номер</Typography.Text>
+            <InputNumber
+              min={1}
+              precision={0}
+              style={{ width: '100%', marginTop: 8 }}
+              placeholder="Необязательно"
+              value={startNumber}
+              onChange={(value) => setStartNumber(typeof value === 'number' ? value : null)}
             />
           </div>
         ) : null}
