@@ -44,6 +44,7 @@ import { EventTrackMap } from './components/EventTrackMap';
 import { EventStatusSelect } from './components/EventStatusSelect';
 import { FinishTimeCell } from './components/FinishTimeCell';
 import { RegisterEventModal } from './components/RegisterEventModal';
+import { RegisterParticipantModal } from './components/RegisterParticipantModal';
 import { SeedTestRegistrationsModal } from './components/SeedTestRegistrationsModal';
 import { RegistrationStatusSelect } from './components/RegistrationStatusSelect';
 import { StartNumberCell } from './components/StartNumberCell';
@@ -449,6 +450,7 @@ export function EventPage() {
   const sessionQuery = useSessionQuery();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
+  const [isRegisterParticipantOpen, setIsRegisterParticipantOpen] = useState(false);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
   const [isCancelRegistrationOpen, setIsCancelRegistrationOpen] = useState(false);
   const [isTestRegistrationsOpen, setIsTestRegistrationsOpen] = useState(false);
@@ -526,6 +528,12 @@ export function EventPage() {
         ? closedReason ?? undefined
         : undefined;
   const showRegister = event.status === 'PLANNED' && !myRegistration;
+  const canRegisterParticipant =
+    canCreateEvents(session?.roles) && event.status === 'PLANNED';
+  const canSeedTestRegistrations =
+    isAdministrator(session?.roles) &&
+    !pastCompleted &&
+    event.status !== 'CANCELLED';
   const canWithdrawOwn =
     myRegistration != null &&
     isActiveRegistrationStatus(myRegistration.status) &&
@@ -876,10 +884,17 @@ export function EventPage() {
         <Card
           title={`Зарегистрированные участники (${event.registrations.length})`}
           extra={
-            isAdministrator(session?.roles) &&
-            !pastCompleted &&
-            event.status !== 'CANCELLED' ? (
-              <Button onClick={() => setIsTestRegistrationsOpen(true)}>Тестовые заявки</Button>
+            canRegisterParticipant || canSeedTestRegistrations ? (
+              <Space wrap>
+                {canRegisterParticipant ? (
+                  <Button type="primary" onClick={() => setIsRegisterParticipantOpen(true)}>
+                    Зарегистрировать участника
+                  </Button>
+                ) : null}
+                {canSeedTestRegistrations ? (
+                  <Button onClick={() => setIsTestRegistrationsOpen(true)}>Тестовые заявки</Button>
+                ) : null}
+              </Space>
             ) : null
           }
         >
@@ -1040,6 +1055,13 @@ export function EventPage() {
         eventId={event.id}
         formats={event.formats}
         onClose={() => setIsRegisterOpen(false)}
+        onRegistered={refreshEvent}
+      />
+      <RegisterParticipantModal
+        open={isRegisterParticipantOpen}
+        eventId={event.id}
+        formats={event.formats}
+        onClose={() => setIsRegisterParticipantOpen(false)}
         onRegistered={refreshEvent}
       />
       <Modal

@@ -18,6 +18,7 @@ import {
 } from '../events/event-status';
 import {
   mergeRegistrationFields,
+  registrationFieldsFromProfile,
   type ParsedCreateRegistration,
 } from './parse-create-registration';
 import { parseUpdateRegistrationBody } from './parse-update-registration';
@@ -137,6 +138,30 @@ function parseSeedTestRegistrationsBody(body: unknown): {
   return { count: raw.count, gender: raw.gender, formatId };
 }
 
+const USER_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function parseStaffRegistrationBody(body: unknown): {
+  userId: string;
+  formatId: number | null;
+} {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new BadRequestException('Request body must be a JSON object.');
+  }
+  const raw = body as Record<string, unknown>;
+  if (typeof raw.userId !== 'string' || !USER_ID_PATTERN.test(raw.userId)) {
+    throw new BadRequestException('userId must be a UUID.');
+  }
+  let formatId: number | null = null;
+  if (raw.formatId != null && raw.formatId !== '') {
+    if (typeof raw.formatId !== 'number' || !Number.isInteger(raw.formatId) || raw.formatId < 1) {
+      throw new BadRequestException('formatId must be a positive integer.');
+    }
+    formatId = raw.formatId;
+  }
+  return { userId: raw.userId, formatId };
+}
+
 function isUniqueViolation(error: unknown): boolean {
   return Boolean(
     error &&
@@ -175,69 +200,69 @@ export class RegistrationsService {
     const event = await this.requirePlannedEvent(eventId);
     this.assertRegistrationWindow(event);
     const formatId = this.resolveFormatId(event, parsed.formatId);
-    const payload = { ...parsed, formatId };
+    return this.persistUserRegistration(eventId, actor.id, { ...parsed, formatId });
+  }
 
-    const existing = await this.store.registration.findFirst({
+  async searchUsersForRegistration(
+    authentikId: string | undefined,
+    eventId: string,
+    query: string,
+  ) {
+    await this.rolesService.assertHasAnyRole(authentikId, ADMIN_ROLE_CODES);
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      select: { id: true },
+    });
+    if (!event) {
+      throw new NotFoundException('Event not found.');
+    }
+
+    const users = await this.usersService.searchByIdentity(query);
+    if (users.length === 0) return [];
+
+    const registered = await this.prisma.registration.findMany({
       where: {
         eventId,
-        userId: actor.id,
+        userId: { in: users.map((user) => user.id) },
         status: { in: [...LISTED_REGISTRATION_STATUSES] },
       },
+      select: { userId: true },
     });
-    if (existing) {
-      throw new ConflictException('Already registered for this event.');
+    const registeredIds = new Set(
+      registered.flatMap((row) => (row.userId ? [row.userId] : [])),
+    );
+    return users.map((user) => ({
+      ...user,
+      alreadyRegistered: registeredIds.has(user.id),
+    }));
+  }
+
+  async createForParticipant(
+    authentikId: string | undefined,
+    eventId: string,
+    body: unknown,
+  ): Promise<RegistrationResponse> {
+    await this.rolesService.assertHasAnyRole(authentikId, ADMIN_ROLE_CODES);
+    const parsedBody = parseStaffRegistrationBody(body);
+    const target = await this.usersService.findById(parsedBody.userId);
+    if (!target) {
+      throw new NotFoundException('User not found.');
+    }
+    if (!target.firstName || !target.lastName || !target.gender || !target.birthDate) {
+      throw new BadRequestException(
+        'Профиль пользователя не заполнен: нужны имя, фамилия, пол и дата рождения.',
+      );
     }
 
-    const withdrawn = await this.store.registration.findFirst({
-      where: {
-        eventId,
-        userId: actor.id,
-        status: RegistrationStatusCode.WITHDRAWN,
-      },
-      orderBy: { registeredAt: 'desc' },
-    });
-    if (withdrawn) {
-      const restored = await this.store.registration.update({
-        where: { id: withdrawn.id },
-        data: {
-          ...payload,
-          status: RegistrationStatusCode.REGISTERED,
-          startNumber: null,
-          registeredAt: new Date(),
-        },
-      });
-      logEvent(this.logger, {
-        event: 'registration.created',
-        eventId,
-        registrationId: restored.id,
-        userId: actor.id,
-        restored: true,
-      });
-      return this.toResponse(restored);
-    }
-
-    try {
-      const created = await this.store.registration.create({
-        data: {
-          eventId,
-          userId: actor.id,
-          ...payload,
-          status: RegistrationStatusCode.REGISTERED,
-        },
-      });
-      logEvent(this.logger, {
-        event: 'registration.created',
-        eventId,
-        registrationId: created.id,
-        userId: actor.id,
-      });
-      return this.toResponse(created);
-    } catch (error) {
-      if (isUniqueViolation(error)) {
-        throw new ConflictException('Already registered for this event.');
-      }
-      throw error;
-    }
+    const parsed = registrationFieldsFromProfile(target);
+    const event = await this.requirePlannedEvent(eventId);
+    const formatId = this.resolveFormatId(event, parsedBody.formatId);
+    return this.persistUserRegistration(
+      eventId,
+      target.id,
+      { ...parsed, formatId },
+      authentikId,
+    );
   }
 
   async seedTestRegistrations(
@@ -460,6 +485,77 @@ export class RegistrationsService {
       userSub: authentikId,
     });
     return this.toResponse(updated);
+  }
+
+  private async persistUserRegistration(
+    eventId: string,
+    userId: string,
+    payload: ParsedCreateRegistration,
+    registeredBy?: string,
+  ): Promise<RegistrationResponse> {
+    const existing = await this.store.registration.findFirst({
+      where: {
+        eventId,
+        userId,
+        status: { in: [...LISTED_REGISTRATION_STATUSES] },
+      },
+    });
+    if (existing) {
+      throw new ConflictException('Already registered for this event.');
+    }
+
+    const withdrawn = await this.store.registration.findFirst({
+      where: {
+        eventId,
+        userId,
+        status: RegistrationStatusCode.WITHDRAWN,
+      },
+      orderBy: { registeredAt: 'desc' },
+    });
+    if (withdrawn) {
+      const restored = await this.store.registration.update({
+        where: { id: withdrawn.id },
+        data: {
+          ...payload,
+          status: RegistrationStatusCode.REGISTERED,
+          startNumber: null,
+          registeredAt: new Date(),
+        },
+      });
+      logEvent(this.logger, {
+        event: 'registration.created',
+        eventId,
+        registrationId: restored.id,
+        userId,
+        restored: true,
+        ...(registeredBy ? { registeredBy } : {}),
+      });
+      return this.toResponse(restored);
+    }
+
+    try {
+      const created = await this.store.registration.create({
+        data: {
+          eventId,
+          userId,
+          ...payload,
+          status: RegistrationStatusCode.REGISTERED,
+        },
+      });
+      logEvent(this.logger, {
+        event: 'registration.created',
+        eventId,
+        registrationId: created.id,
+        userId,
+        ...(registeredBy ? { registeredBy } : {}),
+      });
+      return this.toResponse(created);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ConflictException('Already registered for this event.');
+      }
+      throw error;
+    }
   }
 
   private async requireAuthenticatedUser(authentikId: string): Promise<AppUser> {

@@ -1,12 +1,14 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -31,6 +33,37 @@ export class RegistrationsController {
     @Body() body: unknown,
   ) {
     return this.registrationsService.create(
+      req.session?.userSub,
+      eventId,
+      body,
+    );
+  }
+
+  @Get('users')
+  @UseGuards(ConnectSidGuard, SessionAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLE_CODES)
+  searchUsers(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Query('q') query?: string,
+  ) {
+    return this.registrationsService.searchUsersForRegistration(
+      req.session?.userSub,
+      eventId,
+      query ?? '',
+    );
+  }
+
+  @Post('for-user')
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ConnectSidGuard, SessionAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLE_CODES)
+  createForUser(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Body() body: unknown,
+  ) {
+    return this.registrationsService.createForParticipant(
       req.session?.userSub,
       eventId,
       body,

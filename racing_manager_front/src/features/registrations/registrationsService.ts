@@ -8,6 +8,16 @@ import type {
   UpsertResultRequest,
 } from '../../shared/types/event';
 
+export type ParticipantSearchHit = {
+  id: string;
+  userName: string;
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  profileReady: boolean;
+  alreadyRegistered: boolean;
+};
+
 export class RegistrationsService {
   public async create(
     eventId: string,
@@ -16,6 +26,26 @@ export class RegistrationsService {
     return apiClient.postResult<RegistrationResponse>(
       `/events/${eventId}/registrations`,
       payload ?? {},
+    );
+  }
+
+  public async searchUsers(
+    eventId: string,
+    query: string,
+  ): Promise<ParticipantSearchHit[]> {
+    return apiClient.get<ParticipantSearchHit[]>(
+      `/events/${eventId}/registrations/users`,
+      { params: { q: query } },
+    );
+  }
+
+  public async createForUser(
+    eventId: string,
+    payload: { userId: string; formatId?: number },
+  ): Promise<{ status: number; data: RegistrationResponse }> {
+    return apiClient.postResult<RegistrationResponse>(
+      `/events/${eventId}/registrations/for-user`,
+      payload,
     );
   }
 
