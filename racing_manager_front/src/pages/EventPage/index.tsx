@@ -516,6 +516,15 @@ export function EventPage() {
   );
   const canRegister = isEventRegistrationOpen(event);
   const closedReason = registrationClosedReason(event);
+  const isPlatformUser = session?.authenticated === true;
+  const registerDisabled = !isPlatformUser || !canRegister;
+  const registerTooltip = !sessionQuery.isFetched
+    ? undefined
+    : !isPlatformUser
+      ? 'Регистрация на гонку доступна только зарегистрированным на платформе пользователям'
+      : !canRegister
+        ? closedReason ?? undefined
+        : undefined;
   const showRegister = event.status === 'PLANNED' && !myRegistration;
   const canWithdrawOwn =
     myRegistration != null &&
@@ -764,11 +773,11 @@ export function EventPage() {
         hasHeaderActions ? (
           <Space wrap>
             {showRegister ? (
-              <Tooltip title={!canRegister ? closedReason : undefined}>
+              <Tooltip title={registerTooltip}>
                 <span>
                   <Button
                     type="primary"
-                    disabled={!canRegister}
+                    disabled={registerDisabled}
                     onClick={() => setIsRegisterOpen(true)}
                   >
                     Зарегистрироваться

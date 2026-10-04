@@ -18,7 +18,6 @@ import {
 } from '../events/event-status';
 import {
   mergeRegistrationFields,
-  parseCreateRegistrationBody,
   type ParsedCreateRegistration,
 } from './parse-create-registration';
 import { parseUpdateRegistrationBody } from './parse-update-registration';
@@ -69,7 +68,6 @@ type StoredRegistration = {
   note: string | null;
   registeredAt: Date;
   updatedAt: Date;
-  format?: { name: string } | null;
 };
 
 type EventRegistrationWindow = {
@@ -167,68 +165,62 @@ export class RegistrationsService {
     eventId: string,
     body: unknown,
   ): Promise<RegistrationResponse> {
-    const actor = authentikId
-      ? await this.requireAuthenticatedUser(authentikId)
-      : null;
-    const parsed = actor
-      ? mergeRegistrationFields(actor, body)
-      : parseCreateRegistrationBody(body);
+    if (!authentikId) {
+      throw new UnauthorizedException(
+        'Not authenticated. Start with GET /auth/login.',
+      );
+    }
+    const actor = await this.requireAuthenticatedUser(authentikId);
+    const parsed = mergeRegistrationFields(actor, body);
     const event = await this.requirePlannedEvent(eventId);
     this.assertRegistrationWindow(event);
     const formatId = this.resolveFormatId(event, parsed.formatId);
     const payload = { ...parsed, formatId };
 
-    if (actor) {
-      const existing = await this.store.registration.findFirst({
-        where: {
-          eventId,
-          userId: actor.id,
-          status: { in: [...LISTED_REGISTRATION_STATUSES] },
-        },
-      });
-      if (existing) {
-        throw new ConflictException('Already registered for this event.');
-      }
+    const existing = await this.store.registration.findFirst({
+      where: {
+        eventId,
+        userId: actor.id,
+        status: { in: [...LISTED_REGISTRATION_STATUSES] },
+      },
+    });
+    if (existing) {
+      throw new ConflictException('Already registered for this event.');
+    }
 
-      const withdrawn = await this.store.registration.findFirst({
-        where: {
-          eventId,
-          userId: actor.id,
-          status: RegistrationStatusCode.WITHDRAWN,
+    const withdrawn = await this.store.registration.findFirst({
+      where: {
+        eventId,
+        userId: actor.id,
+        status: RegistrationStatusCode.WITHDRAWN,
+      },
+      orderBy: { registeredAt: 'desc' },
+    });
+    if (withdrawn) {
+      const restored = await this.store.registration.update({
+        where: { id: withdrawn.id },
+        data: {
+          ...payload,
+          status: RegistrationStatusCode.REGISTERED,
+          startNumber: null,
+          registeredAt: new Date(),
         },
-        orderBy: { registeredAt: 'desc' },
       });
-      if (withdrawn) {
-        const restored = await this.store.registration.update({
-          where: { id: withdrawn.id },
-          data: {
-            ...payload,
-            status: RegistrationStatusCode.REGISTERED,
-            startNumber: null,
-            registeredAt: new Date(),
-          },
-        });
-        logEvent(this.logger, {
-          event: 'registration.created',
-          eventId,
-          registrationId: restored.id,
-          userId: actor.id,
-          restored: true,
-        });
-        return this.toResponse(restored);
-      }
-    } else {
-      const duplicate = await this.findActiveGuestPerson(eventId, payload);
-      if (duplicate) {
-        throw new ConflictException(this.duplicatePersonMessage(duplicate));
-      }
+      logEvent(this.logger, {
+        event: 'registration.created',
+        eventId,
+        registrationId: restored.id,
+        userId: actor.id,
+        restored: true,
+      });
+      return this.toResponse(restored);
     }
 
     try {
       const created = await this.store.registration.create({
         data: {
           eventId,
-          userId: actor?.id ?? null,
+          userId: actor.id,
           ...payload,
           status: RegistrationStatusCode.REGISTERED,
         },
@@ -237,17 +229,11 @@ export class RegistrationsService {
         event: 'registration.created',
         eventId,
         registrationId: created.id,
-        userId: actor?.id ?? null,
+        userId: actor.id,
       });
       return this.toResponse(created);
     } catch (error) {
       if (isUniqueViolation(error)) {
-        if (!actor) {
-          const duplicate = await this.findActiveGuestPerson(eventId, payload);
-          if (duplicate) {
-            throw new ConflictException(this.duplicatePersonMessage(duplicate));
-          }
-        }
         throw new ConflictException('Already registered for this event.');
       }
       throw error;
@@ -587,32 +573,6 @@ export class RegistrationsService {
       );
     }
     return resolved;
-  }
-
-  private async findActiveGuestPerson(
-    eventId: string,
-    person: Pick<ParsedCreateRegistration, 'firstName' | 'lastName' | 'birthYear'>,
-  ): Promise<StoredRegistration | null> {
-    return this.store.registration.findFirst({
-      where: {
-        eventId,
-        userId: null,
-        birthYear: person.birthYear,
-        firstName: { equals: person.firstName, mode: 'insensitive' },
-        lastName: { equals: person.lastName, mode: 'insensitive' },
-        status: { in: [...LISTED_REGISTRATION_STATUSES] },
-      },
-      include: { format: { select: { name: true } } },
-    });
-  }
-
-  private duplicatePersonMessage(row: StoredRegistration): string {
-    const person = `${row.firstName} ${row.lastName} ${row.birthYear}`;
-    const formatName = row.format?.name;
-    if (formatName) {
-      return `Участник «${person}» уже зарегистрирован на данное мероприятие в категории: ${formatName}.`;
-    }
-    return `Участник «${person}» уже зарегистрирован на данное мероприятие.`;
   }
 
   private toResponse(row: StoredRegistration): RegistrationResponse {

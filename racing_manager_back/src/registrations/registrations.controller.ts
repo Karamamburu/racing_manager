@@ -14,6 +14,7 @@ import type { Request } from 'express';
 import { ADMIN_ROLE_CODES, RoleCode } from '../auth/role-codes';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { ConnectSidGuard } from '../auth/connect-sid.guard';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
 import { RegistrationsService } from './registrations.service';
 
@@ -23,6 +24,7 @@ export class RegistrationsController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ConnectSidGuard, SessionAuthGuard)
   create(
     @Req() req: Request,
     @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
