@@ -1,5 +1,6 @@
 import { Layout } from 'antd';
 import type { PropsWithChildren, ReactNode } from 'react';
+import { AppBottomNav } from './components/AppBottomNav';
 import { AppShellFooter } from './components/AppShellFooter';
 import { AppShellHeader } from './components/AppShellHeader';
 import { AppSiderMenu } from './components/AppSiderMenu';
@@ -14,13 +15,14 @@ type AppShellProps = PropsWithChildren<{
 
 export function AppShell({ title, subtitle, extra, children }: AppShellProps) {
   return (
-    <Layout hasSider style={{ minHeight: '100vh' }}>
+    <Layout hasSider className="app-shell">
       <AppSiderMenu />
-      <Layout>
+      <Layout className="app-shell-main">
         <AppShellHeader title={title} subtitle={subtitle} extra={extra} />
         <Content className="app-content">{children}</Content>
         <AppShellFooter />
       </Layout>
+      <AppBottomNav />
     </Layout>
   );
 }

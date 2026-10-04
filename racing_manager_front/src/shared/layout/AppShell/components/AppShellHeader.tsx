@@ -1,7 +1,7 @@
 import { UserOutlined } from '@ant-design/icons';
-import { Avatar, Button, Layout, Space, Typography } from 'antd';
+import { Avatar, Button, Dropdown, Layout, Space, Typography } from 'antd';
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { authService } from '../../../../features/auth/authService';
 import { useSessionQuery } from '../../../../features/auth/useSessionQuery';
 
@@ -14,6 +14,7 @@ type AppShellHeaderProps = {
 };
 
 export function AppShellHeader({ title, subtitle, extra }: AppShellHeaderProps) {
+  const navigate = useNavigate();
   const sessionQuery = useSessionQuery();
   const isAuthenticated = Boolean(sessionQuery.data?.authenticated);
 
@@ -41,9 +42,25 @@ export function AppShellHeader({ title, subtitle, extra }: AppShellHeaderProps) 
         {extra}
         {authAction}
         {isAuthenticated ? (
-          <Link to="/cabinet" className="app-header-avatar" title="Личный кабинет" aria-label="Личный кабинет">
-            <Avatar icon={<UserOutlined />} />
-          </Link>
+          <Dropdown
+            trigger={['click']}
+            placement="bottomRight"
+            menu={{
+              items: [
+                { key: 'cabinet', label: 'Личный кабинет' },
+                { type: 'divider' },
+                { key: 'logout', label: 'Выйти' },
+              ],
+              onClick: ({ key }) => {
+                if (key === 'cabinet') navigate('/cabinet');
+                if (key === 'logout') authService.logout();
+              },
+            }}
+          >
+            <button type="button" className="app-header-avatar" aria-label="Меню профиля">
+              <Avatar icon={<UserOutlined />} />
+            </button>
+          </Dropdown>
         ) : null}
       </Space>
     </Header>
