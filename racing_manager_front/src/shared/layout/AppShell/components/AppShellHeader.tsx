@@ -40,9 +40,11 @@ export function AppShellHeader({ title, subtitle, extra }: AppShellHeaderProps) 
       <Space size="middle" align="center" wrap className="app-header-actions">
         {extra}
         {authAction}
-        <Link to="/cabinet" className="app-header-avatar" title="Личный кабинет" aria-label="Личный кабинет">
-          <Avatar icon={<UserOutlined />} />
-        </Link>
+        {isAuthenticated ? (
+          <Link to="/cabinet" className="app-header-avatar" title="Личный кабинет" aria-label="Личный кабинет">
+            <Avatar icon={<UserOutlined />} />
+          </Link>
+        ) : null}
       </Space>
     </Header>
   );
