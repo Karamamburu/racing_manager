@@ -211,6 +211,15 @@ function categoryReadyToFinish(rows: EventParticipant[]): boolean {
     .every((row) => row.finishTimeMs != null);
 }
 
+function isIncompleteProfileError(text: string): boolean {
+  return (
+    text.includes('firstName') ||
+    text.includes('lastName') ||
+    text.includes('gender must be') ||
+    text.includes('birthYear')
+  );
+}
+
 function categoryIsFinished(
   finishes: { formatId: number | null; gender: string }[],
   formatId: number | null,
@@ -450,6 +459,9 @@ export function EventPage() {
   const sessionQuery = useSessionQuery();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
+  const [registerInitialFormatId, setRegisterInitialFormatId] = useState<number | undefined>();
+  const [formatToRegister, setFormatToRegister] = useState<EventFormatRef | null>(null);
+  const [isRegisteringByFormat, setIsRegisteringByFormat] = useState(false);
   const [isRegisterParticipantOpen, setIsRegisterParticipantOpen] = useState(false);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
   const [isCancelRegistrationOpen, setIsCancelRegistrationOpen] = useState(false);
@@ -528,6 +540,7 @@ export function EventPage() {
         ? closedReason ?? undefined
         : undefined;
   const showRegister = event.status === 'PLANNED' && !myRegistration;
+  const canPickFormat = isPlatformUser && showRegister;
   const canRegisterParticipant =
     canCreateEvents(session?.roles) && event.status === 'PLANNED';
   const canSeedTestRegistrations =
@@ -565,6 +578,35 @@ export function EventPage() {
     await queryClient.invalidateQueries({ queryKey: eventDetailsQueryKey(event.id) });
     await queryClient.invalidateQueries({ queryKey: classCompetitionsQueryKey(event.id) });
     void queryClient.invalidateQueries({ queryKey: recentEventsQueryKey });
+  };
+
+  const confirmFormatRegistration = async () => {
+    if (!formatToRegister) return;
+    const format = formatToRegister;
+    setIsRegisteringByFormat(true);
+    try {
+      const result = await registrationsService.create(event.id, { formatId: format.id });
+      if (result.status === 201 || result.status === 200) {
+        message.success('Вы зарегистрированы');
+        setFormatToRegister(null);
+        await refreshEvent();
+        return;
+      }
+      message.error(`Неожиданный код ответа: ${result.status}`);
+    } catch (error) {
+      const statusCode = registrationsService.getStatus(error);
+      const text = registrationsService.getErrorMessage(error);
+      if (statusCode === 400 && isIncompleteProfileError(text)) {
+        setFormatToRegister(null);
+        setRegisterInitialFormatId(format.id);
+        setIsRegisterOpen(true);
+        message.info('Чтобы зарегистрироваться, заполните недостающие данные заявки.');
+        return;
+      }
+      message.error(text);
+    } finally {
+      setIsRegisteringByFormat(false);
+    }
   };
 
   const assignStartNumber = async (participant: EventParticipant, startNumber: number) => {
@@ -786,7 +828,10 @@ export function EventPage() {
                   <Button
                     type="primary"
                     disabled={registerDisabled}
-                    onClick={() => setIsRegisterOpen(true)}
+                    onClick={() => {
+                      setRegisterInitialFormatId(undefined);
+                      setIsRegisterOpen(true);
+                    }}
                   >
                     Зарегистрироваться
                   </Button>
@@ -858,9 +903,26 @@ export function EventPage() {
                 <Space wrap size={[4, 8]} align="center">
                   <Typography.Text type="secondary">Форматы участия:</Typography.Text>
                   {event.formats.length > 0
-                    ? event.formats.map((format: EventFormatRef) => (
-                        <Tag key={format.id}>{format.name}</Tag>
-                      ))
+                    ? event.formats.map((format: EventFormatRef) =>
+                        canPickFormat ? (
+                          <Tooltip
+                            key={format.id}
+                            title={registerDisabled ? registerTooltip : undefined}
+                          >
+                            <span>
+                              <Button
+                                size="small"
+                                disabled={registerDisabled}
+                                onClick={() => setFormatToRegister(format)}
+                              >
+                                {format.name}
+                              </Button>
+                            </span>
+                          </Tooltip>
+                        ) : (
+                          <Tag key={format.id}>{format.name}</Tag>
+                        ),
+                      )
                     : '—'}
                 </Space>
               </Space>
@@ -1054,9 +1116,26 @@ export function EventPage() {
         open={isRegisterOpen}
         eventId={event.id}
         formats={event.formats}
+        initialFormatId={registerInitialFormatId}
         onClose={() => setIsRegisterOpen(false)}
         onRegistered={refreshEvent}
       />
+      <Modal
+        title="Регистрация на гонку"
+        open={formatToRegister != null}
+        onCancel={() => {
+          if (isRegisteringByFormat) return;
+          setFormatToRegister(null);
+        }}
+        okText="Зарегистрироваться"
+        cancelText="Отмена"
+        confirmLoading={isRegisteringByFormat}
+        onOk={() => void confirmFormatRegistration()}
+      >
+        {formatToRegister
+          ? `Вы хотите зарегистрироваться на гонку «${event.name}» в категории «${formatToRegister.name}»?`
+          : null}
+      </Modal>
       <RegisterParticipantModal
         open={isRegisterParticipantOpen}
         eventId={event.id}
