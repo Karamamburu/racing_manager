@@ -1,4 +1,4 @@
-import { Button, Card, Col, Collapse, Divider, Modal, Result, Row, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message, theme } from 'antd';
+import { Button, Card, Col, Collapse, Divider, Grid, Modal, Result, Row, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -450,6 +450,24 @@ function getParticipantColumns(options: {
   ];
 }
 
+const mobileProtocolColumnKeys = ['place', 'fullName', 'finishTimeMs'] as const;
+
+function columnsForProtocol(
+  columns: ColumnsType<ProtocolParticipant>,
+  compact: boolean,
+): ColumnsType<ProtocolParticipant> {
+  if (!compact) return columns;
+  const compactColumns: ColumnsType<ProtocolParticipant> = [];
+  for (const key of mobileProtocolColumnKeys) {
+    const column = columns.find((item) => item.key === key);
+    if (!column) continue;
+    if (key === 'place') compactColumns.push({ ...column, width: 68 });
+    else if (key === 'finishTimeMs') compactColumns.push({ ...column, width: 84 });
+    else compactColumns.push({ ...column, ellipsis: true });
+  }
+  return compactColumns;
+}
+
 export function EventPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -474,7 +492,8 @@ export function EventPage() {
   const [savingRegistrationStatusId, setSavingRegistrationStatusId] = useState<string | null>(null);
   const [savingLap, setSavingLap] = useState<SavingLap | null>(null);
   const [finishingCategory, setFinishingCategory] = useState<string | null>(null);
-  const { token } = theme.useToken();
+  const screens = Grid.useBreakpoint();
+  const compactProtocol = screens.md === false;
 
   if (eventQuery.isLoading) {
     return (
@@ -854,7 +873,7 @@ export function EventPage() {
         ) : undefined
       }
     >
-      <Space direction="vertical" size={24} style={{ width: '100%' }}>
+      <Space direction="vertical" size={24} className="event-page" style={{ width: '100%' }}>
         <Card>
           <Space align="center" wrap>
             <Typography.Title level={2} style={{ margin: 0 }}>
@@ -977,15 +996,7 @@ export function EventPage() {
                 </Typography.Text>
               ) : null}
               {participantGroups.map((group) => (
-                <div
-                  key={group.key}
-                  style={{
-                    background: token.colorFillAlter,
-                    border: `1px solid ${token.colorBorderSecondary}`,
-                    borderRadius: token.borderRadiusLG,
-                    padding: 16,
-                  }}
-                >
+                <div key={group.key} className="event-participant-group">
                   <Typography.Title level={4} style={{ marginTop: 0, marginBottom: 12 }}>
                     {group.title} ({group.sections.reduce((sum, section) => sum + section.rows.length, 0)})
                   </Typography.Title>
@@ -1076,11 +1087,13 @@ export function EventPage() {
                                     label: 'Итоговый протокол',
                                     children: (
                                       <Table
-                                        columns={columns}
+                                        className={compactProtocol ? 'protocol-table protocol-table--compact' : undefined}
+                                        columns={columnsForProtocol(columns, compactProtocol)}
                                         dataSource={rowsWithClassification(section.rows, competition)}
                                         rowKey="id"
                                         pagination={false}
-                                        scroll={{ x: 'max-content' }}
+                                        tableLayout={compactProtocol ? 'fixed' : undefined}
+                                        scroll={compactProtocol ? undefined : { x: 'max-content' }}
                                       />
                                     ),
                                   },

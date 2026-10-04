@@ -114,7 +114,7 @@ export function MainPage() {
         <Space direction="vertical" size={24} className="main-page">
           <PromoSlider slides={mainSlides} />
 
-          <Row gutter={[16, 16]}>
+          <Row gutter={[16, 16]} className="main-page-stats">
             <Col xs={24} md={8}>
               <Card>
                 <Statistic
