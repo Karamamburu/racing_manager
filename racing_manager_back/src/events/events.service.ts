@@ -265,6 +265,7 @@ type EventsStore = {
       }): Promise<EventOwnerRow | null>;
     };
     update: (args: { where: { id: string }; data: object }) => Promise<unknown>;
+    delete: (args: { where: { id: string } }) => Promise<unknown>;
   };
   registration: {
     updateMany: (args: { where: object; data: object }) => Promise<unknown>;
@@ -883,6 +884,16 @@ export class EventsService {
       userSub: authentikId,
     });
     return this.findById(eventId, { syncStatuses: false });
+  }
+
+  async remove(authentikId: string | undefined, eventId: string): Promise<void> {
+    await this.assertCanManageCreatedEvent(authentikId, eventId);
+    await this.store.event.delete({ where: { id: eventId } });
+    logEvent(this.logger, {
+      event: 'event.deleted',
+      eventId,
+      userSub: authentikId,
+    });
   }
 
   private async applyCancel(eventId: string): Promise<void> {

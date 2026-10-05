@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   HttpCode,
   HttpStatus,
   Param,
@@ -67,5 +68,15 @@ export class EventsController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
   ) {
     return this.eventsService.cancel(req.session?.userSub, id);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(RoleCode.ADMINISTRATOR)
+  remove(
+    @Req() req: Request,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ) {
+    return this.eventsService.remove(req.session?.userSub, id);
   }
 }

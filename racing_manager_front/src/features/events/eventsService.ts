@@ -55,6 +55,10 @@ export class EventsService {
     return apiClient.postResult<EventDetails>(`/admin/events/${id}/cancel`);
   }
 
+  public async remove(id: string): Promise<{ status: number }> {
+    return apiClient.deleteResult(`/admin/events/${id}`);
+  }
+
   public async finishCategory(
     id: string,
     payload: { formatId: number | null; gender: 'M' | 'F' },

@@ -842,6 +842,28 @@ export function EventPage() {
     await submitEventStatus('CANCELLED');
   };
 
+  const handleDelete = () => {
+    Modal.confirm({
+      title: 'Удалить мероприятие?',
+      content: `«${event.name}» и все заявки будут удалены без возможности восстановления.`,
+      okText: 'Удалить',
+      okButtonProps: { danger: true },
+      cancelText: 'Отмена',
+      onOk: async () => {
+        try {
+          await eventsService.remove(event.id);
+          await queryClient.invalidateQueries({ queryKey: recentEventsQueryKey });
+          queryClient.removeQueries({ queryKey: eventDetailsQueryKey(event.id) });
+          message.success('Мероприятие удалено');
+          navigate('/');
+        } catch (error) {
+          message.error(eventsService.getErrorMessage(error));
+          throw error;
+        }
+      },
+    });
+  };
+
   return (
     <AppShell
       title={event.name}
@@ -875,7 +897,12 @@ export function EventPage() {
               </Button>
             ) : null}
             {canManage ? (
-              <Button onClick={() => setIsEditOpen(true)}>Редактировать</Button>
+              <>
+                <Button onClick={() => setIsEditOpen(true)}>Редактировать</Button>
+                <Button danger onClick={handleDelete}>
+                  Удалить
+                </Button>
+              </>
             ) : null}
           </Space>
         ) : undefined
