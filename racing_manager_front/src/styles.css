@@ -263,6 +263,16 @@ button.app-header-avatar {
   white-space: nowrap;
 }
 
+.event-page,
+.event-page .ant-space,
+.event-page .ant-space-item,
+.event-participant-group,
+.event-page .ant-tabs-content-holder,
+.event-page .ant-collapse-content-box {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .event-participant-group {
   background: #f3faf8;
   border: 1px solid #e7efec;

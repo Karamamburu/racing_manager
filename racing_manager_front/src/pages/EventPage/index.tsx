@@ -492,8 +492,15 @@ export function EventPage() {
   const [savingRegistrationStatusId, setSavingRegistrationStatusId] = useState<string | null>(null);
   const [savingLap, setSavingLap] = useState<SavingLap | null>(null);
   const [finishingCategory, setFinishingCategory] = useState<string | null>(null);
+  const [fullProtocolKeys, setFullProtocolKeys] = useState<string[]>([]);
   const screens = Grid.useBreakpoint();
   const compactProtocol = screens.md === false;
+
+  const toggleFullProtocol = (key: string) => {
+    setFullProtocolKeys((current) =>
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
+    );
+  };
 
   if (eventQuery.isLoading) {
     return (
@@ -1086,15 +1093,44 @@ export function EventPage() {
                                     key: `${section.key}-protocol`,
                                     label: 'Итоговый протокол',
                                     children: (
-                                      <Table
-                                        className={compactProtocol ? 'protocol-table protocol-table--compact' : undefined}
-                                        columns={columnsForProtocol(columns, compactProtocol)}
-                                        dataSource={rowsWithClassification(section.rows, competition)}
-                                        rowKey="id"
-                                        pagination={false}
-                                        tableLayout={compactProtocol ? 'fixed' : undefined}
-                                        scroll={compactProtocol ? undefined : { x: 'max-content' }}
-                                      />
+                                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                                        {compactProtocol ? (
+                                          <Button
+                                            type="link"
+                                            size="small"
+                                            style={{ paddingInline: 0 }}
+                                            onClick={() => toggleFullProtocol(section.key)}
+                                          >
+                                            {fullProtocolKeys.includes(section.key)
+                                              ? 'Краткий протокол'
+                                              : 'Полный протокол'}
+                                          </Button>
+                                        ) : null}
+                                        <Table
+                                          className={
+                                            compactProtocol && !fullProtocolKeys.includes(section.key)
+                                              ? 'protocol-table protocol-table--compact'
+                                              : 'protocol-table'
+                                          }
+                                          columns={columnsForProtocol(
+                                            columns,
+                                            compactProtocol && !fullProtocolKeys.includes(section.key),
+                                          )}
+                                          dataSource={rowsWithClassification(section.rows, competition)}
+                                          rowKey="id"
+                                          pagination={false}
+                                          tableLayout={
+                                            compactProtocol && !fullProtocolKeys.includes(section.key)
+                                              ? 'fixed'
+                                              : undefined
+                                          }
+                                          scroll={
+                                            compactProtocol && !fullProtocolKeys.includes(section.key)
+                                              ? undefined
+                                              : { x: 'max-content' }
+                                          }
+                                        />
+                                      </Space>
                                     ),
                                   },
                                 ]}
