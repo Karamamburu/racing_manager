@@ -50,8 +50,9 @@ const navItems = [
   {
     key: '/tracks',
     icon: <NodeIndexOutlined />,
-    label: <Link to="/tracks">Трассы</Link>,
+    label: 'Трассы',
     title: '',
+    disabled: true,
   },
   {
     key: 'cups',
