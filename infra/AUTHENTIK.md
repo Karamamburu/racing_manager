@@ -30,7 +30,7 @@ http(s)://AUTH_DOMAIN/application/o/OIDC_APP_SLUG/
 
 Configured on the API container (same scheme as `PUBLIC_SCHEME`):
 
-- `POST_LOGIN_REDIRECT_URI=<scheme>://DOMAIN/cabinet`
+- `POST_LOGIN_REDIRECT_URI=<scheme>://DOMAIN/`
 - `POST_LOGOUT_REDIRECT_URI=<scheme>://DOMAIN/`
 
 Add the same origins in Authentik if it validates post-logout URIs.

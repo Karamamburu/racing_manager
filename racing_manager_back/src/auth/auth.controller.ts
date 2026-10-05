@@ -66,7 +66,7 @@ export class AuthController {
     const fullUrl = `${appHost}${req.url}`;
     const result = await this.authService.handleCallback(req, fullUrl);
     const postLoginRedirectUrl =
-      process.env.POST_LOGIN_REDIRECT_URI ?? 'http://localhost:5173/cabinet';
+      process.env.POST_LOGIN_REDIRECT_URI ?? 'http://localhost:5173/';
     const redirectUrl = new URL(postLoginRedirectUrl);
     redirectUrl.searchParams.set('auth', 'success');
     redirectUrl.searchParams.set(
