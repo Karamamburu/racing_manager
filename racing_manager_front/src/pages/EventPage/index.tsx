@@ -568,7 +568,8 @@ export function EventPage() {
   const showRegister = event.status === 'PLANNED' && !myRegistration;
   const canPickFormat = isPlatformUser && showRegister;
   const canRegisterParticipant =
-    canCreateEvents(session?.roles) && event.status === 'PLANNED';
+    canCreateEvents(session?.roles) &&
+    (event.status === 'PLANNED' || event.status === 'IN_PROGRESS');
   const canSeedTestRegistrations =
     isAdministrator(session?.roles) &&
     !pastCompleted &&

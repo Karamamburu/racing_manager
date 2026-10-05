@@ -54,6 +54,22 @@ export class RegistrationsController {
     );
   }
 
+  @Post('guest')
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ConnectSidGuard, SessionAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLE_CODES)
+  createGuest(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Body() body: unknown,
+  ) {
+    return this.registrationsService.createGuest(
+      req.session?.userSub,
+      eventId,
+      body,
+    );
+  }
+
   @Post('for-user')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(ConnectSidGuard, SessionAuthGuard, RolesGuard)

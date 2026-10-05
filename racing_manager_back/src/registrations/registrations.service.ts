@@ -18,6 +18,7 @@ import {
 } from '../events/event-status';
 import {
   mergeRegistrationFields,
+  parseCreateRegistrationBody,
   registrationFieldsFromProfile,
   type ParsedCreateRegistration,
 } from './parse-create-registration';
@@ -161,16 +162,35 @@ function parseStaffRegistrationBody(body: unknown): {
     }
     formatId = raw.formatId;
   }
-  let startNumber: number | null = null;
-  if (raw.startNumber != null && raw.startNumber !== '') {
-    const numeric = typeof raw.startNumber === 'number' ? raw.startNumber : Number(raw.startNumber);
-    if (!Number.isInteger(numeric) || numeric < 1) {
-      throw new BadRequestException('startNumber must be an integer greater than 0.');
-    }
-    startNumber = numeric;
-  }
-  return { userId: raw.userId, formatId, startNumber };
+  return {
+    userId: raw.userId,
+    formatId,
+    startNumber: readOptionalStartNumber(raw),
+  };
 }
+
+function readOptionalStartNumber(raw: Record<string, unknown>): number | null {
+  if (raw.startNumber == null || raw.startNumber === '') return null;
+  const numeric = typeof raw.startNumber === 'number' ? raw.startNumber : Number(raw.startNumber);
+  if (!Number.isInteger(numeric) || numeric < 1) {
+    throw new BadRequestException('startNumber must be an integer greater than 0.');
+  }
+  return numeric;
+}
+
+function sameGuestPerson(
+  row: { firstName: string; lastName: string; birthYear: number },
+  payload: { firstName: string; lastName: string; birthYear: number },
+): boolean {
+  return (
+    row.birthYear === payload.birthYear &&
+    row.firstName.trim().toLowerCase() === payload.firstName.trim().toLowerCase() &&
+    row.lastName.trim().toLowerCase() === payload.lastName.trim().toLowerCase()
+  );
+}
+
+const GUEST_ALREADY_REGISTERED =
+  'Участник с таким именем, фамилией и годом рождения уже зарегистрирован на это мероприятие.';
 
 function uniqueConstraintName(error: unknown): string {
   if (!error || typeof error !== 'object' || !('meta' in error)) return '';
@@ -273,7 +293,7 @@ export class RegistrationsService {
     }
 
     const parsed = registrationFieldsFromProfile(target);
-    const event = await this.requirePlannedEvent(eventId);
+    const event = await this.requireStaffRegistrationEvent(eventId);
     const formatId = this.resolveFormatId(event, parsedBody.formatId);
     return this.persistUserRegistration(
       eventId,
@@ -281,6 +301,24 @@ export class RegistrationsService {
       { ...parsed, formatId },
       authentikId,
       parsedBody.startNumber,
+    );
+  }
+
+  async createGuest(
+    authentikId: string | undefined,
+    eventId: string,
+    body: unknown,
+  ): Promise<RegistrationResponse> {
+    await this.rolesService.assertHasAnyRole(authentikId, ADMIN_ROLE_CODES);
+    const parsed = parseCreateRegistrationBody(body);
+    const startNumber = readOptionalStartNumber(body as Record<string, unknown>);
+    const event = await this.requireStaffRegistrationEvent(eventId);
+    const formatId = this.resolveFormatId(event, parsed.formatId);
+    return this.persistGuestRegistration(
+      eventId,
+      { ...parsed, formatId },
+      authentikId,
+      startNumber,
     );
   }
 
@@ -597,6 +635,112 @@ export class RegistrationsService {
     }
   }
 
+  private async persistGuestRegistration(
+    eventId: string,
+    payload: ParsedCreateRegistration,
+    registeredBy: string | undefined,
+    startNumber: number | null,
+  ): Promise<RegistrationResponse> {
+    const status = startNumber
+      ? RegistrationStatusCode.CONFIRMED
+      : RegistrationStatusCode.REGISTERED;
+    const listed = await this.prisma.registration.findMany({
+      where: {
+        eventId,
+        userId: null,
+        birthYear: payload.birthYear,
+        status: { in: [...LISTED_REGISTRATION_STATUSES] },
+      },
+    });
+    if (listed.some((row) => sameGuestPerson(row, payload))) {
+      throw new ConflictException(GUEST_ALREADY_REGISTERED);
+    }
+    if (startNumber != null) {
+      const taken = await this.prisma.registration.findFirst({
+        where: { eventId, startNumber },
+      });
+      if (taken) {
+        throw new ConflictException('Этот стартовый номер уже занят.');
+      }
+    }
+
+    const withdrawn = await this.prisma.registration.findMany({
+      where: {
+        eventId,
+        userId: null,
+        birthYear: payload.birthYear,
+        status: RegistrationStatusCode.WITHDRAWN,
+      },
+      orderBy: { registeredAt: 'desc' },
+    });
+    const previous = withdrawn.find((row) => sameGuestPerson(row, payload));
+    if (previous) {
+      const restored = await this.prisma.registration.update({
+        where: { id: previous.id },
+        data: {
+          firstName: payload.firstName,
+          lastName: payload.lastName,
+          gender: payload.gender,
+          birthYear: payload.birthYear,
+          city: payload.city,
+          district: payload.district,
+          team: payload.team,
+          formatId: payload.formatId,
+          status,
+          startNumber,
+          registeredAt: new Date(),
+        },
+      });
+      logEvent(this.logger, {
+        event: 'registration.created',
+        eventId,
+        registrationId: restored.id,
+        userId: null,
+        restored: true,
+        startNumber,
+        ...(registeredBy ? { registeredBy } : {}),
+      });
+      return this.toResponse(restored);
+    }
+
+    try {
+      const created = await this.prisma.registration.create({
+        data: {
+          eventId,
+          userId: null,
+          firstName: payload.firstName,
+          lastName: payload.lastName,
+          gender: payload.gender,
+          birthYear: payload.birthYear,
+          city: payload.city,
+          district: payload.district,
+          team: payload.team,
+          formatId: payload.formatId,
+          status,
+          startNumber,
+        },
+      });
+      logEvent(this.logger, {
+        event: 'registration.created',
+        eventId,
+        registrationId: created.id,
+        userId: null,
+        startNumber,
+        ...(registeredBy ? { registeredBy } : {}),
+      });
+      return this.toResponse(created);
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        const constraint = uniqueConstraintName(error);
+        if (startNumber != null && constraint.includes('start_number')) {
+          throw new ConflictException('Этот стартовый номер уже занят.');
+        }
+        throw new ConflictException(GUEST_ALREADY_REGISTERED);
+      }
+      throw error;
+    }
+  }
+
   private async requireAuthenticatedUser(authentikId: string): Promise<AppUser> {
     const actor = await this.usersService.findBySub(authentikId);
     if (!actor) {
@@ -628,6 +772,18 @@ export class RegistrationsService {
     if (event.status !== 'PLANNED') {
       throw new BadRequestException(
         'Registration is only available for a planned event.',
+      );
+    }
+    return event;
+  }
+
+  private async requireStaffRegistrationEvent(
+    eventId: string,
+  ): Promise<EventRegistrationWindow> {
+    const event = await this.requireManageableEvent(eventId);
+    if (event.status !== 'PLANNED' && event.status !== 'IN_PROGRESS') {
+      throw new BadRequestException(
+        'Зарегистрировать участника можно только для мероприятия со статусом «Запланировано» или «В процессе».',
       );
     }
     return event;

@@ -49,6 +49,16 @@ export class RegistrationsService {
     );
   }
 
+  public async createGuest(
+    eventId: string,
+    payload: CreateRegistrationRequest & { startNumber?: number },
+  ): Promise<{ status: number; data: RegistrationResponse }> {
+    return apiClient.postResult<RegistrationResponse>(
+      `/events/${eventId}/registrations/guest`,
+      payload,
+    );
+  }
+
   public async seedTestBatch(
     eventId: string,
     payload: { count: number; gender: 'M' | 'F'; formatId?: number },
