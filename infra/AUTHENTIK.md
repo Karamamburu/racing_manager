@@ -36,7 +36,7 @@ Configured on the API container (same scheme as `PUBLIC_SCHEME`):
 Logout destroys the app session, then:
 
 - If Authentik and the app share a hostname (local `localhost`), the API returns to `POST_LOGOUT_REDIRECT_URI` and clears Authentik cookies on that host.
-- If they differ (`AUTH_DOMAIN` vs `DOMAIN`), the browser is sent to Authentik's `default-invalidation-flow`, which ends the IdP session. Nginx on `AUTH_DOMAIN` serves `/logout-return` and sends the browser back to the app. Do not proxy that path to Authentik.
+- If they differ (`AUTH_DOMAIN` vs `DOMAIN`), the browser is sent to `https://AUTH_DOMAIN/logout-start`. Nginx starts Authentik's `default-invalidation-flow` (this ends the IdP session) and then redirects `/` back to the app. That return path is required because the flow drops `next` when it logs the user out, and Authentik would otherwise open its own login form.
 
 ## Admin UI exposure
 
