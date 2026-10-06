@@ -19,6 +19,15 @@ function clearLocalhostCookie(
   });
 }
 
+function clearAppSessionCookie(res: Response) {
+  res.clearCookie('connect.sid', {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.SESSION_COOKIE_SECURE === 'true',
+  });
+}
+
 @Controller('auth')
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
@@ -79,11 +88,13 @@ export class AuthController {
 
   @Get('logout')
   logout(@Req() req: Request, @Res() res: Response) {
-    const postLogoutRedirectUri = this.authService.getPostLogoutRedirectUri();
+    const logoutRedirectUrl = this.authService.getLogoutRedirectUrl();
     const userSub = req.session?.userSub;
 
     const finish = () => {
-      clearLocalhostCookie(res, 'connect.sid', true);
+      clearAppSessionCookie(res);
+      // Same-host only (local). On prod these cookies live on AUTH_DOMAIN
+      // and are ended by the invalidation flow instead.
       clearLocalhostCookie(res, 'authentik_session', true);
       clearLocalhostCookie(res, 'authentik_csrf', false);
     };
@@ -92,13 +103,13 @@ export class AuthController {
     if (!session) {
       logEvent(this.logger, { event: 'auth.logout', userSub });
       finish();
-      return res.redirect(postLogoutRedirectUri);
+      return res.redirect(logoutRedirectUrl);
     }
 
     session.destroy(() => {
       logEvent(this.logger, { event: 'auth.logout', userSub });
       finish();
-      return res.redirect(postLogoutRedirectUri);
+      return res.redirect(logoutRedirectUrl);
     });
   }
 }

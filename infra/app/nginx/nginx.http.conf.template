@@ -95,6 +95,11 @@ http {
       root /var/www/certbot;
     }
 
+    # After Authentik's invalidation flow (?next=/logout-return).
+    location = /logout-return {
+      return 302 http://${DOMAIN}/;
+    }
+
     location / {
       proxy_pass http://authentik;
       proxy_http_version 1.1;
