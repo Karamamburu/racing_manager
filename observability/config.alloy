@@ -112,4 +112,8 @@ loki.write "grafana_cloud" {
       password = sys.env("GRAFANA_LOKI_TOKEN")
     }
   }
+
+  external_labels = {
+    env = "local",
+  }
 }

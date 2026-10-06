@@ -48,6 +48,11 @@ services:
       dockerfile: Dockerfile
     container_name: racing_manager_back
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     expose:
       - "4000"
     environment:
@@ -75,9 +80,7 @@ services:
       S3_CREATE_BUCKET: ${S3_CREATE_BUCKET:-false}
       S3_PUBLIC_READ: ${S3_PUBLIC_READ:-true}
       S3_MAX_UPLOAD_BYTES: "83886080"
-      LOG_FILE_PATH: /var/log/racing-manager/racing_manager_back.log
-    volumes:
-      - nest_logs:/var/log/racing-manager
+      LOG_LEVEL: info
     depends_on:
       postgres_main:
         condition: service_healthy
@@ -90,15 +93,18 @@ services:
       dockerfile: Dockerfile
     container_name: competition_managment_service
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     expose:
       - "4100"
     environment:
       NODE_ENV: production
       PORT: 4100
       DATABASE_URL: postgresql://${POSTGRES_CMS_USER}:${POSTGRES_CMS_PASSWORD}@postgres_cms:5432/${POSTGRES_CMS_DB}?schema=public
-      LOG_FILE_PATH: /var/log/racing-manager/competition_managment_service.log
-    volumes:
-      - nest_logs:/var/log/racing-manager
+      LOG_LEVEL: info
     depends_on:
       postgres_cms:
         condition: service_healthy
@@ -219,7 +225,6 @@ services:
     restart: unless-stopped
     volumes:
       - ../observability/config.stage.alloy:/etc/alloy/config.alloy:ro
-      - nest_logs:/var/log/racing-manager:ro
       - alloy_data:/var/lib/alloy/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
@@ -236,7 +241,6 @@ volumes:
   postgres_main_data:
   postgres_cms_data:
   postgres_authentik_data:
-  nest_logs:
   authentik_media:
   authentik_templates:
   certbot_www:

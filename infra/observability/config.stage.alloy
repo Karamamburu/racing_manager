@@ -22,6 +22,21 @@ discovery.relabel "racing_manager_containers" {
     replacement  = "docker"
   }
 
+  // Nest JSON on stdout uses the same labels as local file logs (job=nest, service=...).
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(racing_manager_back|competition_managment_service)"
+    target_label  = "service"
+    replacement   = "$1"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(racing_manager_back|competition_managment_service)"
+    target_label  = "job"
+    replacement   = "nest"
+  }
+
   rule {
     target_label = "host_role"
     replacement  = "stage"
@@ -31,13 +46,20 @@ discovery.relabel "racing_manager_containers" {
 loki.process "docker_logs" {
   forward_to = [loki.write.grafana_cloud.receiver]
 
+  // Nest lines are JSON (`"level":"info"`). Postgres/nginx stay plain text.
+  stage.json {
+    expressions = {
+      json_level = "level",
+    }
+  }
+
   stage.regex {
     expression = `(?P<raw_severity>\b(?:DEBUG|INFO|NOTICE|WARNING|ERROR|LOG|FATAL|PANIC|WARN|CRITICAL|TRACE)\b)`
   }
 
   stage.template {
     source   = "level"
-    template = `{{ $s := default "" .raw_severity | ToUpper }}{{ if eq $s "" }}info{{ else if or (eq $s "LOG") (eq $s "INFO") (eq $s "NOTICE") }}info{{ else if or (eq $s "WARNING") (eq $s "WARN") }}warn{{ else if eq $s "ERROR" }}error{{ else if eq $s "FATAL" }}fatal{{ else if or (eq $s "PANIC") (eq $s "CRITICAL") }}critical{{ else if eq $s "DEBUG" }}debug{{ else if eq $s "TRACE" }}trace{{ else }}info{{ end }}`
+    template = `{{ $j := default "" .json_level | ToLower }}{{ if ne $j "" }}{{ $j }}{{ else }}{{ $s := default "" .raw_severity | ToUpper }}{{ if eq $s "" }}info{{ else if or (eq $s "LOG") (eq $s "INFO") (eq $s "NOTICE") }}info{{ else if or (eq $s "WARNING") (eq $s "WARN") }}warn{{ else if eq $s "ERROR" }}error{{ else if eq $s "FATAL" }}fatal{{ else if or (eq $s "PANIC") (eq $s "CRITICAL") }}critical{{ else if eq $s "DEBUG" }}debug{{ else if eq $s "TRACE" }}trace{{ else }}info{{ end }}{{ end }}`
   }
 
   stage.structured_metadata {
@@ -50,51 +72,8 @@ loki.process "docker_logs" {
 loki.source.docker "containers" {
   host          = "unix:///var/run/docker.sock"
   targets       = discovery.relabel.racing_manager_containers.output
-  labels        = { "job" = "docker" }
   relabel_rules = discovery.relabel.racing_manager_containers.rules
   forward_to    = [loki.process.docker_logs.receiver]
-}
-
-local.file_match "nest_apps" {
-  path_targets = [
-    {
-      __path__ = "/var/log/racing-manager/racing_manager_back.log",
-      job      = "nest",
-      service  = "racing_manager_back",
-    },
-    {
-      __path__ = "/var/log/racing-manager/competition_managment_service.log",
-      job      = "nest",
-      service  = "competition_managment_service",
-    },
-  ]
-}
-
-loki.process "nest_logs" {
-  forward_to = [loki.write.grafana_cloud.receiver]
-
-  stage.json {
-    expressions = {
-      level = "level",
-    }
-  }
-
-  stage.template {
-    source   = "level"
-    template = `{{ if .level }}{{ .level | ToLower }}{{ else }}info{{ end }}`
-  }
-
-  stage.structured_metadata {
-    values = {
-      level = "level",
-    }
-  }
-}
-
-loki.source.file "nest_apps" {
-  targets       = local.file_match.nest_apps.targets
-  forward_to    = [loki.process.nest_logs.receiver]
-  tail_from_end = true
 }
 
 loki.write "grafana_cloud" {
@@ -105,5 +84,9 @@ loki.write "grafana_cloud" {
       username = sys.env("GRAFANA_LOKI_USERNAME")
       password = sys.env("GRAFANA_LOKI_TOKEN")
     }
+  }
+
+  external_labels = {
+    env = "stage",
   }
 }

@@ -47,6 +47,11 @@ services:
       dockerfile: Dockerfile
     container_name: racing_manager_back
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     expose:
       - "4000"
     environment:
@@ -74,11 +79,7 @@ services:
       S3_CREATE_BUCKET: ${S3_CREATE_BUCKET:-false}
       S3_PUBLIC_READ: ${S3_PUBLIC_READ:-true}
       S3_MAX_UPLOAD_BYTES: "83886080"
-      LOG_FILE_PATH: /var/log/racing-manager/racing_manager_back.log
       LOG_LEVEL: info
-      LOG_FILE_LEVEL: info
-    volumes:
-      - nest_logs:/var/log/racing-manager
     depends_on:
       - cms
 
@@ -88,17 +89,18 @@ services:
       dockerfile: Dockerfile
     container_name: competition_managment_service
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     expose:
       - "4100"
     environment:
       NODE_ENV: production
       PORT: 4100
       DATABASE_URL: postgresql://${POSTGRES_CMS_USER}:${POSTGRES_CMS_PASSWORD}@${DATA_HOST}:5433/${POSTGRES_CMS_DB}?schema=public
-      LOG_FILE_PATH: /var/log/racing-manager/competition_managment_service.log
       LOG_LEVEL: info
-      LOG_FILE_LEVEL: info
-    volumes:
-      - nest_logs:/var/log/racing-manager
 
   authentik_server:
     image: ghcr.io/goauthentik/server:2025.10.4
@@ -152,7 +154,6 @@ services:
     restart: unless-stopped
     volumes:
       - ../observability/config.app.alloy:/etc/alloy/config.alloy:ro
-      - nest_logs:/var/log/racing-manager:ro
       - alloy_data:/var/lib/alloy/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
@@ -166,7 +167,6 @@ services:
       - /etc/alloy/config.alloy
 
 volumes:
-  nest_logs:
   authentik_media:
   authentik_templates:
   certbot_www:

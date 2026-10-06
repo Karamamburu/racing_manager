@@ -20,28 +20,34 @@ function shouldIgnorePath(url: string | undefined): boolean {
 }
 
 export function buildPinoParams(service: string): Params {
-  const rawPath = process.env.LOG_FILE_PATH?.trim() || DEFAULT_LOG_FILE;
-  const logFilePath = resolve(rawPath);
-
   const isProd = process.env.NODE_ENV === 'production';
-  // Default info: skip noisy HTTP "request completed" DEBUG lines on console and in file.
+  // Default info: skip noisy HTTP "request completed" DEBUG lines.
   const consoleLevel = process.env.LOG_LEVEL ?? 'info';
   const fileLevel = process.env.LOG_FILE_LEVEL ?? 'info';
 
   // multistream (not transport.targets) so formatters.level is allowed by Pino.
-  const streams: pino.StreamEntry[] = [
-    {
-      level: fileLevel as pino.Level,
-      stream: pino.destination({ dest: logFilePath, mkdir: true, sync: false }),
-    },
-  ];
-
-  if (!isProd) {
-    streams.unshift({
-      level: consoleLevel as pino.Level,
-      stream: pretty({ colorize: true, singleLine: true, sync: true }),
-    });
-  }
+  // Production: JSON on stdout so Alloy tails the container. Local: file for Alloy + pretty console.
+  const streams: pino.StreamEntry[] = isProd
+    ? [
+        {
+          level: consoleLevel as pino.Level,
+          stream: pino.destination(1),
+        },
+      ]
+    : [
+        {
+          level: consoleLevel as pino.Level,
+          stream: pretty({ colorize: true, singleLine: true, sync: true }),
+        },
+        {
+          level: fileLevel as pino.Level,
+          stream: pino.destination({
+            dest: resolve(process.env.LOG_FILE_PATH?.trim() || DEFAULT_LOG_FILE),
+            mkdir: true,
+            sync: false,
+          }),
+        },
+      ];
 
   return {
     pinoHttp: {
