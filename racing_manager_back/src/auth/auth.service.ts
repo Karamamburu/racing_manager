@@ -206,6 +206,41 @@ export class AuthService implements OnModuleInit {
     );
   }
 
+  /**
+   * Where the browser should go after the app session is destroyed.
+   * Same host (local dev): return to the app. Cookie clearing on that host
+   * also drops the Authentik session.
+   * Different host (prod AUTH_DOMAIN): Authentik cookies are not visible to
+   * the app, so the browser must run Authentik's invalidation flow. Nginx on
+   * AUTH_DOMAIN answers `/logout-return` with a redirect back to the app.
+   */
+  getLogoutRedirectUrl(): string {
+    const postLogout = this.getPostLogoutRedirectUri();
+    const issuerUrl =
+      this.config.get<string>('AUTHENTIK_ISSUER_URL') ??
+      'http://localhost:9000/application/o/racing-manager/';
+
+    let issuer: URL;
+    let app: URL;
+    try {
+      issuer = new URL(issuerUrl);
+      app = new URL(postLogout);
+    } catch {
+      return postLogout;
+    }
+
+    if (issuer.hostname === app.hostname) {
+      return postLogout;
+    }
+
+    const flow = new URL(
+      '/if/flow/default-invalidation-flow/',
+      issuer.origin,
+    );
+    flow.searchParams.set('next', '/logout-return');
+    return flow.toString();
+  }
+
   private async readOidcClaims(
     claims: OidcClaims,
     accessToken: string | undefined,

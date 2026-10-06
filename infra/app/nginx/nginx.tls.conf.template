@@ -113,6 +113,11 @@ http {
     ssl_session_timeout 1d;
     ssl_session_cache shared:SSL:10m;
 
+    # After Authentik's invalidation flow (?next=/logout-return).
+    location = /logout-return {
+      return 302 https://${DOMAIN}/;
+    }
+
     location / {
       proxy_pass http://authentik;
       proxy_http_version 1.1;
