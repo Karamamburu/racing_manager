@@ -210,9 +210,10 @@ export class AuthService implements OnModuleInit {
    * Where the browser should go after the app session is destroyed.
    * Same host (local dev): return to the app. Cookie clearing on that host
    * also drops the Authentik session.
-   * Different host (prod AUTH_DOMAIN): Authentik cookies are not visible to
-   * the app, so the browser must run Authentik's invalidation flow. Nginx on
-   * AUTH_DOMAIN answers `/logout-return` with a redirect back to the app.
+   * Different host (prod AUTH_DOMAIN): the browser must visit Authentik so its
+   * session can end. `/logout-start` on that host runs the invalidation flow,
+   * then nginx sends the browser back to the app. The flow's own `next` is
+   * wiped when Authentik logs the user out, so it cannot be used as the return URL.
    */
   getLogoutRedirectUrl(): string {
     const postLogout = this.getPostLogoutRedirectUri();
@@ -233,12 +234,7 @@ export class AuthService implements OnModuleInit {
       return postLogout;
     }
 
-    const flow = new URL(
-      '/if/flow/default-invalidation-flow/',
-      issuer.origin,
-    );
-    flow.searchParams.set('next', '/logout-return');
-    return flow.toString();
+    return new URL('/logout-start', issuer.origin).toString();
   }
 
   private async readOidcClaims(
