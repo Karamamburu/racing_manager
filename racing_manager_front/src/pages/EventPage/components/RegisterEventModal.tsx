@@ -36,6 +36,7 @@ type RegisterEventModalProps = {
   open: boolean;
   eventId: string;
   formats: EventFormatRef[];
+  initialFormatId?: number;
   onClose: () => void;
   onRegistered?: () => void;
 };
@@ -132,6 +133,7 @@ export function RegisterEventModal({
   open,
   eventId,
   formats,
+  initialFormatId,
   onClose,
   onRegistered,
 }: RegisterEventModalProps) {
@@ -162,9 +164,14 @@ export function RegisterEventModal({
       city: profile?.city ?? undefined,
       district: profile?.district ?? undefined,
       team: profile?.team ?? undefined,
-      formatId: formats.length === 1 ? formats[0].id : undefined,
+      formatId:
+        initialFormatId != null && formats.some((format) => format.id === initialFormatId)
+          ? initialFormatId
+          : formats.length === 1
+            ? formats[0].id
+            : undefined,
     });
-  }, [form, formats, open, profile]);
+  }, [form, formats, initialFormatId, open, profile]);
 
   const resetLocalState = () => {
     form.resetFields();

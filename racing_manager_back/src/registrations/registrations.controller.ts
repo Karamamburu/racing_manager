@@ -1,12 +1,14 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -14,6 +16,7 @@ import type { Request } from 'express';
 import { ADMIN_ROLE_CODES, RoleCode } from '../auth/role-codes';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { ConnectSidGuard } from '../auth/connect-sid.guard';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
 import { RegistrationsService } from './registrations.service';
 
@@ -23,12 +26,60 @@ export class RegistrationsController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ConnectSidGuard, SessionAuthGuard)
   create(
     @Req() req: Request,
     @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
     @Body() body: unknown,
   ) {
     return this.registrationsService.create(
+      req.session?.userSub,
+      eventId,
+      body,
+    );
+  }
+
+  @Get('users')
+  @UseGuards(ConnectSidGuard, SessionAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLE_CODES)
+  searchUsers(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Query('q') query?: string,
+  ) {
+    return this.registrationsService.searchUsersForRegistration(
+      req.session?.userSub,
+      eventId,
+      query ?? '',
+    );
+  }
+
+  @Post('guest')
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ConnectSidGuard, SessionAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLE_CODES)
+  createGuest(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Body() body: unknown,
+  ) {
+    return this.registrationsService.createGuest(
+      req.session?.userSub,
+      eventId,
+      body,
+    );
+  }
+
+  @Post('for-user')
+  @HttpCode(HttpStatus.CREATED)
+  @UseGuards(ConnectSidGuard, SessionAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLE_CODES)
+  createForUser(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Body() body: unknown,
+  ) {
+    return this.registrationsService.createForParticipant(
       req.session?.userSub,
       eventId,
       body,

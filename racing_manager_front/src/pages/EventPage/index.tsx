@@ -1,4 +1,4 @@
-import { Button, Card, Col, Collapse, Divider, Modal, Result, Row, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message, theme } from 'antd';
+import { Button, Card, Col, Collapse, Divider, Grid, Modal, Result, Row, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -44,6 +44,7 @@ import { EventTrackMap } from './components/EventTrackMap';
 import { EventStatusSelect } from './components/EventStatusSelect';
 import { FinishTimeCell } from './components/FinishTimeCell';
 import { RegisterEventModal } from './components/RegisterEventModal';
+import { RegisterParticipantModal } from './components/RegisterParticipantModal';
 import { SeedTestRegistrationsModal } from './components/SeedTestRegistrationsModal';
 import { RegistrationStatusSelect } from './components/RegistrationStatusSelect';
 import { StartNumberCell } from './components/StartNumberCell';
@@ -208,6 +209,15 @@ function categoryReadyToFinish(rows: EventParticipant[]): boolean {
   return rows
     .filter((row) => !UNPLACED_STATUSES.has(row.status))
     .every((row) => row.finishTimeMs != null);
+}
+
+function isIncompleteProfileError(text: string): boolean {
+  return (
+    text.includes('firstName') ||
+    text.includes('lastName') ||
+    text.includes('gender must be') ||
+    text.includes('birthYear')
+  );
 }
 
 function categoryIsFinished(
@@ -440,6 +450,24 @@ function getParticipantColumns(options: {
   ];
 }
 
+const mobileProtocolColumnKeys = ['place', 'fullName', 'finishTimeMs'] as const;
+
+function columnsForProtocol(
+  columns: ColumnsType<ProtocolParticipant>,
+  compact: boolean,
+): ColumnsType<ProtocolParticipant> {
+  if (!compact) return columns;
+  const compactColumns: ColumnsType<ProtocolParticipant> = [];
+  for (const key of mobileProtocolColumnKeys) {
+    const column = columns.find((item) => item.key === key);
+    if (!column) continue;
+    if (key === 'place') compactColumns.push({ ...column, width: 68 });
+    else if (key === 'finishTimeMs') compactColumns.push({ ...column, width: 84 });
+    else compactColumns.push({ ...column, ellipsis: true });
+  }
+  return compactColumns;
+}
+
 export function EventPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -449,6 +477,10 @@ export function EventPage() {
   const sessionQuery = useSessionQuery();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
+  const [registerInitialFormatId, setRegisterInitialFormatId] = useState<number | undefined>();
+  const [formatToRegister, setFormatToRegister] = useState<EventFormatRef | null>(null);
+  const [isRegisteringByFormat, setIsRegisteringByFormat] = useState(false);
+  const [isRegisterParticipantOpen, setIsRegisterParticipantOpen] = useState(false);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
   const [isCancelRegistrationOpen, setIsCancelRegistrationOpen] = useState(false);
   const [isTestRegistrationsOpen, setIsTestRegistrationsOpen] = useState(false);
@@ -460,7 +492,15 @@ export function EventPage() {
   const [savingRegistrationStatusId, setSavingRegistrationStatusId] = useState<string | null>(null);
   const [savingLap, setSavingLap] = useState<SavingLap | null>(null);
   const [finishingCategory, setFinishingCategory] = useState<string | null>(null);
-  const { token } = theme.useToken();
+  const [fullProtocolKeys, setFullProtocolKeys] = useState<string[]>([]);
+  const screens = Grid.useBreakpoint();
+  const compactProtocol = screens.md === false;
+
+  const toggleFullProtocol = (key: string) => {
+    setFullProtocolKeys((current) =>
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
+    );
+  };
 
   if (eventQuery.isLoading) {
     return (
@@ -516,7 +556,24 @@ export function EventPage() {
   );
   const canRegister = isEventRegistrationOpen(event);
   const closedReason = registrationClosedReason(event);
+  const isPlatformUser = session?.authenticated === true;
+  const registerDisabled = !isPlatformUser || !canRegister;
+  const registerTooltip = !sessionQuery.isFetched
+    ? undefined
+    : !isPlatformUser
+      ? 'Регистрация на гонку доступна только зарегистрированным на платформе пользователям'
+      : !canRegister
+        ? closedReason ?? undefined
+        : undefined;
   const showRegister = event.status === 'PLANNED' && !myRegistration;
+  const canPickFormat = isPlatformUser && showRegister;
+  const canRegisterParticipant =
+    canCreateEvents(session?.roles) &&
+    (event.status === 'PLANNED' || event.status === 'IN_PROGRESS');
+  const canSeedTestRegistrations =
+    isAdministrator(session?.roles) &&
+    !pastCompleted &&
+    event.status !== 'CANCELLED';
   const canWithdrawOwn =
     myRegistration != null &&
     isActiveRegistrationStatus(myRegistration.status) &&
@@ -548,6 +605,35 @@ export function EventPage() {
     await queryClient.invalidateQueries({ queryKey: eventDetailsQueryKey(event.id) });
     await queryClient.invalidateQueries({ queryKey: classCompetitionsQueryKey(event.id) });
     void queryClient.invalidateQueries({ queryKey: recentEventsQueryKey });
+  };
+
+  const confirmFormatRegistration = async () => {
+    if (!formatToRegister) return;
+    const format = formatToRegister;
+    setIsRegisteringByFormat(true);
+    try {
+      const result = await registrationsService.create(event.id, { formatId: format.id });
+      if (result.status === 201 || result.status === 200) {
+        message.success('Вы зарегистрированы');
+        setFormatToRegister(null);
+        await refreshEvent();
+        return;
+      }
+      message.error(`Неожиданный код ответа: ${result.status}`);
+    } catch (error) {
+      const statusCode = registrationsService.getStatus(error);
+      const text = registrationsService.getErrorMessage(error);
+      if (statusCode === 400 && isIncompleteProfileError(text)) {
+        setFormatToRegister(null);
+        setRegisterInitialFormatId(format.id);
+        setIsRegisterOpen(true);
+        message.info('Чтобы зарегистрироваться, заполните недостающие данные заявки.');
+        return;
+      }
+      message.error(text);
+    } finally {
+      setIsRegisteringByFormat(false);
+    }
   };
 
   const assignStartNumber = async (participant: EventParticipant, startNumber: number) => {
@@ -756,6 +842,28 @@ export function EventPage() {
     await submitEventStatus('CANCELLED');
   };
 
+  const handleDelete = () => {
+    Modal.confirm({
+      title: 'Удалить мероприятие?',
+      content: `«${event.name}» и все заявки будут удалены без возможности восстановления.`,
+      okText: 'Удалить',
+      okButtonProps: { danger: true },
+      cancelText: 'Отмена',
+      onOk: async () => {
+        try {
+          await eventsService.remove(event.id);
+          await queryClient.invalidateQueries({ queryKey: recentEventsQueryKey });
+          queryClient.removeQueries({ queryKey: eventDetailsQueryKey(event.id) });
+          message.success('Мероприятие удалено');
+          navigate('/');
+        } catch (error) {
+          message.error(eventsService.getErrorMessage(error));
+          throw error;
+        }
+      },
+    });
+  };
+
   return (
     <AppShell
       title={event.name}
@@ -764,12 +872,15 @@ export function EventPage() {
         hasHeaderActions ? (
           <Space wrap>
             {showRegister ? (
-              <Tooltip title={!canRegister ? closedReason : undefined}>
+              <Tooltip title={registerTooltip}>
                 <span>
                   <Button
                     type="primary"
-                    disabled={!canRegister}
-                    onClick={() => setIsRegisterOpen(true)}
+                    disabled={registerDisabled}
+                    onClick={() => {
+                      setRegisterInitialFormatId(undefined);
+                      setIsRegisterOpen(true);
+                    }}
                   >
                     Зарегистрироваться
                   </Button>
@@ -786,13 +897,18 @@ export function EventPage() {
               </Button>
             ) : null}
             {canManage ? (
-              <Button onClick={() => setIsEditOpen(true)}>Редактировать</Button>
+              <>
+                <Button onClick={() => setIsEditOpen(true)}>Редактировать</Button>
+                <Button danger onClick={handleDelete}>
+                  Удалить
+                </Button>
+              </>
             ) : null}
           </Space>
         ) : undefined
       }
     >
-      <Space direction="vertical" size={24} style={{ width: '100%' }}>
+      <Space direction="vertical" size={24} className="event-page" style={{ width: '100%' }}>
         <Card>
           <Space align="center" wrap>
             <Typography.Title level={2} style={{ margin: 0 }}>
@@ -841,9 +957,26 @@ export function EventPage() {
                 <Space wrap size={[4, 8]} align="center">
                   <Typography.Text type="secondary">Форматы участия:</Typography.Text>
                   {event.formats.length > 0
-                    ? event.formats.map((format: EventFormatRef) => (
-                        <Tag key={format.id}>{format.name}</Tag>
-                      ))
+                    ? event.formats.map((format: EventFormatRef) =>
+                        canPickFormat ? (
+                          <Tooltip
+                            key={format.id}
+                            title={registerDisabled ? registerTooltip : undefined}
+                          >
+                            <span>
+                              <Button
+                                size="small"
+                                disabled={registerDisabled}
+                                onClick={() => setFormatToRegister(format)}
+                              >
+                                {format.name}
+                              </Button>
+                            </span>
+                          </Tooltip>
+                        ) : (
+                          <Tag key={format.id}>{format.name}</Tag>
+                        ),
+                      )
                     : '—'}
                 </Space>
               </Space>
@@ -867,10 +1000,17 @@ export function EventPage() {
         <Card
           title={`Зарегистрированные участники (${event.registrations.length})`}
           extra={
-            isAdministrator(session?.roles) &&
-            !pastCompleted &&
-            event.status !== 'CANCELLED' ? (
-              <Button onClick={() => setIsTestRegistrationsOpen(true)}>Тестовые заявки</Button>
+            canRegisterParticipant || canSeedTestRegistrations ? (
+              <Space wrap>
+                {canRegisterParticipant ? (
+                  <Button type="primary" onClick={() => setIsRegisterParticipantOpen(true)}>
+                    Зарегистрировать участника
+                  </Button>
+                ) : null}
+                {canSeedTestRegistrations ? (
+                  <Button onClick={() => setIsTestRegistrationsOpen(true)}>Тестовые заявки</Button>
+                ) : null}
+              </Space>
             ) : null
           }
         >
@@ -891,15 +1031,7 @@ export function EventPage() {
                 </Typography.Text>
               ) : null}
               {participantGroups.map((group) => (
-                <div
-                  key={group.key}
-                  style={{
-                    background: token.colorFillAlter,
-                    border: `1px solid ${token.colorBorderSecondary}`,
-                    borderRadius: token.borderRadiusLG,
-                    padding: 16,
-                  }}
-                >
+                <div key={group.key} className="event-participant-group">
                   <Typography.Title level={4} style={{ marginTop: 0, marginBottom: 12 }}>
                     {group.title} ({group.sections.reduce((sum, section) => sum + section.rows.length, 0)})
                   </Typography.Title>
@@ -989,13 +1121,44 @@ export function EventPage() {
                                     key: `${section.key}-protocol`,
                                     label: 'Итоговый протокол',
                                     children: (
-                                      <Table
-                                        columns={columns}
-                                        dataSource={rowsWithClassification(section.rows, competition)}
-                                        rowKey="id"
-                                        pagination={false}
-                                        scroll={{ x: 'max-content' }}
-                                      />
+                                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                                        {compactProtocol ? (
+                                          <Button
+                                            type="link"
+                                            size="small"
+                                            style={{ paddingInline: 0 }}
+                                            onClick={() => toggleFullProtocol(section.key)}
+                                          >
+                                            {fullProtocolKeys.includes(section.key)
+                                              ? 'Краткий протокол'
+                                              : 'Полный протокол'}
+                                          </Button>
+                                        ) : null}
+                                        <Table
+                                          className={
+                                            compactProtocol && !fullProtocolKeys.includes(section.key)
+                                              ? 'protocol-table protocol-table--compact'
+                                              : 'protocol-table'
+                                          }
+                                          columns={columnsForProtocol(
+                                            columns,
+                                            compactProtocol && !fullProtocolKeys.includes(section.key),
+                                          )}
+                                          dataSource={rowsWithClassification(section.rows, competition)}
+                                          rowKey="id"
+                                          pagination={false}
+                                          tableLayout={
+                                            compactProtocol && !fullProtocolKeys.includes(section.key)
+                                              ? 'fixed'
+                                              : undefined
+                                          }
+                                          scroll={
+                                            compactProtocol && !fullProtocolKeys.includes(section.key)
+                                              ? undefined
+                                              : { x: 'max-content' }
+                                          }
+                                        />
+                                      </Space>
                                     ),
                                   },
                                 ]}
@@ -1030,7 +1193,31 @@ export function EventPage() {
         open={isRegisterOpen}
         eventId={event.id}
         formats={event.formats}
+        initialFormatId={registerInitialFormatId}
         onClose={() => setIsRegisterOpen(false)}
+        onRegistered={refreshEvent}
+      />
+      <Modal
+        title="Регистрация на гонку"
+        open={formatToRegister != null}
+        onCancel={() => {
+          if (isRegisteringByFormat) return;
+          setFormatToRegister(null);
+        }}
+        okText="Зарегистрироваться"
+        cancelText="Отмена"
+        confirmLoading={isRegisteringByFormat}
+        onOk={() => void confirmFormatRegistration()}
+      >
+        {formatToRegister
+          ? `Вы хотите зарегистрироваться на гонку «${event.name}» в категории «${formatToRegister.name}»?`
+          : null}
+      </Modal>
+      <RegisterParticipantModal
+        open={isRegisterParticipantOpen}
+        eventId={event.id}
+        formats={event.formats}
+        onClose={() => setIsRegisterParticipantOpen(false)}
         onRegistered={refreshEvent}
       />
       <Modal

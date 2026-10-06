@@ -30,7 +30,7 @@ Timeweb already keeps object durability; this script is an extra offsite/local c
 ## Alloy → Grafana Cloud Loki
 
 - **data** host: `infra/observability/config.data.alloy` (Postgres containers)
-- **app** host: `infra/observability/config.app.alloy` (Nest log files + app containers)
+- **app** host: `infra/observability/config.app.alloy` (Nest stdout + app containers)
 
 Credentials: same `GRAFANA_LOKI_*` as local [`observability/`](../observability/).
 

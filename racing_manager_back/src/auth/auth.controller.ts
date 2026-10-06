@@ -54,13 +54,19 @@ export class AuthController {
     return res.redirect(url);
   }
 
+  @Get('register')
+  register(@Req() req: Request, @Res() res: Response) {
+    const url = this.authService.getRegistrationUrl(req);
+    return res.redirect(url);
+  }
+
   @Get('callback')
   async callback(@Req() req: Request, @Res() res: Response) {
     const appHost = process.env.APP_HOST ?? 'http://localhost:4000';
     const fullUrl = `${appHost}${req.url}`;
     const result = await this.authService.handleCallback(req, fullUrl);
     const postLoginRedirectUrl =
-      process.env.POST_LOGIN_REDIRECT_URI ?? 'http://localhost:5173/cabinet';
+      process.env.POST_LOGIN_REDIRECT_URI ?? 'http://localhost:5173/';
     const redirectUrl = new URL(postLoginRedirectUrl);
     redirectUrl.searchParams.set('auth', 'success');
     redirectUrl.searchParams.set(

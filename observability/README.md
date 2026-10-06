@@ -1,16 +1,20 @@
 # Observability (Grafana Cloud Loki via Alloy)
 
-Local [Grafana Alloy](https://grafana.com/docs/alloy/latest/) ships logs to your Grafana Cloud Loki stack. View them at [deniskhmyrov.grafana.net](https://deniskhmyrov.grafana.net/) → **Explore** → datasource **Loki**.
+[Grafana Alloy](https://grafana.com/docs/alloy/latest/) ships logs to Grafana Cloud Loki. View them at [deniskhmyrov.grafana.net](https://deniskhmyrov.grafana.net/) → **Explore** → datasource **Loki**.
+
+Every stream has an `env` label: `local` (this directory), `production` (app + data hosts), or `stage`.
 
 ## What is collected
 
-| Source | How | Labels |
-|--------|-----|--------|
-| `racing_manager_back` | JSON file under `logs/` | `job=nest`, `service=racing_manager_back` |
-| `competition_managment_service` | JSON file under `logs/` | `job=nest`, `service=competition_managment_service` |
-| Postgres / MinIO containers | Docker socket | `job=docker`, `container=<name>` |
+| Source | Local | Production / stage | Labels |
+|--------|-------|--------------------|--------|
+| `racing_manager_back` | JSON file under `logs/` | JSON on container stdout | `job=nest`, `service=racing_manager_back` |
+| `competition_managment_service` | JSON file under `logs/` | JSON on container stdout | `job=nest`, `service=competition_managment_service` |
+| Postgres / MinIO / nginx / Authentik | Docker socket | Docker socket | `job=docker`, `container=<name>` |
 
-Containers included: `racing_manager_db`, `racing_manager_minio`, `racing_manager_minio_init`, `competition_managment_db`.
+Local containers: `racing_manager_db`, `racing_manager_minio`, `racing_manager_minio_init`, `competition_managment_db`.
+
+On the app host, Alloy ([infra/observability/config.app.alloy](../infra/observability/config.app.alloy)) tails Docker logs, including Nest stdout. The data host ([infra/observability/config.data.alloy](../infra/observability/config.data.alloy)) ships Postgres the same way. Put the same `GRAFANA_LOKI_*` values in each host `.env` (never commit them). Empty username or token makes Loki reject the push.
 
 ## Setup
 
@@ -53,7 +57,9 @@ LOG_FILE_PATH=../observability/logs/competition_managment_service.log
 
 ```logql
 {service="racing_manager_back"}
-{service="competition_managment_service"}
+{env="production", service="racing_manager_back"}
+{env="production", service="competition_managment_service"}
+{env="local", service="competition_managment_service"}
 {container="racing_manager_db"}
 {container="racing_manager_minio"}
 {job="docker"}
@@ -82,7 +88,7 @@ Notable `event` values:
 | back | `auth.login_success`, `auth.logout`, `registration.created` / `.cancelled` / `.status_changed`, `event.created` / `.updated` / `.status_changed` / `.cancelled` / `.status_auto_synced`, `class_competition.*`, `cms.request_failed`, `result.upserted` |
 | CMS | `domain_error`, `competition.created` / `.plan_updated`, `stage.seeded` / `.results_recorded` / `.completed` / `.advanced` |
 
-Auth HTTP routes (`/auth/*`) are **not** access-logged — only the business events above go to Loki. Successful GETs stay at `debug` on the console and are omitted from the log file (default `LOG_FILE_LEVEL=info`).
+Auth HTTP routes (`/auth/*`) are **not** access-logged — only the business events above go to Loki. Successful GETs stay at `debug` and are omitted from the shipped stream (local file and production stdout both default to `info`).
 
 Pino writes `level` as a string (`info` / `warn` / `error`) so Grafana Explore shows the correct severity instead of **UNK**.
 

@@ -16,6 +16,15 @@ export type OwnProfileUpdate = {
   team: string | null;
 };
 
+export type UserSearchRow = {
+  id: string;
+  userName: string;
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  profileReady: boolean;
+};
+
 export type AppUser = {
   id: string;
   authentikId: string;
@@ -165,6 +174,47 @@ export class UsersService {
 
   async count(): Promise<number> {
     return this.prisma.user.count();
+  }
+
+  async findById(id: string): Promise<AppUser | null> {
+    const dbUser = await this.prisma.user.findUnique({ where: { id } });
+    return dbUser ? this.toAppUser(dbUser) : null;
+  }
+
+  async searchByIdentity(query: string): Promise<UserSearchRow[]> {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) return [];
+    const tokens = trimmed.split(/\s+/).filter(Boolean).slice(0, 4);
+    if (tokens.length === 0) return [];
+
+    const rows = await this.prisma.user.findMany({
+      where: {
+        AND: tokens.map((token) => ({
+          OR: [
+            { email: { contains: token, mode: 'insensitive' } },
+            { userName: { contains: token, mode: 'insensitive' } },
+            { lastName: { contains: token, mode: 'insensitive' } },
+            { firstName: { contains: token, mode: 'insensitive' } },
+          ],
+        })),
+      },
+      take: 20,
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }, { userName: 'asc' }],
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      userName: row.userName,
+      email: row.email,
+      firstName: row.firstName,
+      lastName: row.lastName,
+      profileReady: Boolean(
+        row.firstName?.trim() &&
+          row.lastName?.trim() &&
+          row.gender &&
+          row.birthDate,
+      ),
+    }));
   }
 
   async updateOwnProfile(

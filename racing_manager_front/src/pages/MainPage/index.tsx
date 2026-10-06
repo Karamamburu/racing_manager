@@ -111,10 +111,10 @@ export function MainPage() {
         subtitle="Сводка по соревнованиям, трассам и активности участников"
         extra={extra}
       >
-        <Space direction="vertical" size={24} style={{ width: '100%' }}>
+        <Space direction="vertical" size={24} className="main-page">
           <PromoSlider slides={mainSlides} />
 
-          <Row gutter={[16, 16]}>
+          <Row gutter={[16, 16]} className="main-page-stats">
             <Col xs={24} md={8}>
               <Card>
                 <Statistic
@@ -148,6 +148,7 @@ export function MainPage() {
           </Row>
 
           <Card
+            className="main-events-card"
             title="Ближайшие события"
             extra={
               <Checkbox
@@ -176,6 +177,7 @@ export function MainPage() {
                 columns={getEventColumns((eventId) => navigate(`/events/${eventId}`))}
                 dataSource={visibleEvents.map(toMainEventRow)}
                 pagination={false}
+                scroll={{ x: 'max-content' }}
                 locale={{
                   emptyText: showPastEvents ? 'Пока нет мероприятий' : 'Нет ближайших мероприятий',
                 }}

@@ -1,9 +1,5 @@
-/* Racing Manager — Authentik brand CSS (server 2025.10).
-   Paste into Customization → Brands → Custom CSS.
-   Colors match racing_manager_front/src/shared/theme/portalTheme.ts */
-
-:root,
-:host {
+:host-context(ak-flow-executor),
+.pf-c-login {
   --ak-accent: #0f766e;
 
   --pf-global--primary-color--100: #0f766e;
@@ -17,7 +13,6 @@
   --pf-global--BorderColor--100: #dce7e3;
   --pf-global--BorderColor--200: #e7efec;
   --pf-global--BackgroundColor--100: #ffffff;
-  --pf-global--BackgroundColor--200: #f3f7f5;
 
   --pf-global--BorderRadius--sm: 10px;
   --pf-global--BorderRadius--lg: 12px;
@@ -37,97 +32,170 @@
   --pf-c-login__main--BoxShadow: 0 1px 2px rgba(28, 43, 42, 0.04), 0 6px 16px rgba(28, 43, 42, 0.06);
 }
 
-:host,
-.pf-c-login {
-  min-height: 100dvh;
+html:has(ak-flow-executor),
+html:has(.pf-c-login),
+body:has(ak-flow-executor),
+body:has(.pf-c-login) {
+  height: auto !important;
+  overflow-y: auto !important;
 }
 
+:host(ak-flow-executor) {
+  display: block;
+  height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+:host-context(ak-flow-executor) .pf-c-page__drawer,
+:host-context(ak-flow-executor) .pf-c-drawer,
+:host-context(ak-flow-executor) .pf-c-drawer__main,
+:host-context(ak-flow-executor) .pf-c-drawer__content,
+:host-context(ak-flow-executor) .pf-c-drawer__body {
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+:host-context(ak-flow-executor) .pf-c-login,
 .pf-c-login {
+  box-sizing: border-box;
+  height: auto !important;
+  min-height: 100dvh;
+  max-height: none !important;
+  overflow: visible;
+  padding-block: 24px;
   justify-content: safe center;
   align-items: center;
-}
-
-.pf-c-login[data-layout="stacked"] .pf-c-login__main {
-  margin-top: 0 !important;
-}
-
-.pf-c-login,
-.pf-c-login__main,
-.pf-c-title,
-.pf-c-form__label,
-.pf-c-form-control,
-.pf-c-button {
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-.pf-c-login__main {
+:host-context(ak-flow-executor) .pf-c-login[data-layout="stacked"] .pf-c-login__main,
+.pf-c-login.stacked .pf-c-login__main {
+  margin-top: 0 !important;
+}
+
+:host-context(ak-flow-executor) .pf-c-login__main,
+.pf-c-login .pf-c-login__main {
   background-color: #ffffff;
   border: 1px solid #dce7e3;
   border-radius: 12px;
   box-shadow: 0 1px 2px rgba(28, 43, 42, 0.04), 0 6px 16px rgba(28, 43, 42, 0.06);
+  height: auto !important;
+  max-height: none !important;
+  overflow: clip;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-.pf-c-title {
+:host-context(ak-flow-executor) .pf-c-login__main-footer-band,
+.pf-c-login .pf-c-login__main-footer-band {
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+:host-context(ak-flow-executor) .pf-c-title,
+.pf-c-login .pf-c-title {
   color: #1c2b2a;
   font-weight: 600;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-.pf-c-form__label,
-.pf-c-form__label-text {
+:host-context(ak-flow-executor) .pf-c-form__label,
+:host-context(ak-flow-executor) .pf-c-form__label-text,
+.pf-c-login .pf-c-form__label,
+.pf-c-login .pf-c-form__label-text {
   color: #3d524f;
   font-weight: 500;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-.pf-c-form-control {
+:host-context(ak-flow-executor) .pf-c-form-control,
+:host-context(ak-flow-executor) textarea,
+:host-context(ak-flow-executor) select,
+.pf-c-login .pf-c-form-control,
+.pf-c-login textarea,
+.pf-c-login select {
   color: #1c2b2a;
   background-color: #ffffff;
   border: 1px solid #dce7e3;
   border-radius: 10px;
   box-shadow: none;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-.pf-c-form-control:hover {
+:host-context(ak-flow-executor) .pf-c-form-control:hover,
+:host-context(ak-flow-executor) textarea:hover,
+:host-context(ak-flow-executor) select:hover,
+.pf-c-login .pf-c-form-control:hover,
+.pf-c-login textarea:hover,
+.pf-c-login select:hover {
   border-color: #0f766e;
 }
 
-.pf-c-form-control:focus {
+:host-context(ak-flow-executor) .pf-c-form-control:focus,
+:host-context(ak-flow-executor) textarea:focus,
+:host-context(ak-flow-executor) select:focus,
+.pf-c-login .pf-c-form-control:focus,
+.pf-c-login textarea:focus,
+.pf-c-login select:focus {
   border-color: #0f766e;
   outline: none;
   box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.16);
 }
 
-.pf-c-button.pf-m-primary {
+:host-context(ak-flow-executor) .pf-c-button.pf-m-primary,
+.pf-c-login .pf-c-button.pf-m-primary {
   border-radius: 10px;
   font-weight: 500;
   background-color: #0f766e;
   border-color: #0f766e;
   box-shadow: 0 2px 0 rgba(15, 118, 110, 0.06);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-.pf-c-button.pf-m-primary:hover,
-.pf-c-button.pf-m-primary:focus {
+:host-context(ak-flow-executor) .pf-c-button.pf-m-primary:hover,
+:host-context(ak-flow-executor) .pf-c-button.pf-m-primary:focus,
+.pf-c-login .pf-c-button.pf-m-primary:hover,
+.pf-c-login .pf-c-button.pf-m-primary:focus {
   background-color: #14988c;
   border-color: #14988c;
 }
 
-.pf-c-button.pf-m-primary:active {
+:host-context(ak-flow-executor) .pf-c-button.pf-m-primary:active,
+.pf-c-login .pf-c-button.pf-m-primary:active {
   background-color: #0c615b;
   border-color: #0c615b;
 }
 
-.pf-c-button.pf-m-link,
-.pf-c-login__main-footer-links-item-link,
-a {
+:host-context(ak-flow-executor) .pf-c-button.pf-m-link,
+:host-context(ak-flow-executor) .pf-c-login__main-footer-links-item-link,
+:host-context(ak-flow-executor) a,
+.pf-c-login .pf-c-button.pf-m-link,
+.pf-c-login .pf-c-login__main-footer-links-item-link,
+.pf-c-login a:not(.pf-m-primary) {
   color: #0f766e;
 }
 
-.pf-c-button.pf-m-link:hover,
-.pf-c-login__main-footer-links-item-link:hover,
-a:hover {
+:host-context(ak-flow-executor) .pf-c-button.pf-m-link:hover,
+:host-context(ak-flow-executor) .pf-c-login__main-footer-links-item-link:hover,
+:host-context(ak-flow-executor) a:hover,
+.pf-c-login .pf-c-button.pf-m-link:hover,
+.pf-c-login .pf-c-login__main-footer-links-item-link:hover,
+.pf-c-login a:not(.pf-m-primary):hover {
   color: #14988c;
 }
 
-.pf-c-login__footer,
-.pf-c-login__main-footer-band {
+:host-context(ak-flow-executor) .pf-c-login__footer,
+:host-context(ak-flow-executor) .pf-c-login__main-footer-band,
+.pf-c-login .pf-c-login__footer,
+.pf-c-login .pf-c-login__main-footer-band {
   color: #5c6f6c;
+}
+
+:host(ak-brand-links),
+:host-context(ak-flow-executor) ak-brand-links,
+.pf-c-login ak-brand-links,
+.pf-c-login__footer .pf-c-list.pf-m-inline,
+.pf-c-list.pf-m-inline.style-scope.ak-brand-links {
+  display: none !important;
 }

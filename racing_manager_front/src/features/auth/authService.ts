@@ -3,6 +3,10 @@ export class AuthService {
     window.location.assign('/api/auth/login');
   }
 
+  public startRegistrationFlow(): void {
+    window.location.assign('/api/auth/register');
+  }
+
   public logout(): void {
     window.location.assign('/api/auth/logout');
   }
