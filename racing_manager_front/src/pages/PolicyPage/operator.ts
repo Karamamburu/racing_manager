@@ -1,7 +1,7 @@
 export const policyOperator = {
-  fullName: '[Фамилия Имя Отчество Оператора]',
-  inn: '[ИНН Оператора]',
-  postalAddress: '[Почтовый адрес для обращений]',
-  email: '[адрес электронной почты для обращений]',
-  siteUrl: '[https://адрес-портала]',
+  fullName: '[Хмыров Денис Евгеньевич]',
+  inn: '[773382867987]',
+  postalAddress: '[г. Москва]',
+  email: '[denis.e.khmyrov@gmail.com]',
+  siteUrl: '[https://www.vse-na-gonku.ru]',
 };
