@@ -8,8 +8,9 @@ export type PolicyDocument = {
 export const policyDocuments: PolicyDocument[] = [
   {
     slug: 'privacy',
-    title: 'Политика конфиденциальности',
-    description: 'Как портал собирает, хранит и обрабатывает персональные данные.',
+    title: 'Политика в отношении обработки персональных данных',
+    description:
+      'Кто оператор, какие данные обрабатываются, зачем, на каком основании, как долго и как ими управлять.',
     published: true,
   },
   {
@@ -22,6 +23,12 @@ export const policyDocuments: PolicyDocument[] = [
     slug: 'personal-data',
     title: 'Согласие на обработку персональных данных',
     description: 'Условия согласия субъекта персональных данных на обработку сведений.',
+    published: true,
+  },
+  {
+    slug: 'data-distribution',
+    title: 'Согласие на распространение персональных данных',
+    description: 'Условия публикации данных участников в стартовых и итоговых протоколах.',
     published: true,
   },
 ];

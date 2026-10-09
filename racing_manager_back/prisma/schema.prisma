@@ -75,6 +75,7 @@ enum ClassHeatResultStatus {
 enum PersonalConsentDocumentType {
   PRIVACY_POLICY
   PERSONAL_DATA_CONSENT
+  PERSONAL_DATA_DISTRIBUTION_CONSENT
 
   @@map("personal_consent_document_type")
 }

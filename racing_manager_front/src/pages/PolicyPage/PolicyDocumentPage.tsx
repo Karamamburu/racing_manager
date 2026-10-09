@@ -2,6 +2,7 @@ import { Button, Card, Result } from 'antd';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../../shared/layout';
 import { CookiesPolicyContent } from './CookiesPolicyContent';
+import { DataDistributionConsentContent } from './DataDistributionConsentContent';
 import { findPolicyDocument } from './documents';
 import { PersonalDataConsentContent } from './PersonalDataConsentContent';
 import { PrivacyPolicyContent } from './PrivacyPolicyContent';
@@ -38,6 +39,7 @@ export function PolicyDocumentPage() {
         {document.slug === 'cookies' ? <CookiesPolicyContent /> : null}
         {document.slug === 'privacy' ? <PrivacyPolicyContent /> : null}
         {document.slug === 'personal-data' ? <PersonalDataConsentContent /> : null}
+        {document.slug === 'data-distribution' ? <DataDistributionConsentContent /> : null}
         <Button type="link" onClick={() => navigate('/policy')} style={{ paddingInline: 0 }}>
           Ко всем политикам
         </Button>
