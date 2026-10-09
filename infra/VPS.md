@@ -7,8 +7,8 @@ Rent two VPS in the **same region** with a **private network** (or VPC). Do not 
 | Host | Role | vCPU | RAM | Disk | Public ports |
 |------|------|------|-----|------|--------------|
 | **jump** | Bastion (SSH entry) | 1–2 | 1–2 GB | 20 GB | 22 (admin) |
-| **app** | nginx TLS, front, API, CMS, Authentik, Alloy | 4 | 8 GB | 40–80 GB SSD | 80, 443; 22/3389 from jump only |
-| **data** | Postgres ×3 (main, CMS, Authentik), Alloy (DB logs) | 2 | 4 GB | 40–80 GB SSD | 22/3389 from jump; DB only from app |
+| **app** | nginx TLS, front, API, CMS, Authentik | 4 | 8 GB | 40–80 GB SSD | 80, 443; 22/3389 from jump only |
+| **data** | Postgres ×3 (main, CMS, Authentik) | 2 | 4 GB | 40–80 GB SSD | 22/3389 from jump; DB only from app |
 
 Optional **stage**: one VPS 2–4 vCPU / 4–8 GB / 60 GB — use [`stage/`](stage/).
 
