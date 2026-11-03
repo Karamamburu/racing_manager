@@ -174,7 +174,8 @@ export type EventDetails = {
   } | null;
   formats: EventFormatRef[];
   laps: EventLap[];
-  registrations: EventParticipant[];
+  registrations: EventParticipant[] | null;
+  registeredCount: number;
   finishedCategories: CategoryFinishRef[];
 };
 

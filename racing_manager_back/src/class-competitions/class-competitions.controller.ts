@@ -27,6 +27,7 @@ export class ClassCompetitionsController {
   constructor(private readonly classCompetitions: ClassCompetitionsService) {}
 
   @Get()
+  @UseGuards(SessionAuthGuard)
   list(@Param('eventId', eventIdPipe) eventId: string) {
     return this.classCompetitions.list(eventId);
   }

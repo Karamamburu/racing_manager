@@ -1,4 +1,12 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Query,
+  Req,
+} from '@nestjs/common';
+import type { Request } from 'express';
 import { EventsService } from './events.service';
 
 @Controller('events')
@@ -11,7 +19,12 @@ export class EventsCatalogController {
   }
 
   @Get(':id')
-  getById(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
-    return this.eventsService.findById(id);
+  getById(
+    @Req() req: Request,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ) {
+    return this.eventsService.findById(id, {
+      includeRegistrations: Boolean(req.session?.userSub),
+    });
   }
 }

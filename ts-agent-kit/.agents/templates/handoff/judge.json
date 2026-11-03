@@ -1,0 +1,13 @@
+{
+  "role": "skeptic",
+  "verdict": "REJECT",
+  "findings": [
+    {
+      "id": "F-001",
+      "severity": "BLOCKER",
+      "location": "apps/api/src/links/links.service.ts:40",
+      "issue": "The count is read before the write, outside prisma.$transaction.",
+      "evidence": "const count = await this.repo.count(userId)"
+    }
+  ]
+}

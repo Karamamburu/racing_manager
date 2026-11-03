@@ -1,0 +1,7 @@
+{
+  "role": "code_gate",
+  "verdict": "GATE_FAILURE",
+  "command": "node .agents/tools/verify_techlead_gate.mjs",
+  "exit_code": 1,
+  "summary": "layers: apps/api/src/links/links.controller.ts imports PrismaClient"
+}

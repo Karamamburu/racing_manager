@@ -1,0 +1,14 @@
+{
+  "role": "summarizer",
+  "title": "Panel rework brief",
+  "blocking_count": 1,
+  "instructions": [
+    {
+      "id": "RW-001",
+      "severity": "BLOCKER",
+      "location": "apps/api/src/links/links.service.ts:40",
+      "issue": "The count is read before the write, outside prisma.$transaction.",
+      "action": "Move the count and the insert into one prisma.$transaction in the repository."
+    }
+  ]
+}
