@@ -1,0 +1,15 @@
+---
+description: Use the Karpathy-style docs wiki before scanning the monorepo
+alwaysApply: true
+---
+
+# Project knowledge
+
+For Racing Manager product context:
+
+1. Read `docs/INDEX.md` first.
+2. Open exactly one linked domain or wiki page for the task.
+3. Then open only needed code neighbors. Do not dump entire packages into context.
+4. Keep wiki pages in English. Follow `docs/SCHEMA.md` for ingest / query / lint.
+5. Package paths are in root `AGENTS.md` (not `apps/api` / `apps/web`).
+6. After public API/DTO/enum contract changes, update the matching `docs/domains/` page when feasible and append `docs/log.md`.

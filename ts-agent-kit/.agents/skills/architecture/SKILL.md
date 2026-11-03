@@ -4,8 +4,9 @@ description: >
   Designs a change before code: C1 and C2 diagrams, a component model,
   decisions with alternatives, data contracts, and tasks T1-TN with a
   definition of done. Use for work of a day or more, several modules, or a
-  breaking change, after requirements exist and before feature implementation.
-  Do not use for a small local fork that an ADR-lite can record.
+  breaking change, after an accepted functional-analysis PRD (and usually
+  EARS) and before feature implementation. Do not use for a small local
+  fork that an ADR-lite can record.
 owner: tbd
 freedom: heuristic
 last_reviewed: 2026-10-28
@@ -15,7 +16,7 @@ last_reviewed: 2026-10-28
 
 ## When
 
-The task is a day or more, crosses modules, breaks a contract, or adds a service. Input is an approved requirements note. Output is the input to `feature`, `nest-feature`, or `react-feature`. A small fork that is cheap to undo is an ADR-lite via `docs`, not this skill.
+The task is a day or more, crosses modules, breaks a contract, or adds a service. Input is an accepted `Tasks/<KEY>/PRD.md` from `functional-analysis` (and usually an EARS spec). Output is the input to `feature`, `nest-feature`, or `react-feature`. A small fork that is cheap to undo is an ADR-lite via `docs`, not this skill.
 
 ## Goal
 
@@ -27,7 +28,7 @@ Read `.agents/agents/architecture.md` first.
 
 | Input | Where | If missing |
 |---|---|---|
-| Requirements with ids and a definition of done | `Tasks/<KEY>/PRD.md` or the ticket | Ask. Do not design from a guess. |
+| Accepted functional analysis with ids and a definition of done | `Tasks/<KEY>/PRD.md` from `functional-analysis` (status `accepted`) | Ask. Do not design from a guess or from a draft PRD. |
 | Latency, volume, cost, or availability numbers | The requirements | Ask. Do not invent numbers. |
 | The code that exists today | The product repo | Read it before proposing a new module. |
 | Stack and security constraints | `AGENTS.md` | Read-only. A conflict is an escalation, not an override. |

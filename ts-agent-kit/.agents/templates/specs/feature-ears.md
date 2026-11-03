@@ -1,5 +1,8 @@
 # Create link
 
+Source PRD: Tasks/<KEY>/PRD.md
+Domain: docs/domains/<domain>.md
+
 ## Ubiquitous
 
 The system SHALL reject a target that is not http or https. The request type is CreateLinkDto.
@@ -32,3 +35,12 @@ WHERE none, the system SHALL skip this pattern.
 - WHEN create returns LinkResponseDto and sends the idempotency key.
 - IF a file URL is rejected.
 - WHILE the quota is exhausted the status is 429.
+
+## Traceability
+
+| EARS (section / statement) | FR | UC |
+|---|---|---|
+| Ubiquitous / The system SHALL reject a target that is not http or https | FR-01 | UC-01 |
+| Event / WHEN the client creates a link … | FR-02 | UC-01 |
+| State / WHILE the daily create quota … | FR-03 | UC-01 |
+| Unwanted / IF the target URL uses the file scheme … | FR-01 | UC-01 |

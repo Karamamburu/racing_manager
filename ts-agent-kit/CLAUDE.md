@@ -10,11 +10,12 @@ Then open only the standards that skill names, under `.agents/agents/`.
 
 ## Router
 
-New behavior follows this order: `knowledge-index`, `spec-kit-ears`, `architecture` only when the change is breaking or multi-day, then `open-gsd-pipeline`, then `feature-pipeline` before `mr`. CODE_GATE inside that loop is `techlead-gate`. Three `ACCEPT` verdicts are required. A one or two file fix with no schema change and no new contract uses `small-fix` and does not create `.planning/`.
+New behavior follows this order: `knowledge-index`, `functional-analysis`, `spec-kit-ears`, `architecture` only when the change is breaking or multi-day, then `open-gsd-pipeline`, then `feature-pipeline` before `mr`. CODE_GATE inside that loop is `techlead-gate`. Three `ACCEPT` verdicts are required. A one or two file fix with no schema change and no new contract uses `small-fix` and does not create `.planning/`.
 
 | Task | Skill |
 |---|---|
 | One domain and its import neighbors | `knowledge-index` |
+| Functional analysis (PRD) before EARS | `functional-analysis` |
 | Acceptance spec before code | `spec-kit-ears` |
 | Waves on disk | `open-gsd-pipeline` |
 | Coder, gate, and three read-only judges | `feature-pipeline` |

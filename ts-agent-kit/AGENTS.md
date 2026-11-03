@@ -30,10 +30,11 @@ If a product uses different directories, the product's root `AGENTS.md` names th
 New behavior, in this order:
 
 1. `knowledge-index` — one domain page and the import neighbors. Do not read the whole repo.
-2. `spec-kit-ears` — `specs/<feature>-ears.md` before tests or product code.
-3. `architecture` — only when the change is breaking, multi-day, or crosses a service boundary. Stop until a human accepts the document.
-4. `open-gsd-pipeline` — `.planning/` waves of at most 3 files. A fresh context executes one wave with `nest-feature`, `react-feature`, or `database-migration`.
-5. `feature-pipeline` — closed loop for that wave: coder, CODE_GATE (`verify_techlead_gate.mjs`), then Skeptic, Realist, and Visionary. Three `ACCEPT` verdicts are required before `mr`. A single reviewer, when the human asks for one, stays `orchestrate-coder-reviewer-summarizer`.
+2. `functional-analysis` — accepted English `Tasks/<KEY>/PRD.md` (problem, actors, use cases, FRs) before any acceptance spec.
+3. `spec-kit-ears` — `specs/<feature>-ears.md` before tests or product code.
+4. `architecture` — only when the change is breaking, multi-day, or crosses a service boundary. Stop until a human accepts the document.
+5. `open-gsd-pipeline` — `.planning/` waves of at most 3 files. A fresh context executes one wave with `nest-feature`, `react-feature`, or `database-migration`.
+6. `feature-pipeline` — closed loop for that wave: coder, CODE_GATE (`verify_techlead_gate.mjs`), then Skeptic, Realist, and Visionary. Three `ACCEPT` verdicts are required before `mr`. A single reviewer, when the human asks for one, stays `orchestrate-coder-reviewer-summarizer`.
 
 A correction of one or two product files, with no schema change, no new dependency, and no new route contract, uses `small-fix` instead. It does not invent a `.planning/` roadmap.
 
@@ -52,6 +53,7 @@ Pick one primary skill. A second skill runs only when the first skill says to.
 | Task | Skill | Do not use it for |
 |---|---|---|
 | Scope a change to one domain and its import neighbors | `knowledge-index` | Implementing the change |
+| Functional analysis (PRD) before EARS | `functional-analysis` | Writing EARS, architecture, or the feature |
 | Acceptance spec before code | `spec-kit-ears` | Writing the feature |
 | Disk-backed waves for a multi-file change | `open-gsd-pipeline` | A 1-2 file fix with no new contract |
 | Closed loop after a feature wave: coder, gate, three judges | `feature-pipeline` | A 1-2 file fix, or a request for one reviewer |
