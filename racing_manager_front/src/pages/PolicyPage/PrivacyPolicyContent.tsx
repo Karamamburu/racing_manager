@@ -122,7 +122,6 @@ export function PrivacyPolicyContent() {
       <Typography.Title level={4}>3. Сведения об Операторе</Typography.Title>
       <ul className="policy-list">
         <li>Оператор: {policyOperator.fullName};</li>
-        <li>ИНН: {policyOperator.inn};</li>
         <li>почтовый адрес для обращений: {policyOperator.postalAddress};</li>
         <li>
           адрес электронной почты для обращений по вопросам персональных данных: <OperatorEmail />.
