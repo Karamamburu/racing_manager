@@ -43,3 +43,8 @@ pids/
 .classpath
 .settings/
 *.sublime-workspace
+
+.cursor/
+.planning/
+Tasks/
+specs/

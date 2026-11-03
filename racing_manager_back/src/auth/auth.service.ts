@@ -27,6 +27,7 @@ type OidcClaims = {
   birth_date?: unknown;
   gender?: unknown;
   consent?: unknown;
+  distribution_consent?: unknown;
 };
 
 type UsersServicePort = Pick<UsersService, 'registerFromOidcProfile'>;
@@ -154,6 +155,9 @@ export class AuthService implements OnModuleInit {
     const birthDate = parseOptionalBirthDate(claims.birth_date);
     const gender = parseOptionalGender(claims.gender);
     const consentGranted = isOidcConsentGranted(claims.consent);
+    const distributionConsentGranted = isOidcConsentGranted(
+      claims.distribution_consent,
+    );
     const displayName =
       [firstName, lastName].filter(Boolean).join(' ').trim() || name;
 
@@ -170,6 +174,7 @@ export class AuthService implements OnModuleInit {
         birthDate,
         gender,
         consentGranted,
+        distributionConsentGranted,
         requestMeta: mergeConsentRequestMeta(
           readConsentRequestMeta(req),
           requestMeta,
@@ -243,6 +248,7 @@ export class AuthService implements OnModuleInit {
   ): Promise<OidcClaims> {
     const needsUserinfo =
       claims.consent === undefined ||
+      claims.distribution_consent === undefined ||
       claims.first_name === undefined ||
       claims.last_name === undefined ||
       claims.birth_date === undefined ||

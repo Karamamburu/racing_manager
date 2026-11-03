@@ -55,6 +55,7 @@ export class UsersService {
     birthDate?: Date;
     gender?: 'M' | 'F';
     consentGranted?: boolean;
+    distributionConsentGranted?: boolean;
     requestMeta?: ConsentRequestMeta;
   }): Promise<{ user: AppUser; isNew: boolean }> {
     const existing = await this.prisma.user.findUnique({
@@ -93,6 +94,7 @@ export class UsersService {
       birthDate,
       gender,
       consentGranted: Boolean(profile.consentGranted),
+      distributionConsentGranted: Boolean(profile.distributionConsentGranted),
       requestMeta: profile.requestMeta,
     });
 
@@ -118,6 +120,7 @@ export class UsersService {
     birthDate?: Date;
     gender?: 'M' | 'F';
     consentGranted: boolean;
+    distributionConsentGranted: boolean;
     requestMeta?: ConsentRequestMeta;
   }) {
     const document = input.consentGranted
@@ -129,6 +132,18 @@ export class UsersService {
     if (input.consentGranted && !document) {
       throw new ServiceUnavailableException(
         'Personal data consent document is not published.',
+      );
+    }
+
+    const distributionDocument = input.distributionConsentGranted
+      ? await this.prisma.personalConsentDocument.findFirst({
+          where: { type: 'PERSONAL_DATA_DISTRIBUTION_CONSENT' },
+          orderBy: { publishedAt: 'desc' },
+        })
+      : null;
+    if (input.distributionConsentGranted && !distributionDocument) {
+      throw new ServiceUnavailableException(
+        'Personal data distribution consent document is not published.',
       );
     }
 
@@ -149,6 +164,22 @@ export class UsersService {
         await tx.personalConsentEvent.create({
           data: {
             documentId: document.id,
+            userId: user.id,
+            action: 'GRANTED',
+            source: 'REGISTRATION',
+            userFirstName: input.firstName ?? '',
+            userLastName: input.lastName ?? '',
+            userBirthDate: input.birthDate ?? null,
+            ip: input.requestMeta?.ip ?? null,
+            userAgent: input.requestMeta?.userAgent ?? null,
+          },
+        });
+      }
+
+      if (distributionDocument) {
+        await tx.personalConsentEvent.create({
+          data: {
+            documentId: distributionDocument.id,
             userId: user.id,
             action: 'GRANTED',
             source: 'REGISTRATION',
