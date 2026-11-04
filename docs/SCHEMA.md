@@ -88,5 +88,5 @@ Example: `grep "^## \[" docs/log.md | tail -5`
 ## Non-goals
 
 - No RAG / embeddings / search CLI in v1 (`INDEX.md` is enough).
-- No full legal policy paste — summarize and cite `policy.md`.
+- No full legal policy paste — summarize and cite `racing_manager_front/src/pages/PolicyPage/`.
 - Do not treat uncommitted WIP as settled fact unless marked in progress on the page.

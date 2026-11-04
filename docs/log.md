@@ -2,6 +2,10 @@
 
 Append-only. Prefix every entry with `## [YYYY-MM-DD] ingest|query|lint | Title`.
 
+## [2026-11-04] ingest | Remove stray RifaStore policy.md
+
+Deleted root `policy.md` (foreign RifaStore template with https://rifastore.ru). Operator email SoT remains `racing_manager_front/src/pages/PolicyPage/operator.ts` (`vse.na.gonku@gmail.com`). Wiki citations retargeted to PolicyPage. Updated [personal-consent](entities/personal-consent.md), [overview](overview.md), [SCHEMA](SCHEMA.md), [raw/sources](raw/sources.md).
+
 ## [2026-11-03] ingest | Consent email on registration events
 
 Registration-sourced personal consent events store IdP `email` snapshot; first registration without usable email is refused; returning login does not rewrite consent-event email. Updated [domains/personal.md](domains/personal.md). Spec: `specs/consent-email-ears.md`.

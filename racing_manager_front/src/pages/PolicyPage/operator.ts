@@ -1,6 +1,6 @@
 export const policyOperator = {
   fullName: 'Хмыров Денис Евгеньевич',
   postalAddress: 'г. Москва',
-  email: 'denis.e.khmyrov@gmail.com',
+  email: 'vse.na.gonku@gmail.com',
   siteUrl: 'https://www.vse-na-gonku.ru',
 };

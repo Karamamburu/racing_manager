@@ -20,4 +20,4 @@ Immutable layer of the LLM wiki.
 - Exported decision notes, meeting briefs, or ADRs the team wants frozen
 - Snapshots of external docs that are not already in the git tree
 
-Repo files that already live elsewhere (READMEs, Prisma schema, `policy.md`) stay in place; list them in `sources.md` instead of copying.
+Repo files that already live elsewhere (READMEs, Prisma schema, PolicyPage legal copy) stay in place; list them in `sources.md` instead of copying.

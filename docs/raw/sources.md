@@ -37,7 +37,7 @@ Pointers into the repository. Paths are relative to the repo root. Do not copy s
 
 | Source | Use |
 |---|---|
-| `policy.md` | Russian personal-data policy text (152-FZ); summarize in English wiki only |
+| `racing_manager_front/src/pages/PolicyPage/` | Russian personal-data policy / consent copy (152-FZ); summarize in English wiki only |
 
 ## First compile
 

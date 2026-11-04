@@ -1,9 +1,9 @@
 ---
 type: entity
-updated: 2026-11-03
+updated: 2026-11-04
 sources:
   - racing_manager_back/prisma/schema.prisma
-  - policy.md
+  - racing_manager_front/src/pages/PolicyPage/
 ---
 
 # Entity: Personal data consent
@@ -25,7 +25,7 @@ Tracks grant/revoke of personal-data related documents for a [User](user-and-rol
 
 Events are append-style history (`PersonalConsentEvent`). Cabinet/`personal` module and registration flows collect checkboxes; Policy page renders legal copy.
 
-Full Russian legal text: repo `policy.md`. Do not paste it into the wiki.
+Full Russian legal text: `racing_manager_front/src/pages/PolicyPage/` (operator contacts in `operator.ts`). Do not paste it into the wiki.
 
 ## Links
 
