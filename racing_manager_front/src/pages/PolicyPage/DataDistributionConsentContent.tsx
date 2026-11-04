@@ -33,7 +33,6 @@ export function DataDistributionConsentContent() {
       <Typography.Title level={4}>2. Оператор</Typography.Title>
       <ul className="policy-list">
         <li>Оператор: {policyOperator.fullName};</li>
-        <li>ИНН: {policyOperator.inn};</li>
         <li>почтовый адрес: {policyOperator.postalAddress};</li>
         <li>адрес электронной почты: {policyOperator.email}.</li>
       </ul>
