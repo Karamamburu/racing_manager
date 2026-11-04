@@ -301,6 +301,7 @@ CREATE TABLE personal_consent_events (
   user_first_name TEXT NOT NULL,
   user_last_name TEXT NOT NULL,
   user_birth_date DATE,
+  email TEXT,
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   ip TEXT,
   user_agent TEXT

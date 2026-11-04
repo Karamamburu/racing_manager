@@ -73,6 +73,10 @@ function counts(file) {
   return !(
     norm === '.planning' ||
     norm.startsWith('.planning/') ||
+    norm === 'handoff' ||
+    norm.startsWith('handoff/') ||
+    norm === 'ts-agent-kit' ||
+    norm.startsWith('ts-agent-kit/') ||
     norm === '.ai-team' ||
     norm.startsWith('.ai-team/') ||
     norm === 'specs/dependency-graph.json'

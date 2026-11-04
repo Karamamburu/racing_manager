@@ -6,6 +6,16 @@ import {
 import type { ConsentRequestMeta } from '../auth/consent-request-meta';
 import { PrismaService } from '../prisma/prisma.service';
 
+/** Thrown when first registration lacks a usable OIDC email (refuse before writes). */
+export class MissingOidcEmailError extends Error {
+  constructor(
+    message = 'OIDC profile does not include a usable email for registration.',
+  ) {
+    super(message);
+    this.name = 'MissingOidcEmailError';
+  }
+}
+
 export type OwnProfileUpdate = {
   firstName: string;
   lastName: string;
@@ -123,6 +133,11 @@ export class UsersService {
     distributionConsentGranted: boolean;
     requestMeta?: ConsentRequestMeta;
   }) {
+    const email = input.email?.trim();
+    if (!email) {
+      throw new MissingOidcEmailError();
+    }
+
     const document = input.consentGranted
       ? await this.prisma.personalConsentDocument.findFirst({
           where: { type: 'PERSONAL_DATA_CONSENT' },
@@ -152,7 +167,7 @@ export class UsersService {
         data: {
           authentikId: input.authentikId,
           userName: input.userName,
-          email: input.email,
+          email,
           firstName: input.firstName,
           lastName: input.lastName,
           birthDate: input.birthDate,
@@ -167,6 +182,7 @@ export class UsersService {
             userId: user.id,
             action: 'GRANTED',
             source: 'REGISTRATION',
+            email,
             userFirstName: input.firstName ?? '',
             userLastName: input.lastName ?? '',
             userBirthDate: input.birthDate ?? null,
@@ -183,6 +199,7 @@ export class UsersService {
             userId: user.id,
             action: 'GRANTED',
             source: 'REGISTRATION',
+            email,
             userFirstName: input.firstName ?? '',
             userLastName: input.lastName ?? '',
             userBirthDate: input.birthDate ?? null,
