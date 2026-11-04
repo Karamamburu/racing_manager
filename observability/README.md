@@ -1,47 +1,16 @@
-# Observability (Grafana Cloud Loki via Alloy)
+# Observability
 
-[Grafana Alloy](https://grafana.com/docs/alloy/latest/) ships logs to Grafana Cloud Loki. View them at [deniskhmyrov.grafana.net](https://deniskhmyrov.grafana.net/) → **Explore** → datasource **Loki**.
+Logs contain personal data (`userSub`, registrations, etc.), so they must **not** leave Russia (152-FZ, cross-border transfer). Shipping to Grafana Cloud was removed; there is currently no external log collector.
 
-Every stream has an `env` label: `local` (this directory), `production` (app + data hosts), or `stage`.
+## Where logs live now
 
-## What is collected
+| Source | Local | Production / stage |
+|--------|-------|--------------------|
+| `racing_manager_back` | pretty console + JSON file under `logs/` | JSON on container stdout → Docker `json-file` on the host |
+| `competition_managment_service` | pretty console + JSON file under `logs/` | JSON on container stdout → Docker `json-file` on the host |
+| Postgres / nginx / Authentik | `docker logs <container>` | `docker logs <container>` on the host |
 
-| Source | Local | Production / stage | Labels |
-|--------|-------|--------------------|--------|
-| `racing_manager_back` | JSON file under `logs/` | JSON on container stdout | `job=nest`, `service=racing_manager_back` |
-| `competition_managment_service` | JSON file under `logs/` | JSON on container stdout | `job=nest`, `service=competition_managment_service` |
-| Postgres / MinIO / nginx / Authentik | Docker socket | Docker socket | `job=docker`, `container=<name>` |
-
-Local containers: `racing_manager_db`, `racing_manager_minio`, `racing_manager_minio_init`, `competition_managment_db`.
-
-On the app host, Alloy ([infra/observability/config.app.alloy](../infra/observability/config.app.alloy)) tails Docker logs, including Nest stdout. The data host ([infra/observability/config.data.alloy](../infra/observability/config.data.alloy)) ships Postgres the same way. Put the same `GRAFANA_LOKI_*` values in each host `.env` (never commit them). Empty username or token makes Loki reject the push.
-
-## Setup
-
-1. Copy credentials (never commit `.env`):
-
-```bash
-cp .env.example .env
-```
-
-Fill from Grafana Cloud Portal → your stack → **Loki** → **Details** (or **Connections** → Alloy snippet):
-
-- `GRAFANA_LOKI_URL` — push URL ending in `/loki/api/v1/push`  
-  (Sweden / `prod-eu-north-0`: `https://logs-prod-025.grafana.net/loki/api/v1/push` — **not** `*.grafana.net` instance URL)
-- `GRAFANA_LOKI_USERNAME` — **numeric** Loki User / Instance ID from the Loki card (digits only, not the stack slug)
-- `GRAFANA_LOKI_TOKEN` — access policy token with `logs:write` (starts with `glc_`)
-
-Put secrets only in `.env` (never in `.env.example`).
-
-2. Start Alloy:
-
-```bash
-docker compose up -d
-```
-
-UI metrics: http://localhost:12345
-
-3. Point Nest apps at log files (defaults work if you start from each service directory):
+Local file paths (defaults work if you start from each service directory):
 
 ```env
 # racing_manager_back/.env
@@ -51,52 +20,39 @@ LOG_FILE_PATH=../observability/logs/racing_manager_back.log
 LOG_FILE_PATH=../observability/logs/competition_managment_service.log
 ```
 
-4. Run backends (`npm run start:dev`) and ensure DB/MinIO compose stacks are up.
+Query on a host:
 
-## Example LogQL
-
-```logql
-{service="racing_manager_back"}
-{env="production", service="racing_manager_back"}
-{env="production", service="competition_managment_service"}
-{env="local", service="competition_managment_service"}
-{container="racing_manager_db"}
-{container="racing_manager_minio"}
-{job="docker"}
-{job="nest"}
+```bash
+docker logs racing_manager_back --since 1h | jq 'select(.event == "registration.created")'
+docker logs competition_managment_service --since 1h | jq 'select(.level == "error")'
 ```
+
+## Planned: Yandex Cloud Logging + DataLens
+
+Target setup (all data stays in RF):
+
+1. Create a log group in [Yandex Cloud Logging](https://yandex.cloud/ru/docs/logging/) (`ru-central1`).
+2. Ship container logs with [Fluent Bit + Yandex Cloud Logging plugin](https://yandex.cloud/ru/docs/logging/tutorials/fluent-bit-logging) (or Unified Agent) from the app / data / stage hosts, using a service account with `logging.writer`.
+3. Build dashboards in [Yandex DataLens](https://yandex.cloud/ru/docs/datalens/) (via export of the log group to ClickHouse / Object Storage, or directly from Logging).
+
+Until then, do not add any log/metrics/tracing exporter that sends data outside RF.
 
 ## Business events
 
-Structured Nest logs include an `event` field. Parse JSON in Explore:
-
-```logql
-{service="racing_manager_back"} | json | event=~"registration.*"
-{service="racing_manager_back"} | json | event="auth.login_success"
-{service="racing_manager_back"} | json | event="event.status_changed"
-{service="racing_manager_back"} | json | event="cms.request_failed"
-{service="racing_manager_back"} | json | event=~"class_competition.*"
-{service="competition_managment_service"} | json | event="domain_error"
-{service="competition_managment_service"} | json | event=~"stage\\..*"
-{service="competition_managment_service"} | json | event=~"competition\\..*"
-```
-
-Notable `event` values:
+Structured Nest logs include an `event` field (also used as `msg`).
 
 | Service | Events |
 |---------|--------|
 | back | `auth.login_success`, `auth.logout`, `registration.created` / `.cancelled` / `.status_changed`, `event.created` / `.updated` / `.status_changed` / `.cancelled` / `.status_auto_synced`, `class_competition.*`, `cms.request_failed`, `result.upserted` |
 | CMS | `domain_error`, `competition.created` / `.plan_updated`, `stage.seeded` / `.results_recorded` / `.completed` / `.advanced` |
 
-Auth HTTP routes (`/auth/*`) are **not** access-logged — only the business events above go to Loki. Successful GETs stay at `debug` and are omitted from the shipped stream (local file and production stdout both default to `info`).
+Auth HTTP routes (`/auth/*`) are **not** access-logged — only the business events above. Successful GETs stay at `debug` and are omitted (local file and production stdout both default to `info`).
 
-Pino writes `level` as a string (`info` / `warn` / `error`) so Grafana Explore shows the correct severity instead of **UNK**.
-
-Docker/Postgres logs go through Alloy `loki.process`: Postgres `LOG`/`WARNING`/`ERROR`/… are mapped to Grafana levels (`info`/`warn`/`error`/…).
+Pino writes `level` as a string (`info` / `warn` / `error`).
 
 ## Sentry Uptime
 
-[Sentry Uptime Monitoring](https://docs.sentry.io/product/monitors-and-alerts/monitors/uptime-monitoring/) probes public HTTP URLs from Sentry’s cloud (not a local Docker service). No DSN or `.env` secrets are required for uptime — monitors live in the Sentry UI.
+[Sentry Uptime Monitoring](https://docs.sentry.io/product/monitors-and-alerts/monitors/uptime-monitoring/) probes public HTTP URLs from Sentry’s cloud (not a local Docker service). It only calls `/health` and receives `{ "status": "ok" }` — no personal data is sent. No DSN or `.env` secrets are required — monitors live in the Sentry UI.
 
 ### Probe endpoints
 
@@ -106,7 +62,7 @@ Docker/Postgres logs go through Alloy `loki.process`: Postgres `LOG`/`WARNING`/`
 | `competition_managment_service` | `GET /health` → `{ "status": "ok" }` | `curl http://localhost:4100/health` | private (not on public edge) |
 | Frontend | `GET /health` → `{ "status": "ok" }` | `curl http://localhost:5173/health` | `https://DOMAIN/health` |
 
-See also [infra/backups/README.md](../infra/backups/README.md) for production Alloy + Sentry Uptime.
+See also [infra/backups/README.md](../infra/backups/README.md).
 
 Liveness only (no DB/MinIO checks). Access logs for `/health` are skipped on both Nest apps.
 
@@ -119,7 +75,6 @@ Liveness only (no DB/MinIO checks). Access logs for `/health` are skipped on bot
 | Monitor | URL | Method | Interval |
 |---------|-----|--------|----------|
 | API | `https://<api-host>/health` | GET | 1 minute |
-| CMS | `https://<cms-host>/health` | GET | 1 minute |
 | Front | `https://<front-host>/health` | GET | 1 minute |
 
 4. Expect HTTP 2xx. Optionally wire notifications (email / Slack) for downtime issues.

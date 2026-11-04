@@ -27,12 +27,9 @@ Media lives in Timeweb Cloud S3 (`s3.twcstorage.ru`). Optional weekly local mirr
 
 Timeweb already keeps object durability; this script is an extra offsite/local copy via `aws s3 sync`.
 
-## Alloy → Grafana Cloud Loki
+## Logs
 
-- **data** host: `infra/observability/config.data.alloy` (Postgres containers)
-- **app** host: `infra/observability/config.app.alloy` (Nest stdout + app containers)
-
-Credentials: same `GRAFANA_LOKI_*` as local [`observability/`](../observability/).
+Logs are **not** shipped to any external service: personal data must not leave RF (152-FZ). They stay on each host in Docker `json-file` (`docker logs <container>`, rotated by `max-size` / `max-file`). See [`observability/`](../../observability/) for the planned Yandex Cloud setup.
 
 ## Sentry Uptime
 

@@ -65,26 +65,7 @@ services:
       retries: 5
       start_period: 20s
 
-  alloy:
-    image: grafana/alloy:v1.9.1
-    container_name: racing_manager_alloy_data
-    restart: unless-stopped
-    volumes:
-      - ../observability/config.data.alloy:/etc/alloy/config.alloy:ro
-      - alloy_data:/var/lib/alloy/data
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      GRAFANA_LOKI_URL: ${GRAFANA_LOKI_URL}
-      GRAFANA_LOKI_USERNAME: ${GRAFANA_LOKI_USERNAME}
-      GRAFANA_LOKI_TOKEN: ${GRAFANA_LOKI_TOKEN}
-    command:
-      - run
-      - --server.http.listen-addr=0.0.0.0:12345
-      - --storage.path=/var/lib/alloy/data
-      - /etc/alloy/config.alloy
-
 volumes:
   postgres_main_data:
   postgres_cms_data:
   postgres_authentik_data:
-  alloy_data:

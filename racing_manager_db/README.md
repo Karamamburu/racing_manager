@@ -61,6 +61,12 @@ docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB
 docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_personal_data_consent_document.sql
 ```
 
+For the privacy policy 2026-10-09 and the separate consent to distribute personal data in public protocols:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/migrate_policy_2026_10_09.sql
+```
+
 For one active guest registration per person (name + birth year) on an event. Logged-in users are unique by `user_id` only.
 
 ```bash

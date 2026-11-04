@@ -41,6 +41,7 @@ export function PersonalDataConsentContent() {
         <li>фамилия;</li>
         <li>пол;</li>
         <li>дата рождения;</li>
+        <li>email;</li>
         <li>город;</li>
         <li>район;</li>
         <li>команда.</li>

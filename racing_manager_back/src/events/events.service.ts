@@ -117,7 +117,8 @@ export type EventDetails = {
   } | null;
   formats: EventFormatRef[];
   laps: EventLapRef[];
-  registrations: EventParticipant[];
+  registrations: EventParticipant[] | null;
+  registeredCount: number;
   finishedCategories: CategoryFinishRef[];
 };
 
@@ -228,7 +229,8 @@ type EventWithDetails = StoredEvent & {
   createdBy: PersonRow | null;
   eventFormats: { format: StoredFormat }[];
   laps: StoredLap[];
-  registrations: StoredRegistration[];
+  registrations?: StoredRegistration[];
+  _count: { registrations: number };
 };
 
 type EventOwnerRow = {
@@ -244,10 +246,7 @@ type EventsStore = {
     }) => Promise<{ id: string } | null>;
   };
   event: {
-    create: (args: {
-      data: object;
-      include?: object;
-    }) => Promise<
+    create: (args: { data: object; include?: object }) => Promise<
       StoredEvent & {
         eventFormats?: { format: StoredFormat }[];
         laps?: StoredLap[];
@@ -353,7 +352,10 @@ export class EventsService {
     }
 
     const parsed: ParsedCreateEvent = parseCreateEventBody(body);
-    const formatIds = await this.resolveFormatIds(parsed.sport, parsed.formatIds);
+    const formatIds = await this.resolveFormatIds(
+      parsed.sport,
+      parsed.formatIds,
+    );
     const track = await this.store.track.findUnique({
       where: { id: ALESHKINO_TRACK_ID },
     });
@@ -468,11 +470,15 @@ export class EventsService {
 
   async findById(
     id: string,
-    options: { syncStatuses?: boolean } = {},
+    options: { syncStatuses?: boolean; includeRegistrations?: boolean } = {},
   ): Promise<EventDetails> {
     if (options.syncStatuses !== false) {
       await this.eventStatusSync.syncDueStatuses();
     }
+    const includeRegistrations = options.includeRegistrations !== false;
+    const listedRegistrations = {
+      status: { in: [...LISTED_REGISTRATION_STATUSES] },
+    };
     const event = await this.store.event.findUnique({
       where: { id },
       include: {
@@ -498,46 +504,53 @@ export class EventsService {
         laps: {
           orderBy: { lapNumber: 'asc' },
         },
-        registrations: {
-          where: { status: { in: [...LISTED_REGISTRATION_STATUSES] } },
-          orderBy: { registeredAt: 'asc' },
-          select: {
-            id: true,
-            userId: true,
-            firstName: true,
-            lastName: true,
-            gender: true,
-            birthYear: true,
-            city: true,
-            district: true,
-            team: true,
-            formatId: true,
-            format: {
-              select: {
-                id: true,
-                code: true,
-                name: true,
-                sortOrder: true,
-              },
-            },
-            startNumber: true,
-            status: true,
-            note: true,
-            registeredAt: true,
-            result: {
-              select: {
-                timeMilliseconds: true,
-                place: true,
-                laps: {
-                  select: {
-                    timeMilliseconds: true,
-                    eventLap: { select: { lapNumber: true } },
+        _count: {
+          select: { registrations: { where: listedRegistrations } },
+        },
+        ...(includeRegistrations
+          ? {
+              registrations: {
+                where: listedRegistrations,
+                orderBy: { registeredAt: 'asc' },
+                select: {
+                  id: true,
+                  userId: true,
+                  firstName: true,
+                  lastName: true,
+                  gender: true,
+                  birthYear: true,
+                  city: true,
+                  district: true,
+                  team: true,
+                  formatId: true,
+                  format: {
+                    select: {
+                      id: true,
+                      code: true,
+                      name: true,
+                      sortOrder: true,
+                    },
+                  },
+                  startNumber: true,
+                  status: true,
+                  note: true,
+                  registeredAt: true,
+                  result: {
+                    select: {
+                      timeMilliseconds: true,
+                      place: true,
+                      laps: {
+                        select: {
+                          timeMilliseconds: true,
+                          eventLap: { select: { lapNumber: true } },
+                        },
+                      },
+                    },
                   },
                 },
               },
-            },
-          },
-        },
+            }
+          : {}),
       },
     });
 
@@ -578,11 +591,14 @@ export class EventsService {
         : null,
       formats: mapEventFormats(event.eventFormats),
       laps: mapEventLaps(event.laps),
-      registrations: this.toRankedParticipants(
-        event.registrations,
-        event.laps.length,
-        event.status,
-      ),
+      registrations: event.registrations
+        ? this.toRankedParticipants(
+            event.registrations,
+            event.laps.length,
+            event.status,
+          )
+        : null,
+      registeredCount: event._count.registrations,
       finishedCategories,
     };
   }
@@ -606,7 +622,9 @@ export class EventsService {
     });
     if (!event) throw new NotFoundException('Event not found.');
     if (event.status === 'CANCELLED') {
-      throw new BadRequestException('Нельзя завершить гонку отменённого мероприятия.');
+      throw new BadRequestException(
+        'Нельзя завершить гонку отменённого мероприятия.',
+      );
     }
     if (isPastCompletedEvent(event.status, event.eventDate)) {
       throw new BadRequestException(PAST_COMPLETED_EVENT_LOCKED_MESSAGE);
@@ -617,7 +635,9 @@ export class EventsService {
         throw new BadRequestException('У мероприятия нет форматов участия.');
       }
     } else if (parsed.formatId == null || !formats.includes(parsed.formatId)) {
-      throw new BadRequestException('Такой формат не заявлен на этом мероприятии.');
+      throw new BadRequestException(
+        'Такой формат не заявлен на этом мероприятии.',
+      );
     }
 
     const bracket = await this.prisma.classCompetition.findFirst({
@@ -629,7 +649,14 @@ export class EventsService {
         'Это многоэтапная гонка. Она завершается на последнем этапе.',
       );
     }
-    if (await categoryIsFinished(this.prisma, eventId, parsed.formatId, parsed.gender)) {
+    if (
+      await categoryIsFinished(
+        this.prisma,
+        eventId,
+        parsed.formatId,
+        parsed.gender,
+      )
+    ) {
       throw new ConflictException('Гонка в этой категории уже завершена.');
     }
 
@@ -658,7 +685,9 @@ export class EventsService {
         },
       });
       const missing = registrations.some(
-        (row) => isRankedRegistrationStatus(row.status) && !isCompleteResult(row, lapCount),
+        (row) =>
+          isRankedRegistrationStatus(row.status) &&
+          !isCompleteResult(row, lapCount),
       );
       if (missing) {
         throw new BadRequestException(
@@ -696,7 +725,10 @@ export class EventsService {
   ): Promise<EventDetails> {
     await this.assertCanManageCreatedEvent(authentikId, eventId);
     const parsed: ParsedCreateEvent = parseCreateEventBody(body);
-    const formatIds = await this.resolveFormatIds(parsed.sport, parsed.formatIds);
+    const formatIds = await this.resolveFormatIds(
+      parsed.sport,
+      parsed.formatIds,
+    );
 
     const current = await this.prisma.event.findUnique({
       where: { id: eventId },
@@ -886,7 +918,10 @@ export class EventsService {
     return this.findById(eventId, { syncStatuses: false });
   }
 
-  async remove(authentikId: string | undefined, eventId: string): Promise<void> {
+  async remove(
+    authentikId: string | undefined,
+    eventId: string,
+  ): Promise<void> {
     await this.assertCanManageCreatedEvent(authentikId, eventId);
     await this.store.event.delete({ where: { id: eventId } });
     logEvent(this.logger, {
@@ -1012,32 +1047,30 @@ export class EventsService {
     eventStatus: string,
   ): EventParticipant[] {
     const useStoredPlaces = hasStoredPlaces(eventStatus, registrations);
-    return rankRegistrations(
-      registrations,
-      eventLapCount,
-      useStoredPlaces,
-    ).map(({ registration, place }) => ({
-      id: registration.id,
-      userId: registration.userId,
-      fullName: this.formatPersonName(
-        registration.firstName,
-        registration.lastName,
-        'Участник',
-      ),
-      birthYear: registration.birthYear,
-      gender: registration.gender,
-      city: registration.city,
-      district: registration.district,
-      team: registration.team,
-      startNumber: registration.startNumber,
-      finishTimeMs: registration.result?.timeMilliseconds ?? null,
-      place,
-      format: registration.format ? toFormatRef(registration.format) : null,
-      laps: mapParticipantLaps(registration.result?.laps),
-      status: registration.status,
-      note: registration.note,
-      registeredAt: registration.registeredAt.toISOString(),
-    }));
+    return rankRegistrations(registrations, eventLapCount, useStoredPlaces).map(
+      ({ registration, place }) => ({
+        id: registration.id,
+        userId: registration.userId,
+        fullName: this.formatPersonName(
+          registration.firstName,
+          registration.lastName,
+          'Участник',
+        ),
+        birthYear: registration.birthYear,
+        gender: registration.gender,
+        city: registration.city,
+        district: registration.district,
+        team: registration.team,
+        startNumber: registration.startNumber,
+        finishTimeMs: registration.result?.timeMilliseconds ?? null,
+        place,
+        format: registration.format ? toFormatRef(registration.format) : null,
+        laps: mapParticipantLaps(registration.result?.laps),
+        status: registration.status,
+        note: registration.note,
+        registeredAt: registration.registeredAt.toISOString(),
+      }),
+    );
   }
 
   private formatPersonName(

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { canChangeEventStatus, canCreateEvents, canManageCreatedEvent, isAdministrator } from '../../features/auth/canCreateEvents';
+import { authService } from '../../features/auth/authService';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import type {
   ClassCompetitionStage,
@@ -473,8 +474,11 @@ export function EventPage() {
   const queryClient = useQueryClient();
   const { id } = useParams<{ id: string }>();
   const eventQuery = useEventDetailsQuery(id);
-  const classCompetitionsQuery = useClassCompetitionsQuery(id);
   const sessionQuery = useSessionQuery();
+  const classCompetitionsQuery = useClassCompetitionsQuery(
+    id,
+    sessionQuery.data?.authenticated === true,
+  );
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [registerInitialFormatId, setRegisterInitialFormatId] = useState<number | undefined>();
@@ -550,7 +554,8 @@ export function EventPage() {
     canCreateEvents(session?.roles) &&
     event.status !== 'CANCELLED' &&
     !pastCompleted;
-  const myRegistration = event.registrations.find(
+  const registrations = event.registrations ?? [];
+  const myRegistration = registrations.find(
     (registration: EventParticipant) =>
       Boolean(registration.userId) && registration.userId === session?.userId,
   );
@@ -778,7 +783,7 @@ export function EventPage() {
     onAssignLap: assignLapTime,
     onAssignResult: assignFinishTime,
   });
-  const participantGroups = groupParticipants(event.registrations, event.formats);
+  const participantGroups = groupParticipants(registrations, event.formats);
 
   const handleStatusChange = (nextStatus: EventStatusCode) => {
     if (nextStatus === 'CANCELLED') {
@@ -998,7 +1003,7 @@ export function EventPage() {
         </Row>
 
         <Card
-          title={`Зарегистрированные участники (${event.registrations.length})`}
+          title={`Зарегистрированные участники (${event.registeredCount})`}
           extra={
             canRegisterParticipant || canSeedTestRegistrations ? (
               <Space wrap>
@@ -1014,7 +1019,16 @@ export function EventPage() {
             ) : null
           }
         >
-          {participantGroups.length === 0 ? (
+          {event.registrations === null ? (
+            <Space direction="vertical" size={12}>
+              <Typography.Text type="secondary">
+                Список участников доступен только авторизованным пользователям
+              </Typography.Text>
+              <Button type="primary" onClick={() => authService.startLoginFlow()}>
+                Войти
+              </Button>
+            </Space>
+          ) : participantGroups.length === 0 ? (
             <Table
               columns={participantColumns}
               dataSource={[]}

@@ -6,6 +6,16 @@ import {
 import type { ConsentRequestMeta } from '../auth/consent-request-meta';
 import { PrismaService } from '../prisma/prisma.service';
 
+/** Thrown when first registration lacks a usable OIDC email (refuse before writes). */
+export class MissingOidcEmailError extends Error {
+  constructor(
+    message = 'OIDC profile does not include a usable email for registration.',
+  ) {
+    super(message);
+    this.name = 'MissingOidcEmailError';
+  }
+}
+
 export type OwnProfileUpdate = {
   firstName: string;
   lastName: string;
@@ -55,6 +65,7 @@ export class UsersService {
     birthDate?: Date;
     gender?: 'M' | 'F';
     consentGranted?: boolean;
+    distributionConsentGranted?: boolean;
     requestMeta?: ConsentRequestMeta;
   }): Promise<{ user: AppUser; isNew: boolean }> {
     const existing = await this.prisma.user.findUnique({
@@ -93,6 +104,7 @@ export class UsersService {
       birthDate,
       gender,
       consentGranted: Boolean(profile.consentGranted),
+      distributionConsentGranted: Boolean(profile.distributionConsentGranted),
       requestMeta: profile.requestMeta,
     });
 
@@ -118,8 +130,14 @@ export class UsersService {
     birthDate?: Date;
     gender?: 'M' | 'F';
     consentGranted: boolean;
+    distributionConsentGranted: boolean;
     requestMeta?: ConsentRequestMeta;
   }) {
+    const email = input.email?.trim();
+    if (!email) {
+      throw new MissingOidcEmailError();
+    }
+
     const document = input.consentGranted
       ? await this.prisma.personalConsentDocument.findFirst({
           where: { type: 'PERSONAL_DATA_CONSENT' },
@@ -132,12 +150,24 @@ export class UsersService {
       );
     }
 
+    const distributionDocument = input.distributionConsentGranted
+      ? await this.prisma.personalConsentDocument.findFirst({
+          where: { type: 'PERSONAL_DATA_DISTRIBUTION_CONSENT' },
+          orderBy: { publishedAt: 'desc' },
+        })
+      : null;
+    if (input.distributionConsentGranted && !distributionDocument) {
+      throw new ServiceUnavailableException(
+        'Personal data distribution consent document is not published.',
+      );
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
           authentikId: input.authentikId,
           userName: input.userName,
-          email: input.email,
+          email,
           firstName: input.firstName,
           lastName: input.lastName,
           birthDate: input.birthDate,
@@ -152,6 +182,24 @@ export class UsersService {
             userId: user.id,
             action: 'GRANTED',
             source: 'REGISTRATION',
+            email,
+            userFirstName: input.firstName ?? '',
+            userLastName: input.lastName ?? '',
+            userBirthDate: input.birthDate ?? null,
+            ip: input.requestMeta?.ip ?? null,
+            userAgent: input.requestMeta?.userAgent ?? null,
+          },
+        });
+      }
+
+      if (distributionDocument) {
+        await tx.personalConsentEvent.create({
+          data: {
+            documentId: distributionDocument.id,
+            userId: user.id,
+            action: 'GRANTED',
+            source: 'REGISTRATION',
+            email,
             userFirstName: input.firstName ?? '',
             userLastName: input.lastName ?? '',
             userBirthDate: input.birthDate ?? null,

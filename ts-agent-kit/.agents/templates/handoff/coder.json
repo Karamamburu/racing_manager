@@ -1,0 +1,9 @@
+{
+  "role": "coder",
+  "cycle": 1,
+  "changed_files": ["apps/api/src/links/links.service.ts"],
+  "commands": [{ "cmd": "pnpm test", "exit_code": 0 }],
+  "rw_trace": [],
+  "assumptions": [],
+  "risks": []
+}

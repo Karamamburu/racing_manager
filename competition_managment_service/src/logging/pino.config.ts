@@ -26,7 +26,7 @@ export function buildPinoParams(service: string): Params {
   const fileLevel = process.env.LOG_FILE_LEVEL ?? 'info';
 
   // multistream (not transport.targets) so formatters.level is allowed by Pino.
-  // Production: JSON on stdout so Alloy tails the container. Local: file for Alloy + pretty console.
+  // Production: JSON on stdout (Docker json-file). Local: JSON file + pretty console.
   const streams: pino.StreamEntry[] = isProd
     ? [
         {
@@ -53,7 +53,7 @@ export function buildPinoParams(service: string): Params {
     pinoHttp: {
       level: consoleLevel,
       base: { service },
-      // Grafana/Loki expect textual levels (info/warn/error), not Pino numbers (30/40/50).
+      // Textual levels (info/warn/error) instead of Pino numbers (30/40/50).
       formatters: {
         level: (label: string) => ({ level: label }),
       },

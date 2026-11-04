@@ -54,8 +54,8 @@ Local stacks under `racing_manager_db/`, `nginx/`, `observability/` stay for dev
 |------|---------|
 | [ACCESS.md](ACCESS.md) | Host IPs, SSH jump, ufw, Beekeeper tunnel |
 | [VPS.md](VPS.md) | Rental specs + firewall checklist |
-| [data/](data/) | Data VPS compose (Postgres ×3, Alloy) |
-| [app/](app/) | App VPS compose (nginx TLS, front, API, CMS, Authentik, Alloy) |
+| [data/](data/) | Data VPS compose (Postgres ×3) |
+| [app/](app/) | App VPS compose (nginx TLS, front, API, CMS, Authentik) |
 | [stage/](stage/) | Single-VPS stage |
 | [AUTHENTIK.md](AUTHENTIK.md) | OIDC application setup |
 | [backups/](backups/) | pg_dump / S3 mirror / Sentry notes |

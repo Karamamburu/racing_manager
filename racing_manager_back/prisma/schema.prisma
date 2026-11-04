@@ -75,6 +75,7 @@ enum ClassHeatResultStatus {
 enum PersonalConsentDocumentType {
   PRIVACY_POLICY
   PERSONAL_DATA_CONSENT
+  PERSONAL_DATA_DISTRIBUTION_CONSENT
 
   @@map("personal_consent_document_type")
 }
@@ -378,6 +379,7 @@ model PersonalConsentEvent {
   userFirstName String                    @map("user_first_name")
   userLastName  String                    @map("user_last_name")
   userBirthDate DateTime?                 @map("user_birth_date") @db.Date
+  email         String?
   occurredAt    DateTime                  @default(now()) @map("occurred_at") @db.Timestamptz(6)
   ip            String?
   userAgent     String?                   @map("user_agent")

@@ -1,4 +1,5 @@
-# App host: edge nginx (TLS), SPA, Nest API/CMS, Authentik, Alloy.
+# App host: edge nginx (TLS), SPA, Nest API/CMS, Authentik.
+# Logs stay on the host (docker json-file); do not ship them outside RF (152-FZ).
 # Object storage: Timeweb Cloud S3 (https://s3.twcstorage.ru) — no local MinIO.
 # Build context paths are relative to this file → repo root via ../..
 
@@ -148,27 +149,8 @@ services:
       - certs
     entrypoint: certbot
 
-  alloy:
-    image: grafana/alloy:v1.9.1
-    container_name: racing_manager_alloy_app
-    restart: unless-stopped
-    volumes:
-      - ../observability/config.app.alloy:/etc/alloy/config.alloy:ro
-      - alloy_data:/var/lib/alloy/data
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      GRAFANA_LOKI_URL: ${GRAFANA_LOKI_URL}
-      GRAFANA_LOKI_USERNAME: ${GRAFANA_LOKI_USERNAME}
-      GRAFANA_LOKI_TOKEN: ${GRAFANA_LOKI_TOKEN}
-    command:
-      - run
-      - --server.http.listen-addr=0.0.0.0:12345
-      - --storage.path=/var/lib/alloy/data
-      - /etc/alloy/config.alloy
-
 volumes:
   authentik_media:
   authentik_templates:
   certbot_www:
   certbot_certs:
-  alloy_data:
