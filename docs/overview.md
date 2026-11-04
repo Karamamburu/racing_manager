@@ -1,6 +1,6 @@
 ---
 type: overview
-updated: 2026-11-03
+updated: 2026-11-04
 sources:
   - docs/raw/sources.md
 ---
@@ -34,7 +34,7 @@ Not a pnpm workspace: independent npm packages under one git repo.
 
 ## Compliance note
 
-Personal data processing is constrained by Russian 152-FZ. Full legal text: `racing_manager_front/src/pages/PolicyPage/`. English summary: [personal-consent](entities/personal-consent.md). Observability must not ship logs abroad.
+Personal data processing is constrained by Russian 152-FZ. Full legal text: `racing_manager_front/src/pages/PolicyPage/`. English summary: [personal-consent](entities/personal-consent.md). Policy time limits vs law: [policy-deadlines-152fz](concepts/policy-deadlines-152fz.md). Observability must not ship logs abroad.
 
 ## Where to go next
 

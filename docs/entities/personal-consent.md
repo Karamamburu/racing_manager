@@ -25,9 +25,10 @@ Tracks grant/revoke of personal-data related documents for a [User](user-and-rol
 
 Events are append-style history (`PersonalConsentEvent`). Cabinet/`personal` module and registration flows collect checkboxes; Policy page renders legal copy.
 
-Full Russian legal text: `racing_manager_front/src/pages/PolicyPage/` (operator contacts in `operator.ts`). Do not paste it into the wiki.
+Full Russian legal text: `racing_manager_front/src/pages/PolicyPage/` (operator contacts in `operator.ts`). Do not paste it into the wiki. Deadline checklist vs 152-FZ: [policy-deadlines-152fz](../concepts/policy-deadlines-152fz.md).
 
 ## Links
 
 - Domain: [personal](../domains/personal.md)
 - Front: shared personalConsent / Policy pages
+- Concept: [policy-deadlines-152fz](../concepts/policy-deadlines-152fz.md)

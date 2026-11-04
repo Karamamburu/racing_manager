@@ -2,6 +2,10 @@
 
 Append-only. Prefix every entry with `## [YYYY-MM-DD] ingest|query|lint | Title`.
 
+## [2026-11-04] query | Policy deadlines vs 152-FZ
+
+Audited all numeric deadlines in PolicyPage legal copy. None exceed statutory maxima. Filed [concepts/policy-deadlines-152fz.md](concepts/policy-deadlines-152fz.md); linked from INDEX, overview, personal-consent.
+
 ## [2026-11-04] ingest | Remove stray RifaStore policy.md
 
 Deleted root `policy.md` (foreign RifaStore template with https://rifastore.ru). Operator email SoT remains `racing_manager_front/src/pages/PolicyPage/operator.ts` (`vse.na.gonku@gmail.com`). Wiki citations retargeted to PolicyPage. Updated [personal-consent](entities/personal-consent.md), [overview](overview.md), [SCHEMA](SCHEMA.md), [raw/sources](raw/sources.md).
