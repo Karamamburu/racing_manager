@@ -43,11 +43,7 @@ import { categoryIsFinished } from './category-finish';
 import { parseEventDateRange } from './parse-event-date-range';
 import { parseUpdateEventStatusBody } from './parse-update-event-status';
 import { logEvent } from '../logging/log-event';
-import {
-  hasStoredPlaces,
-  isCompleteResult,
-  rankRegistrations,
-} from './rank-registrations';
+import { rankEnrollments } from './rank-registrations';
 
 export type ParticipationFormatDto = {
   id: number;
@@ -148,12 +144,18 @@ export type EventDetails = {
 };
 
 export type CategoryFinishRef = {
+  startId: string | null;
   formatId: number | null;
   gender: string;
 };
 
 export type EventParticipant = {
   id: string;
+  enrollmentId: string;
+  startId: string;
+  startLabel: string;
+  sortOrder: number;
+  enrollmentStatus: string;
   userId: string | null;
   fullName: string;
   birthYear: number | null;
@@ -163,10 +165,12 @@ export type EventParticipant = {
   team: string | null;
   startNumber: number | null;
   finishTimeMs: number | null;
+  outcome: string | null;
   place: number | null;
   format: EventFormatRef | null;
   laps: { lapNumber: number; timeMilliseconds: number }[];
   status: string;
+  isCupEligible: boolean;
   note: string | null;
   registeredAt: string;
 };
@@ -238,6 +242,21 @@ type StoredResultLap = {
   eventLap: { lapNumber: number };
 };
 
+type StoredEnrollmentResult = {
+  outcome: string | null;
+  timeMilliseconds: number | null;
+  place: number | null;
+};
+
+type StoredEnrollment = {
+  id: string;
+  startId: string;
+  formatId: number;
+  status: string;
+  start: StoredStart;
+  result: StoredEnrollmentResult | null;
+};
+
 type StoredRegistration = {
   id: string;
   userId: string | null;
@@ -259,6 +278,7 @@ type StoredRegistration = {
     place: number | null;
     laps: StoredResultLap[];
   } | null;
+  enrollments?: StoredEnrollment[];
 };
 
 type EventWithDetails = StoredEvent & {
@@ -349,17 +369,6 @@ function toLapRef(lap: StoredLap): EventLapRef {
 function mapEventLaps(laps: StoredLap[] | undefined): EventLapRef[] {
   return [...(laps ?? [])]
     .map(toLapRef)
-    .sort((a, b) => a.lapNumber - b.lapNumber);
-}
-
-function mapParticipantLaps(
-  laps: StoredResultLap[] | undefined,
-): { lapNumber: number; timeMilliseconds: number }[] {
-  return [...(laps ?? [])]
-    .map((lap) => ({
-      lapNumber: lap.eventLap.lapNumber,
-      timeMilliseconds: lap.timeMilliseconds,
-    }))
     .sort((a, b) => a.lapNumber - b.lapNumber);
 }
 
@@ -716,6 +725,46 @@ export class EventsService {
                       },
                     },
                   },
+                  enrollments: {
+                    where: { status: 'REGISTERED' },
+                    orderBy: { createdAt: 'asc' },
+                    select: {
+                      id: true,
+                      startId: true,
+                      formatId: true,
+                      status: true,
+                      start: {
+                        select: {
+                          id: true,
+                          purposeType: true,
+                          lapCount: true,
+                          lapLengthMeters: true,
+                          displayName: true,
+                          sortOrder: true,
+                          legacyEffectiveDistanceM: true,
+                          formats: {
+                            select: {
+                              format: {
+                                select: {
+                                  id: true,
+                                  code: true,
+                                  name: true,
+                                  sortOrder: true,
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                      result: {
+                        select: {
+                          outcome: true,
+                          timeMilliseconds: true,
+                          place: true,
+                        },
+                      },
+                    },
+                  },
                 },
               },
             }
@@ -729,8 +778,8 @@ export class EventsService {
 
     const finishedCategories = await this.prisma.categoryFinish.findMany({
       where: { eventId: id },
-      select: { formatId: true, gender: true },
-      orderBy: [{ formatId: 'asc' }, { gender: 'asc' }],
+      select: { startId: true, formatId: true, gender: true },
+      orderBy: [{ startId: 'asc' }, { formatId: 'asc' }, { gender: 'asc' }],
     });
 
     return {
@@ -762,11 +811,7 @@ export class EventsService {
       laps: mapEventLaps(event.laps),
       starts: mapEventStarts(event.starts),
       registrations: event.registrations
-        ? this.toRankedParticipants(
-            event.registrations,
-            event.laps.length,
-            event.status,
-          )
+        ? this.toProtocolParticipants(event.registrations)
         : null,
       registeredCount: event._count.registrations,
       finishedCategories,
@@ -786,8 +831,12 @@ export class EventsService {
         id: true,
         status: true,
         eventDate: true,
-        eventFormats: { select: { formatId: true } },
-        laps: { select: { id: true } },
+        starts: {
+          select: {
+            id: true,
+            formats: { select: { formatId: true } },
+          },
+        },
       },
     });
     if (!event) throw new NotFoundException('Event not found.');
@@ -799,19 +848,26 @@ export class EventsService {
     if (isPastCompletedEvent(event.status, event.eventDate)) {
       throw new BadRequestException(PAST_COMPLETED_EVENT_LOCKED_MESSAGE);
     }
-    const formats = event.eventFormats.map((row) => row.formatId);
+
+    const start = event.starts.find((row) => row.id === parsed.startId);
+    if (!start) {
+      throw new BadRequestException('Старт не принадлежит этому мероприятию.');
+    }
+    const formats = start.formats.map((row) => row.formatId);
     if (formats.length === 0) {
       if (parsed.formatId != null) {
         throw new BadRequestException('У мероприятия нет форматов участия.');
       }
     } else if (parsed.formatId == null || !formats.includes(parsed.formatId)) {
-      throw new BadRequestException(
-        'Такой формат не заявлен на этом мероприятии.',
-      );
+      throw new BadRequestException('Такой формат не заявлен на этом старте.');
     }
+    if (parsed.formatId == null) {
+      throw new BadRequestException('formatId is required.');
+    }
+    const formatId = parsed.formatId;
 
     const bracket = await this.prisma.classCompetition.findFirst({
-      where: { eventId, gender: parsed.gender, formatId: parsed.formatId },
+      where: { eventId, gender: parsed.gender, formatId },
       select: { id: true },
     });
     if (bracket) {
@@ -823,63 +879,86 @@ export class EventsService {
       await categoryIsFinished(
         this.prisma,
         eventId,
-        parsed.formatId,
+        formatId,
         parsed.gender,
+        parsed.startId,
       )
     ) {
       throw new ConflictException('Гонка в этой категории уже завершена.');
     }
 
-    const lapCount = event.laps.length;
     await this.prisma.$transaction(async (tx) => {
-      const registrations = await tx.registration.findMany({
+      const enrollments = await tx.enrollment.findMany({
         where: {
           eventId,
-          gender: parsed.gender,
-          formatId: parsed.formatId,
-          status: { in: [...LISTED_REGISTRATION_STATUSES] },
+          startId: parsed.startId,
+          formatId,
+          status: 'REGISTERED',
+          registration: {
+            gender: parsed.gender,
+            status: { in: [...LISTED_REGISTRATION_STATUSES] },
+          },
         },
         select: {
           id: true,
+          startId: true,
           formatId: true,
-          gender: true,
-          startNumber: true,
           status: true,
-          registeredAt: true,
-          result: {
+          registration: {
             select: {
-              timeMilliseconds: true,
-              laps: { select: { id: true } },
+              id: true,
+              gender: true,
+              startNumber: true,
+              status: true,
+              registeredAt: true,
             },
+          },
+          result: {
+            select: { outcome: true, timeMilliseconds: true, place: true },
           },
         },
       });
-      const missing = registrations.some(
+      if (enrollments.length === 0) {
+        throw new BadRequestException(
+          'В этой категории нет участников для завершения.',
+        );
+      }
+      const missing = enrollments.some(
         (row) =>
-          isRankedRegistrationStatus(row.status) &&
-          !isCompleteResult(row, lapCount),
+          isRankedRegistrationStatus(row.registration.status) &&
+          row.result === null,
       );
       if (missing) {
         throw new BadRequestException(
           'Перед завершением гонки укажите результат каждому участнику, который занимает место, либо поставьте DNS, DNF, DSQ или NQ.',
         );
       }
-      const ranked = rankRegistrations(registrations, lapCount);
-      for (const { registration, place } of ranked) {
-        if (!registration.result || place == null) continue;
+      const ranked = rankEnrollments(
+        enrollments.map((row) => ({
+          enrollmentId: row.id,
+          registrationId: row.registration.id,
+          startId: row.startId,
+          formatId: row.formatId,
+          gender: row.registration.gender,
+          startNumber: row.registration.startNumber,
+          registeredAt: row.registration.registeredAt,
+          outcome: row.result?.outcome ?? null,
+          timeMilliseconds: row.result?.timeMilliseconds ?? null,
+          enrollmentStatus: row.status,
+        })),
+      );
+      for (const { enrollment, place } of ranked) {
+        if (place == null) continue;
         await tx.result.update({
-          where: { registrationId: registration.id },
+          where: { enrollmentId: enrollment.enrollmentId },
           data: { place },
-        });
-        await tx.registration.update({
-          where: { id: registration.id },
-          data: { status: RegistrationStatusCode.FINISHED },
         });
       }
       await tx.categoryFinish.create({
         data: {
           eventId,
-          formatId: parsed.formatId,
+          startId: parsed.startId,
+          formatId,
           gender: parsed.gender,
         },
       });
@@ -1554,36 +1633,86 @@ export class EventsService {
     };
   }
 
-  private toRankedParticipants(
+  private toProtocolParticipants(
     registrations: StoredRegistration[],
-    eventLapCount: number,
-    eventStatus: string,
   ): EventParticipant[] {
-    const useStoredPlaces = hasStoredPlaces(eventStatus, registrations);
-    return rankRegistrations(registrations, eventLapCount, useStoredPlaces).map(
-      ({ registration, place }) => ({
-        id: registration.id,
-        userId: registration.userId,
-        fullName: this.formatPersonName(
-          registration.firstName,
-          registration.lastName,
-          'Участник',
-        ),
-        birthYear: registration.birthYear,
-        gender: registration.gender,
-        city: registration.city,
-        district: registration.district,
-        team: registration.team,
-        startNumber: registration.startNumber,
-        finishTimeMs: registration.result?.timeMilliseconds ?? null,
-        place,
-        format: registration.format ? toFormatRef(registration.format) : null,
-        laps: mapParticipantLaps(registration.result?.laps),
-        status: registration.status,
-        note: registration.note,
-        registeredAt: registration.registeredAt.toISOString(),
-      }),
+    const rows = registrations.flatMap((registration) =>
+      (registration.enrollments ?? [])
+        .filter((enrollment) => enrollment.status === 'REGISTERED')
+        .map((enrollment) => ({
+          enrollmentId: enrollment.id,
+          registrationId: registration.id,
+          startId: enrollment.startId,
+          formatId: enrollment.formatId,
+          gender: registration.gender,
+          startNumber: registration.startNumber,
+          registeredAt: registration.registeredAt,
+          outcome: enrollment.result?.outcome ?? null,
+          timeMilliseconds: enrollment.result?.timeMilliseconds ?? null,
+          enrollmentStatus: enrollment.status,
+          registration,
+          start: enrollment.start,
+          format:
+            enrollment.start.formats.find(
+              (row) => row.format.id === enrollment.formatId,
+            )?.format ?? null,
+        })),
     );
+
+    const ranked = rankEnrollments(rows);
+    return ranked
+      .map(({ enrollment, place }) => {
+        const registration = enrollment.registration;
+        const start = enrollment.start;
+        return {
+          id: registration.id,
+          enrollmentId: enrollment.enrollmentId,
+          startId: enrollment.startId,
+          startLabel: resolveStartLabel({
+            purposeType: start.purposeType as StartPurposeTypeCode,
+            lapCount: start.lapCount,
+            lapLengthMeters: start.lapLengthMeters,
+            legacyEffectiveDistanceM: start.legacyEffectiveDistanceM,
+            displayName: start.displayName,
+          }),
+          sortOrder: start.sortOrder,
+          enrollmentStatus: enrollment.enrollmentStatus,
+          userId: registration.userId,
+          fullName: this.formatPersonName(
+            registration.firstName,
+            registration.lastName,
+            'Участник',
+          ),
+          birthYear: registration.birthYear,
+          gender: registration.gender,
+          city: registration.city,
+          district: registration.district,
+          team: registration.team,
+          startNumber: registration.startNumber,
+          finishTimeMs:
+            enrollment.outcome === 'FINISHED'
+              ? enrollment.timeMilliseconds
+              : null,
+          outcome: enrollment.outcome,
+          place,
+          format: enrollment.format ? toFormatRef(enrollment.format) : null,
+          laps: [],
+          status: registration.status,
+          isCupEligible: start.purposeType === 'CUP_RACE',
+          note: registration.note,
+          registeredAt: registration.registeredAt.toISOString(),
+        };
+      })
+      .sort(
+        (left, right) =>
+          String(left.gender ?? '').localeCompare(String(right.gender ?? '')) ||
+          left.sortOrder - right.sortOrder ||
+          (left.format?.sortOrder ?? 0) - (right.format?.sortOrder ?? 0) ||
+          (left.place ?? Number.POSITIVE_INFINITY) -
+            (right.place ?? Number.POSITIVE_INFINITY) ||
+          (left.startNumber ?? Number.POSITIVE_INFINITY) -
+            (right.startNumber ?? Number.POSITIVE_INFINITY),
+      );
   }
 
   private formatPersonName(
