@@ -2,6 +2,10 @@
 
 Append-only. Prefix every entry with `## [YYYY-MM-DD] ingest|query|lint | Title`.
 
+## [2026-11-07] query | MULTI-START T2 review follow-up + AD-8
+
+Human T2 parser review accepted. Live registration PATCH gated: reject `enrollments` and empty bodies until T6 (`assertSupportedRegistrationUpdate`). Recorded architecture **AD-8** (project EventLap/EventFormat from lowest-`sortOrder` start during T3–T6; no union). Updated [domains/events.md](domains/events.md), [domains/registrations.md](domains/registrations.md); Wave 9 unblocked in `.planning/STATE.md`.
+
 ## [2026-11-04] query | Policy deadlines vs 152-FZ
 
 Audited all numeric deadlines in PolicyPage legal copy. None exceed statutory maxima. Filed [concepts/policy-deadlines-152fz.md](concepts/policy-deadlines-152fz.md); linked from INDEX, overview, personal-consent.

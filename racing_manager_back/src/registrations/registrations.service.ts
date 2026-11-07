@@ -22,7 +22,10 @@ import {
   registrationFieldsFromProfile,
   type ParsedCreateRegistration,
 } from './parse-create-registration';
-import { parseUpdateRegistrationBody } from './parse-update-registration';
+import {
+  assertSupportedRegistrationUpdate,
+  parseUpdateRegistrationBody,
+} from './parse-update-registration';
 import { parseUpdateRegistrationStatusBody } from './parse-update-registration-status';
 import { buildTestPeople, guestPersonKey } from './seed-test-people';
 import { logEvent } from '../logging/log-event';
@@ -437,6 +440,7 @@ export class RegistrationsService {
   ): Promise<RegistrationResponse> {
     await this.rolesService.assertHasAnyRole(authentikId, ADMIN_ROLE_CODES);
     const parsed = parseUpdateRegistrationBody(body);
+    assertSupportedRegistrationUpdate(parsed);
     await this.requireAssignableEvent(eventId);
 
     const existing = await this.store.registration.findFirst({
