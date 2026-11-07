@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import { AdminModule } from './admin/admin.module';
 import { ClassCompetitionsModule } from './class-competitions/class-competitions.module';
@@ -15,6 +16,8 @@ import { TracksModule } from './tracks/tracks.module';
 import { UsersModule } from './users/users.module';
 import { MainModule } from './main/main.module';
 import { HealthModule } from './health/health.module';
+import { IdempotencyInterceptor } from './idempotency/idempotency.interceptor';
+import { IdempotencyModule } from './idempotency/idempotency.module';
 import { buildPinoParams } from './logging/pino.config';
 
 @Module({
@@ -35,6 +38,10 @@ import { buildPinoParams } from './logging/pino.config';
     ResultsModule,
     MainModule,
     HealthModule,
+    IdempotencyModule,
+  ],
+  providers: [
+    { provide: APP_INTERCEPTOR, useExisting: IdempotencyInterceptor },
   ],
 })
 export class AppModule {}
