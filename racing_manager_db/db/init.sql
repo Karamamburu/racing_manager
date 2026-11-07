@@ -201,7 +201,7 @@ CREATE TABLE registrations (
 CREATE TABLE results (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   registration_id UUID NOT NULL UNIQUE REFERENCES registrations(id) ON DELETE CASCADE,
-  time_milliseconds INT NOT NULL CHECK (time_milliseconds > 0),
+  time_milliseconds INT,
   place INT CHECK (place IS NULL OR place > 0),
   recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -711,7 +711,11 @@ ALTER TABLE results
 
 ALTER TABLE results
   ADD CONSTRAINT results_outcome_timing_check
-  CHECK (outcome IS NULL OR (outcome = 'FINISHED' AND time_milliseconds > 0));
+  CHECK (
+    (outcome = 'FINISHED' AND time_milliseconds > 0)
+    OR (outcome IN ('DNS', 'DNF', 'DSQ') AND time_milliseconds IS NULL)
+    OR (outcome IS NULL AND time_milliseconds > 0)
+  );
 
 ALTER TABLE category_finishes ADD COLUMN start_id UUID;
 CREATE INDEX idx_category_finishes_start_id ON category_finishes (start_id);
