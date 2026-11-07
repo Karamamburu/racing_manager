@@ -35,6 +35,25 @@ export type CreateEventLapRequest = {
   distanceKm: number;
 };
 
+export type StartPurposeType = 'CUP_RACE' | 'CONTROL_TRAINING';
+
+export type StartInputRequest = {
+  id?: string;
+  purposeType: StartPurposeType;
+  formatIds: number[];
+  lapCount: number;
+  lapLengthMeters: number;
+  displayName: string | null;
+  sortOrder: number;
+};
+
+export type StartResponse = StartInputRequest & {
+  id: string;
+  resolvedLabel: string;
+  legacyEffectiveDistanceM: number | null;
+  displayedDistanceMeters: number;
+};
+
 export type CreateEventRequest = {
   name: string;
   eventType: EventTypeCode;
@@ -46,7 +65,9 @@ export type CreateEventRequest = {
   registrationOpen?: string;
   registrationClose?: string;
   formatIds?: number[];
-  laps: CreateEventLapRequest[];
+  laps?: CreateEventLapRequest[];
+  // Required by the shipped API; tightened in the starts editor wave.
+  starts?: StartInputRequest[];
 };
 
 export type CreatedEventResponse = {
@@ -67,6 +88,7 @@ export type CreatedEventResponse = {
   updatedAt: string;
   formats: EventFormatRef[];
   laps: EventLap[];
+  starts: StartResponse[];
 };
 
 export type RecentEventRow = {
@@ -81,6 +103,11 @@ export type RecentEventRow = {
 
 export type EventParticipant = {
   id: string;
+  enrollmentId: string;
+  startId: string;
+  startLabel: string;
+  sortOrder: number;
+  enrollmentStatus: string;
   userId: string | null;
   fullName: string;
   birthYear: number | null;
@@ -90,13 +117,31 @@ export type EventParticipant = {
   team: string | null;
   startNumber: number | null;
   finishTimeMs: number | null;
+  outcome: string | null;
   place: number | null;
   format: EventFormatRef | null;
   laps: ParticipantLap[];
   status: string;
+  isCupEligible: boolean;
   note: string | null;
   registeredAt: string;
 };
+
+export type EnrollmentInputRequest = {
+  startId: string;
+  formatId: number;
+};
+
+export type EnrollmentResponse = {
+  id: string;
+  registrationId: string;
+  startId: string;
+  formatId: number;
+  status: string;
+  isCupEligible: boolean;
+};
+
+export type ResultOutcome = 'FINISHED' | 'DNS' | 'DNF' | 'DSQ';
 
 export type GenderCode = 'M' | 'F';
 
@@ -109,24 +154,31 @@ export type CreateRegistrationRequest = {
   district?: string;
   team?: string;
   formatId?: number;
+  // Required by the shipped API; tightened in the registration UI wave.
+  enrollments?: EnrollmentInputRequest[];
 };
 
 export type UpdateRegistrationRequest = {
-  startNumber: number;
+  startNumber?: number;
+  enrollments?: EnrollmentInputRequest[];
 };
 
 export type UpsertResultRequest = {
+  // Required by the shipped API; tightened in the protocol UI wave.
+  outcome?: ResultOutcome;
   timeMilliseconds?: number;
+  /** Deprecated: per-lap result arrays are rejected by the enrollment route. */
   laps?: ParticipantLap[];
 };
 
 export type ResultResponse = {
   id: string;
+  enrollmentId: string;
   registrationId: string;
-  timeMilliseconds: number;
+  outcome: string;
+  timeMilliseconds: number | null;
   recordedAt: string;
   updatedAt: string;
-  laps: ParticipantLap[];
 };
 
 export type RegistrationResponse = {
@@ -146,6 +198,7 @@ export type RegistrationResponse = {
   note: string | null;
   registeredAt: string;
   updatedAt: string;
+  enrollments?: EnrollmentResponse[];
 };
 
 export type EventDetails = {
@@ -174,12 +227,14 @@ export type EventDetails = {
   } | null;
   formats: EventFormatRef[];
   laps: EventLap[];
+  starts: StartResponse[];
   registrations: EventParticipant[] | null;
   registeredCount: number;
   finishedCategories: CategoryFinishRef[];
 };
 
 export type CategoryFinishRef = {
+  startId: string | null;
   formatId: number | null;
   gender: string;
 };
