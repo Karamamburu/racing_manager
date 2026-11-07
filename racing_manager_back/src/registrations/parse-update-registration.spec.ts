@@ -1,8 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import {
-  assertSupportedRegistrationUpdate,
-  parseUpdateRegistrationBody,
-} from './parse-update-registration';
+import { parseUpdateRegistrationBody } from './parse-update-registration';
 
 const startId = '11111111-1111-4111-8111-111111111111';
 
@@ -98,27 +95,5 @@ describe('parseUpdateRegistrationBody', () => {
       BadRequestException,
     );
     expect(() => parseUpdateRegistrationBody([])).toThrow(BadRequestException);
-  });
-});
-
-describe('assertSupportedRegistrationUpdate', () => {
-  it('allows a startNumber-only patch', () => {
-    expect(() =>
-      assertSupportedRegistrationUpdate({ startNumber: 12 }),
-    ).not.toThrow();
-  });
-
-  it('rejects enrollment updates until T6', () => {
-    expect(() =>
-      assertSupportedRegistrationUpdate({
-        enrollments: [{ startId, formatId: 1 }],
-      }),
-    ).toThrow('Enrollment updates are not supported yet.');
-  });
-
-  it('rejects an empty patch so REGISTERED cannot auto-confirm', () => {
-    expect(() => assertSupportedRegistrationUpdate({})).toThrow(
-      'startNumber is required.',
-    );
   });
 });

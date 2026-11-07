@@ -79,18 +79,3 @@ export function parseUpdateRegistrationBody(
 
   return parsed;
 }
-
-/**
- * Live PATCH gate until T6 applies desired-state enrollments.
- * Parser still accepts the final omit/`[]`/present shape for unit coverage.
- */
-export function assertSupportedRegistrationUpdate(
-  parsed: ParsedUpdateRegistration,
-): asserts parsed is { startNumber: number } {
-  if (parsed.enrollments !== undefined) {
-    throw new BadRequestException('Enrollment updates are not supported yet.');
-  }
-  if (parsed.startNumber === undefined) {
-    throw new BadRequestException('startNumber is required.');
-  }
-}
