@@ -28,10 +28,7 @@ import {
   type ParsedCreateRegistration,
   type ParsedEnrollment,
 } from './parse-create-registration';
-import {
-  assertSupportedRegistrationUpdate,
-  parseUpdateRegistrationBody,
-} from './parse-update-registration';
+import { parseUpdateRegistrationBody } from './parse-update-registration';
 import { parseUpdateRegistrationStatusBody } from './parse-update-registration-status';
 import {
   buildTestPeople,
@@ -477,15 +474,19 @@ export class RegistrationsService {
       throw new NotFoundException('Registration not found.');
     }
 
-    await this.store.result.deleteMany({
-      where: { registrationId: existing.id },
-    });
-    const withdrawn = await this.store.registration.update({
-      where: { id: existing.id },
-      data: {
-        status: RegistrationStatusCode.WITHDRAWN,
-        startNumber: null,
-      },
+    await this.assertRegistrationHasNoResults(existing.id);
+    const withdrawn = await this.prisma.$transaction(async (tx) => {
+      await tx.enrollment.updateMany({
+        where: { registrationId: existing.id },
+        data: { status: 'WITHDRAWN' },
+      });
+      return tx.registration.update({
+        where: { id: existing.id },
+        data: {
+          status: RegistrationStatusCode.WITHDRAWN,
+          startNumber: null,
+        },
+      });
     });
     logEvent(this.logger, {
       event: 'registration.cancelled',
@@ -505,8 +506,7 @@ export class RegistrationsService {
   ): Promise<RegistrationResponse> {
     await this.rolesService.assertHasAnyRole(authentikId, ADMIN_ROLE_CODES);
     const parsed = parseUpdateRegistrationBody(body);
-    assertSupportedRegistrationUpdate(parsed);
-    await this.requireAssignableEvent(eventId);
+    const event = await this.requireAssignableEvent(eventId);
 
     const existing = await this.store.registration.findFirst({
       where: { id: registrationId, eventId },
@@ -520,17 +520,69 @@ export class RegistrationsService {
       );
     }
 
+    const desiredEnrollments =
+      parsed.enrollments !== undefined
+        ? this.resolveEnrollments(event, parsed.enrollments)
+        : null;
+
     try {
-      const updated = await this.store.registration.update({
-        where: { id: existing.id },
-        data: {
-          startNumber: parsed.startNumber,
-          ...(existing.status === RegistrationStatusCode.REGISTERED
-            ? { status: RegistrationStatusCode.CONFIRMED }
-            : {}),
-        },
+      const updated = await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM registrations WHERE id = ${existing.id} FOR UPDATE`;
+        const current = await tx.registration.findFirst({
+          where: { id: existing.id, eventId },
+        });
+        if (!current) {
+          throw new NotFoundException('Registration not found.');
+        }
+
+        if (desiredEnrollments !== null) {
+          await this.applyEnrollmentDesiredSet(
+            tx,
+            eventId,
+            current.id,
+            desiredEnrollments,
+          );
+        }
+
+        const data: { startNumber?: number; status?: RegistrationStatus } = {};
+        if (parsed.startNumber !== undefined) {
+          data.startNumber = parsed.startNumber;
+          if (current.status === RegistrationStatusCode.REGISTERED) {
+            data.status = RegistrationStatusCode.CONFIRMED;
+          }
+        }
+        const registration =
+          Object.keys(data).length > 0
+            ? await tx.registration.update({
+                where: { id: current.id },
+                data,
+              })
+            : current;
+
+        const enrollments = await tx.enrollment.findMany({
+          where: { registrationId: registration.id },
+          select: {
+            id: true,
+            registrationId: true,
+            startId: true,
+            formatId: true,
+            status: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+        return { registration, enrollments };
       });
-      return this.toResponse(updated);
+      logEvent(this.logger, {
+        event: 'registration.updated',
+        eventId,
+        registrationId: updated.registration.id,
+        userSub: authentikId,
+        enrollmentsChanged: desiredEnrollments !== null,
+      });
+      return this.toResponse(
+        updated.registration,
+        updated.enrollments.map((row) => this.toEnrollmentResponse(event, row)),
+      );
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ConflictException(
@@ -577,15 +629,19 @@ export class RegistrationsService {
     }
 
     if (clearsRegistrationOnStatus(status)) {
-      await this.store.result.deleteMany({
-        where: { registrationId: existing.id },
-      });
-      const cancelled = await this.store.registration.update({
-        where: { id: existing.id },
-        data: {
-          status,
-          startNumber: null,
-        },
+      await this.assertRegistrationHasNoResults(existing.id);
+      const cancelled = await this.prisma.$transaction(async (tx) => {
+        await tx.enrollment.updateMany({
+          where: { registrationId: existing.id },
+          data: { status: 'WITHDRAWN' },
+        });
+        return tx.registration.update({
+          where: { id: existing.id },
+          data: {
+            status,
+            startNumber: null,
+          },
+        });
       });
       logEvent(this.logger, {
         event: 'registration.status_changed',
@@ -959,6 +1015,130 @@ export class RegistrationsService {
     if (now > closesAt) {
       throw new BadRequestException('Registration is closed.');
     }
+  }
+
+  private async applyEnrollmentDesiredSet(
+    tx: Prisma.TransactionClient,
+    eventId: string,
+    registrationId: string,
+    desired: ResolvedEnrollment[],
+  ): Promise<void> {
+    const existing = await tx.enrollment.findMany({
+      where: { registrationId },
+      select: {
+        id: true,
+        startId: true,
+        formatId: true,
+        status: true,
+        result: { select: { id: true } },
+      },
+    });
+    const desiredByStart = new Map(desired.map((row) => [row.startId, row]));
+
+    for (const row of existing) {
+      if (desiredByStart.has(row.startId)) continue;
+      if (row.result) {
+        throw new BadRequestException(
+          'Cannot withdraw an enrollment that has a result.',
+        );
+      }
+    }
+    for (const desiredRow of desired) {
+      const row = existing.find((item) => item.startId === desiredRow.startId);
+      if (!row?.result) continue;
+      if (row.status === 'WITHDRAWN') {
+        throw new BadRequestException(
+          'Cannot reactivate an enrollment that has a result.',
+        );
+      }
+      if (row.formatId !== desiredRow.formatId) {
+        throw new BadRequestException(
+          'Cannot change format on an enrollment that has a result.',
+        );
+      }
+    }
+
+    for (const row of existing) {
+      if (desiredByStart.has(row.startId) || row.status !== 'REGISTERED') {
+        continue;
+      }
+      await tx.enrollment.update({
+        where: { id: row.id },
+        data: { status: 'WITHDRAWN' },
+      });
+    }
+
+    let registeredCount = 0;
+    for (const desiredRow of desired) {
+      const row = existing.find((item) => item.startId === desiredRow.startId);
+      if (!row) {
+        await tx.enrollment.create({
+          data: {
+            eventId,
+            registrationId,
+            startId: desiredRow.startId,
+            formatId: desiredRow.formatId,
+            status: 'REGISTERED',
+          },
+        });
+        registeredCount += 1;
+        continue;
+      }
+      if (row.result) {
+        registeredCount += 1;
+        continue;
+      }
+      if (row.status !== 'REGISTERED' || row.formatId !== desiredRow.formatId) {
+        await tx.enrollment.update({
+          where: { id: row.id },
+          data: { status: 'REGISTERED', formatId: desiredRow.formatId },
+        });
+      }
+      registeredCount += 1;
+    }
+
+    if (registeredCount === 0) {
+      throw new BadRequestException(
+        'At least one enrollment must remain REGISTERED; use the cancel route to cancel the registration.',
+      );
+    }
+  }
+
+  private async assertRegistrationHasNoResults(
+    registrationId: string,
+  ): Promise<void> {
+    const result = await this.prisma.result.findFirst({
+      where: { registrationId },
+      select: { id: true },
+    });
+    if (result) {
+      throw new BadRequestException(
+        'Cannot cancel a registration that has results.',
+      );
+    }
+  }
+
+  private toEnrollmentResponse(
+    event: EventRegistrationWindow,
+    row: {
+      id: string;
+      registrationId: string;
+      startId: string;
+      formatId: number;
+      status: string;
+    },
+  ): EnrollmentResponse {
+    const start = event.starts.find(
+      (item) => item.id.toLowerCase() === row.startId.toLowerCase(),
+    );
+    return {
+      id: row.id,
+      registrationId: row.registrationId,
+      startId: row.startId,
+      formatId: row.formatId,
+      status: row.status,
+      isCupEligible: start?.purposeType === 'CUP_RACE',
+    };
   }
 
   private resolveEnrollments(
