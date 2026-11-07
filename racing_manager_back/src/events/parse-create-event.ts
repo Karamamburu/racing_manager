@@ -1,19 +1,30 @@
 import { BadRequestException } from '@nestjs/common';
-import {
-  parseMoscowDateTime,
-  toMoscowDateOnly,
-} from '../time/moscow-time';
+import { parseMoscowDateTime, toMoscowDateOnly } from '../time/moscow-time';
 
 const EVENT_TYPES = ['RACE', 'TIME_TRIAL'] as const;
 const SPORTS = ['RUN', 'SKI', 'ROLLER_SKI', 'BIKE'] as const;
+const START_PURPOSE_TYPES = ['CUP_RACE', 'CONTROL_TRAINING'] as const;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_LAP_COUNT = 50;
+const MAX_STARTS = 20;
 const MAX_DISTANCE_KM = 9999.99;
 const MAX_MAP_LINK_LENGTH = 4000;
 const NAKARTE_HOSTS = new Set(['nakarte.me', 'www.nakarte.me']);
 
 export type EventTypeCode = (typeof EVENT_TYPES)[number];
 export type SportCode = (typeof SPORTS)[number];
+export type StartPurposeTypeCode = (typeof START_PURPOSE_TYPES)[number];
+
+export type ParsedStartInput = {
+  id?: string;
+  purposeType: StartPurposeTypeCode;
+  formatIds: number[];
+  lapCount: number;
+  lapLengthMeters: number;
+  displayName: string | null;
+  sortOrder: number;
+};
 
 export type ParsedEventLap = {
   lapNumber: number;
@@ -32,6 +43,7 @@ export type ParsedCreateEvent = {
   registrationClose: Date | null;
   formatIds: number[];
   laps: ParsedEventLap[];
+  starts?: ParsedStartInput[];
 };
 
 function isEventType(value: string): value is EventTypeCode {
@@ -106,7 +118,7 @@ function parseLaps(value: unknown): ParsedEventLap[] {
 
   const laps: ParsedEventLap[] = [];
   for (let index = 0; index < value.length; index += 1) {
-    const item = value[index];
+    const item: unknown = value[index];
     if (!item || typeof item !== 'object') {
       throw new BadRequestException(
         'laps items must be objects with lapNumber and distanceKm.',
@@ -124,9 +136,7 @@ function parseLaps(value: unknown): ParsedEventLap[] {
       );
     }
     if (raw.distanceKm === undefined || raw.distanceKm === null) {
-      throw new BadRequestException(
-        `laps[${index}].distanceKm is required.`,
-      );
+      throw new BadRequestException(`laps[${index}].distanceKm is required.`);
     }
     laps.push({
       lapNumber,
@@ -157,7 +167,10 @@ function parseNakarteMapLink(value: unknown): string | null {
     throw new BadRequestException('mapLink must be an https URL.');
   }
   const host = url.hostname.toLowerCase();
-  if (!NAKARTE_HOSTS.has(host) || (url.pathname !== '/' && url.pathname !== '')) {
+  if (
+    !NAKARTE_HOSTS.has(host) ||
+    (url.pathname !== '/' && url.pathname !== '')
+  ) {
     throw new BadRequestException('mapLink must be a nakarte.me URL.');
   }
   return raw;
@@ -181,6 +194,130 @@ function parseFormatIds(value: unknown): number[] {
     if (!ids.includes(numeric)) ids.push(numeric);
   }
   return ids;
+}
+
+function isStartPurposeType(value: string): value is StartPurposeTypeCode {
+  return (START_PURPOSE_TYPES as readonly string[]).includes(value);
+}
+
+function parseStartFormatIds(value: unknown, field: string): number[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new BadRequestException(`${field} must be a non-empty array.`);
+  }
+
+  const ids: number[] = [];
+  for (const item of value) {
+    const numeric = typeof item === 'number' ? item : Number(item);
+    if (!Number.isInteger(numeric) || numeric <= 0) {
+      throw new BadRequestException(
+        `${field} must contain positive integers only.`,
+      );
+    }
+    if (ids.includes(numeric)) {
+      throw new BadRequestException(`${field} must not contain duplicates.`);
+    }
+    ids.push(numeric);
+  }
+  return ids;
+}
+
+function parseStartId(value: unknown, field: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string' || !UUID.test(value)) {
+    throw new BadRequestException(`${field} must be a UUID.`);
+  }
+  return value;
+}
+
+function parseStartLapCount(value: unknown, field: string): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(numeric) || numeric <= 0) {
+    throw new BadRequestException(`${field} must be a positive integer.`);
+  }
+  if (numeric > MAX_LAP_COUNT) {
+    throw new BadRequestException(`${field} must be at most ${MAX_LAP_COUNT}.`);
+  }
+  return numeric;
+}
+
+function parseStartLapLengthMeters(value: unknown, field: string): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(numeric) || numeric <= 0) {
+    throw new BadRequestException(`${field} must be a positive integer.`);
+  }
+  return numeric;
+}
+
+function parseStartSortOrder(value: unknown, field: string): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(numeric) || numeric < 0) {
+    throw new BadRequestException(`${field} must be a non-negative integer.`);
+  }
+  return numeric;
+}
+
+export function parseStartInputs(value: unknown): ParsedStartInput[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new BadRequestException('starts must be a non-empty array.');
+  }
+  if (value.length > MAX_STARTS) {
+    throw new BadRequestException(
+      `starts must contain at most ${MAX_STARTS} items.`,
+    );
+  }
+
+  const starts: ParsedStartInput[] = [];
+  const ids = new Set<string>();
+  const sortOrders = new Set<number>();
+
+  for (let index = 0; index < value.length; index += 1) {
+    const item: unknown = value[index];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new BadRequestException(`starts[${index}] must be an object.`);
+    }
+
+    const field = `starts[${index}]`;
+    const raw = item as Record<string, unknown>;
+    const id = parseStartId(raw.id, `${field}.id`);
+    if (id) {
+      if (ids.has(id)) {
+        throw new BadRequestException(`${field}.id must be unique.`);
+      }
+      ids.add(id);
+    }
+
+    const purposeTypeRaw = readString(
+      raw.purposeType,
+      `${field}.purposeType`,
+      true,
+    );
+    if (!purposeTypeRaw || !isStartPurposeType(purposeTypeRaw)) {
+      throw new BadRequestException(
+        `${field}.purposeType must be CUP_RACE or CONTROL_TRAINING.`,
+      );
+    }
+
+    const sortOrder = parseStartSortOrder(raw.sortOrder, `${field}.sortOrder`);
+    if (sortOrders.has(sortOrder)) {
+      throw new BadRequestException(`${field}.sortOrder must be unique.`);
+    }
+    sortOrders.add(sortOrder);
+
+    starts.push({
+      ...(id ? { id } : {}),
+      purposeType: purposeTypeRaw,
+      formatIds: parseStartFormatIds(raw.formatIds, `${field}.formatIds`),
+      lapCount: parseStartLapCount(raw.lapCount, `${field}.lapCount`),
+      lapLengthMeters: parseStartLapLengthMeters(
+        raw.lapLengthMeters,
+        `${field}.lapLengthMeters`,
+      ),
+      displayName: readString(raw.displayName, `${field}.displayName`, false),
+      sortOrder,
+    });
+  }
+
+  return starts;
 }
 
 export function parseCreateEventBody(body: unknown): ParsedCreateEvent {
@@ -265,5 +402,8 @@ export function parseCreateEventBody(body: unknown): ParsedCreateEvent {
     registrationClose,
     formatIds: parseFormatIds(raw.formatIds),
     laps,
+    ...(raw.starts === undefined
+      ? {}
+      : { starts: parseStartInputs(raw.starts) }),
   };
 }
