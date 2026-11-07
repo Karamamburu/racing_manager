@@ -2,6 +2,10 @@
 
 Append-only. Prefix every entry with `## [YYYY-MM-DD] ingest|query|lint | Title`.
 
+## [2026-11-08] ingest | MULTI-START contracts shipped (T1–T12)
+
+Compiled the implemented MULTI-START surface into the wiki. Events now persist `starts[]` as SoT (create requires ≥ 1; PATCH omit/`[]`/full-set, AD-7 lock, AD-8 projection). Registrations require `enrollments[]` on create and PATCH applies the desired `REGISTERED` set with Result-freeze and result-aware whole cancel. Authoritative results move to `PUT /events/:eventId/enrollments/:enrollmentId/result`; the registration-scoped route returns **410**; place is computed on read per gender × start × format. Category finish requires `startId`. Mutating routes honour Postgres-backed `Idempotency-Key`. Updated [domains/events.md](domains/events.md), [domains/registrations.md](domains/registrations.md), [domains/results.md](domains/results.md). Spec: `specs/multi-start-ears.md`; architecture: `Tasks/MULTI-START/ARCHITECTURE.md`.
+
 ## [2026-11-07] query | MULTI-START T2 review follow-up + AD-8
 
 Human T2 parser review accepted. Live registration PATCH gated: reject `enrollments` and empty bodies until T6 (`assertSupportedRegistrationUpdate`). Recorded architecture **AD-8** (project EventLap/EventFormat from lowest-`sortOrder` start during T3–T6; no union). Updated [domains/events.md](domains/events.md), [domains/registrations.md](domains/registrations.md); Wave 9 unblocked in `.planning/STATE.md`.
