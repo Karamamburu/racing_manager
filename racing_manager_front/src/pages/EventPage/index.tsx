@@ -1,4 +1,4 @@
-import { Button, Card, Col, Collapse, Divider, Grid, Modal, Result, Row, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Col, Collapse, Divider, Grid, Modal, Result, Row, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -17,6 +17,12 @@ import {
 import { eventsService } from '../../features/events/eventsService';
 import { recentEventsQueryKey } from '../../features/events/useRecentEventsQuery';
 import {
+  categoryHasResults,
+  categoryIsFinished,
+  categoryReadyToFinish,
+  groupParticipants,
+} from '../../features/events/protocolGroups';
+import {
   eventDetailsQueryKey,
   useEventDetailsQuery,
 } from '../../features/events/useEventDetailsQuery';
@@ -28,7 +34,6 @@ import {
 import { registrationsService } from '../../features/registrations/registrationsService';
 import { FeaturesCard } from '../../shared/components';
 import { formatDateTime } from '../../shared/formatDateTime';
-import { formatFinishTime } from '../../shared/formatFinishTime';
 import { eventStatusMeta, isPastCompletedEvent, PAST_COMPLETED_EVENT_LOCKED_MESSAGE, type EventStatusCode } from '../../shared/eventStatus';
 import {
   isActiveRegistrationStatus,
@@ -67,30 +72,6 @@ const genderLabels: Record<string, string> = {
   F: 'Женский',
 };
 
-const genderGroupLabels: Record<string, string> = {
-  M: 'Мужчины',
-  F: 'Женщины',
-};
-
-const GENDER_ORDER = ['M', 'F'] as const;
-
-type ClassificationSection = {
-  key: string;
-  title: string;
-  rows: EventParticipant[];
-};
-
-type GenderGroup = {
-  key: string;
-  title: string;
-  sections: ClassificationSection[];
-};
-
-type SavingLap = {
-  registrationId: string;
-  lapNumber: number;
-};
-
 function formatLapCount(count: number): string {
   const mod10 = count % 10;
   const mod100 = count % 100;
@@ -105,10 +86,6 @@ function formatEventLaps(laps: EventLap[]): string {
   const allEqual = laps.every((lap) => lap.distanceKm === first);
   if (allEqual) return `${formatLapCount(laps.length)} по ${first} км`;
   return laps.map((lap) => `${lap.lapNumber}: ${lap.distanceKm} км`).join(', ');
-}
-
-function participantLapTime(participant: EventParticipant, lapNumber: number): number | null {
-  return (participant.laps ?? []).find((lap) => lap.lapNumber === lapNumber)?.timeMilliseconds ?? null;
 }
 
 const REACHED_STAGE_LABELS: Record<string, string> = {
@@ -200,18 +177,6 @@ function formatParticipantCount(count: number, gender: string): string {
   return `${count} участников`;
 }
 
-const UNPLACED_STATUSES = new Set(['DNS', 'DNF', 'DSQ', 'NQ', 'CANCELLED', 'WITHDRAWN']);
-
-function categoryHasResults(rows: EventParticipant[]): boolean {
-  return rows.some((row) => row.finishTimeMs != null);
-}
-
-function categoryReadyToFinish(rows: EventParticipant[]): boolean {
-  return rows
-    .filter((row) => !UNPLACED_STATUSES.has(row.status))
-    .every((row) => row.finishTimeMs != null);
-}
-
 function isIncompleteProfileError(text: string): boolean {
   return (
     text.includes('firstName') ||
@@ -221,62 +186,7 @@ function isIncompleteProfileError(text: string): boolean {
   );
 }
 
-function categoryIsFinished(
-  finishes: { formatId: number | null; gender: string }[],
-  formatId: number | null,
-  gender: string,
-): boolean {
-  return finishes.some((item) => item.formatId === formatId && item.gender === gender);
-}
-
-function groupParticipants(
-  participants: EventParticipant[],
-  formats: EventFormatRef[],
-): GenderGroup[] {
-  const sortedFormats = [...formats].sort(
-    (a, b) => a.sortOrder - b.sortOrder || a.id - b.id,
-  );
-  const groups: GenderGroup[] = [];
-
-  for (const gender of GENDER_ORDER) {
-    const sections: ClassificationSection[] = [];
-    if (sortedFormats.length === 0) {
-      const rows = participants.filter((participant) => participant.gender === gender);
-      if (rows.length) {
-        sections.push({
-          key: gender,
-          title: 'Участники',
-          rows,
-        });
-      }
-    } else {
-      for (const format of sortedFormats) {
-        const rows = participants.filter(
-          (participant) =>
-            participant.format?.id === format.id && participant.gender === gender,
-        );
-        if (rows.length) {
-          sections.push({
-            key: `${format.id}-${gender}`,
-            title: format.name,
-            rows,
-          });
-        }
-      }
-    }
-    if (sections.length) {
-      groups.push({
-        key: gender,
-        title: genderGroupLabels[gender] ?? gender,
-        sections,
-      });
-    }
-  }
-  return groups;
-}
-
 function getParticipantColumns(options: {
-  eventLaps: EventLap[];
   showReachedStage?: boolean;
   canAssignNumbers: boolean;
   canAssignResults: boolean;
@@ -284,47 +194,15 @@ function getParticipantColumns(options: {
   savingNumberId: string | null;
   savingResultId: string | null;
   savingStatusId: string | null;
-  savingLap: SavingLap | null;
+  savingOutcomeId: string | null;
   onAssignNumber: (participant: EventParticipant, startNumber: number) => Promise<void>;
   onChangeStatus: (participant: EventParticipant, status: RegistrationStatusCode) => Promise<void>;
-  onAssignLap: (
+  onAssignOutcome: (
     participant: EventParticipant,
-    lapNumber: number,
-    timeMilliseconds: number,
+    outcome: 'DNS' | 'DNF' | 'DSQ',
   ) => Promise<void>;
   onAssignResult: (participant: EventParticipant, timeMilliseconds: number) => Promise<void>;
 }): ColumnsType<ProtocolParticipant> {
-  const recordsByLaps = options.eventLaps.length > 0;
-  const lapColumns: ColumnsType<EventParticipant> = options.eventLaps.map((lap) => ({
-    title: (
-      <span>
-        Круг {lap.lapNumber}
-        <div style={{ fontWeight: 400, fontSize: 12, color: 'rgba(0, 0, 0, 0.45)' }}>
-          {lap.distanceKm} км
-        </div>
-      </span>
-    ),
-    key: `lap-${lap.lapNumber}`,
-    width: 130,
-    render: (_value: unknown, record) => (
-      <FinishTimeCell
-        value={participantLapTime(record, lap.lapNumber)}
-        canEdit={
-          options.canAssignResults &&
-          record.startNumber != null &&
-          isRecordableRegistrationStatus(record.status)
-        }
-        saving={
-          options.savingLap?.registrationId === record.id &&
-          options.savingLap.lapNumber === lap.lapNumber
-        }
-        onSave={(timeMilliseconds) =>
-          options.onAssignLap(record, lap.lapNumber, timeMilliseconds)
-        }
-      />
-    ),
-  }));
-
   return [
     {
       title: 'Место',
@@ -356,43 +234,59 @@ function getParticipantColumns(options: {
           },
         ]
       : []),
-    ...lapColumns,
     {
-      title: recordsByLaps ? (
-        <Tooltip title="Сумма времени кругов">
-          <span>Время</span>
-        </Tooltip>
-      ) : (
-        'Время'
-      ),
+      title: 'Результат',
+      key: 'outcome',
+      width: 150,
+      render: (_value: unknown, record: ProtocolParticipant) => {
+        if (!options.canAssignResults) {
+          return record.outcome ?? '—';
+        }
+        const editable =
+          record.startNumber != null &&
+          isRecordableRegistrationStatus(record.status);
+        return (
+          <Select
+            size="small"
+            style={{ width: 120 }}
+            placeholder="—"
+            value={record.outcome ?? undefined}
+            disabled={!editable}
+            loading={options.savingOutcomeId === record.enrollmentId}
+            options={[
+              { value: 'FINISHED', label: 'Финиш' },
+              { value: 'DNS', label: 'DNS' },
+              { value: 'DNF', label: 'DNF' },
+              { value: 'DSQ', label: 'DSQ' },
+            ]}
+            onChange={(outcome) => {
+              if (outcome === 'FINISHED') return;
+              void options.onAssignOutcome(
+                record,
+                outcome as 'DNS' | 'DNF' | 'DSQ',
+              );
+            }}
+          />
+        );
+      },
+    },
+    {
+      title: 'Время',
       dataIndex: 'finishTimeMs',
       key: 'finishTimeMs',
       width: 150,
-      render: (value: number | null, record) => {
-        if (!recordsByLaps) {
-          return (
-            <FinishTimeCell
-              value={value}
-              canEdit={
-                options.canAssignResults &&
-                record.startNumber != null &&
-                isRecordableRegistrationStatus(record.status)
-              }
-              saving={options.savingResultId === record.id}
-              onSave={(timeMilliseconds) => options.onAssignResult(record, timeMilliseconds)}
-            />
-          );
-        }
-        const filled = (record.laps ?? []).length;
-        const incomplete = value != null && filled < options.eventLaps.length;
-        const label = formatFinishTime(value);
-        if (!incomplete) return label;
-        return (
-          <Tooltip title={`Заполнено кругов: ${filled} из ${options.eventLaps.length}`}>
-            <span>{label}</span>
-          </Tooltip>
-        );
-      },
+      render: (value: number | null, record) => (
+        <FinishTimeCell
+          value={value}
+          canEdit={
+            options.canAssignResults &&
+            record.startNumber != null &&
+            isRecordableRegistrationStatus(record.status)
+          }
+          saving={options.savingResultId === record.enrollmentId}
+          onSave={(timeMilliseconds) => options.onAssignResult(record, timeMilliseconds)}
+        />
+      ),
     },
     {
       title: 'Участник',
@@ -493,8 +387,8 @@ export function EventPage() {
   const [isCancellingRegistration, setIsCancellingRegistration] = useState(false);
   const [savingStartNumberId, setSavingStartNumberId] = useState<string | null>(null);
   const [savingFinishTimeId, setSavingFinishTimeId] = useState<string | null>(null);
+  const [savingOutcomeId, setSavingOutcomeId] = useState<string | null>(null);
   const [savingRegistrationStatusId, setSavingRegistrationStatusId] = useState<string | null>(null);
-  const [savingLap, setSavingLap] = useState<SavingLap | null>(null);
   const [finishingCategory, setFinishingCategory] = useState<string | null>(null);
   const [fullProtocolKeys, setFullProtocolKeys] = useState<string[]>([]);
   const screens = Grid.useBreakpoint();
@@ -617,7 +511,14 @@ export function EventPage() {
     const format = formatToRegister;
     setIsRegisteringByFormat(true);
     try {
-      const result = await registrationsService.create(event.id, { formatId: format.id });
+      const start = event.starts.find((row) => row.formatIds.includes(format.id));
+      if (!start) {
+        message.error('Для этого формата не настроен старт.');
+        return;
+      }
+      const result = await registrationsService.create(event.id, {
+        enrollments: [{ startId: start.id, formatId: format.id }],
+      });
       if (result.status === 201 || result.status === 200) {
         message.success('Вы зарегистрированы');
         setFormatToRegister(null);
@@ -661,37 +562,14 @@ export function EventPage() {
     }
   };
 
-  const assignLapTime = async (
-    participant: EventParticipant,
-    lapNumber: number,
-    timeMilliseconds: number,
-  ) => {
-    setSavingLap({ registrationId: participant.id, lapNumber });
-    try {
-      await registrationsService.upsertResult(event.id, participant.id, {
-        laps: [{ lapNumber, timeMilliseconds }],
-      });
-      await refreshEvent();
-      message.success(`Время круга ${lapNumber} записано`);
-    } catch (error) {
-      const statusCode = registrationsService.getStatus(error);
-      const text =
-        statusCode === 403
-          ? 'Недостаточно прав. Записывать результаты может организатор или администратор.'
-          : registrationsService.getErrorMessage(error);
-      throw new Error(text);
-    } finally {
-      setSavingLap(null);
-    }
-  };
-
   const assignFinishTime = async (
     participant: EventParticipant,
     timeMilliseconds: number,
   ) => {
-    setSavingFinishTimeId(participant.id);
+    setSavingFinishTimeId(participant.enrollmentId);
     try {
-      await registrationsService.upsertResult(event.id, participant.id, {
+      await registrationsService.upsertResult(event.id, participant.enrollmentId, {
+        outcome: 'FINISHED',
         timeMilliseconds,
       });
       await refreshEvent();
@@ -708,11 +586,39 @@ export function EventPage() {
     }
   };
 
-  const finishCategory = async (formatId: number | null, gender: string, key: string) => {
+  const assignOutcome = async (
+    participant: EventParticipant,
+    outcome: 'DNS' | 'DNF' | 'DSQ',
+  ) => {
+    setSavingOutcomeId(participant.enrollmentId);
+    try {
+      await registrationsService.upsertResult(event.id, participant.enrollmentId, {
+        outcome,
+      });
+      await refreshEvent();
+      message.success('Результат записан');
+    } catch (error) {
+      const statusCode = registrationsService.getStatus(error);
+      const text =
+        statusCode === 403
+          ? 'Недостаточно прав. Записывать результаты может организатор или администратор.'
+          : registrationsService.getErrorMessage(error);
+      throw new Error(text);
+    } finally {
+      setSavingOutcomeId(null);
+    }
+  };
+
+  const finishCategory = async (
+    startId: string,
+    formatId: number | null,
+    gender: string,
+    key: string,
+  ) => {
     if (gender !== 'M' && gender !== 'F') return;
     setFinishingCategory(key);
     try {
-      await eventsService.finishCategory(event.id, { formatId, gender });
+      await eventsService.finishCategory(event.id, { startId, formatId, gender });
       await refreshEvent();
       message.success('Гонка завершена');
     } catch (error) {
@@ -770,20 +676,23 @@ export function EventPage() {
   const registrationClosed = isRegistrationWindowClosed(event);
   const classCompetitions = classCompetitionsQuery.data ?? [];
   const participantColumns = getParticipantColumns({
-    eventLaps: event.laps ?? [],
     canAssignNumbers,
     canAssignResults,
     canChangeStatus: canChangeRegistrationStatus,
     savingNumberId: savingStartNumberId,
     savingResultId: savingFinishTimeId,
     savingStatusId: savingRegistrationStatusId,
-    savingLap,
+    savingOutcomeId,
     onAssignNumber: assignStartNumber,
     onChangeStatus: assignRegistrationStatus,
-    onAssignLap: assignLapTime,
+    onAssignOutcome: assignOutcome,
     onAssignResult: assignFinishTime,
   });
-  const participantGroups = groupParticipants(registrations, event.formats);
+  const participantGroups = groupParticipants(
+    registrations,
+    event.formats,
+    event.starts,
+  );
 
   const handleStatusChange = (nextStatus: EventStatusCode) => {
     if (nextStatus === 'CANCELLED') {
@@ -1057,15 +966,16 @@ export function EventPage() {
                       const sample = section.rows[0];
                       const formatId = sample?.format?.id ?? null;
                       const gender = sample?.gender ?? '';
+                      const startId = sample?.startId ?? '';
                       const categoryFinished = categoryIsFinished(
                         event.finishedCategories ?? [],
+                        startId,
                         formatId,
                         gender,
                       );
                       const hasResults = categoryHasResults(section.rows);
                       const readyToFinish = categoryReadyToFinish(section.rows);
                       const lockedColumns = getParticipantColumns({
-                        eventLaps: event.laps ?? [],
                         showReachedStage: competition != null,
                         canAssignNumbers: competition ? false : canAssignNumbers,
                         canAssignResults: false,
@@ -1073,10 +983,10 @@ export function EventPage() {
                         savingNumberId: savingStartNumberId,
                         savingResultId: savingFinishTimeId,
                         savingStatusId: savingRegistrationStatusId,
-                        savingLap,
+                        savingOutcomeId,
                         onAssignNumber: assignStartNumber,
                         onChangeStatus: assignRegistrationStatus,
-                        onAssignLap: assignLapTime,
+                        onAssignOutcome: assignOutcome,
                         onAssignResult: assignFinishTime,
                       });
                       const columns = competition || categoryFinished ? lockedColumns : participantColumns;
@@ -1120,7 +1030,7 @@ export function EventPage() {
                                         type="primary"
                                         disabled={!readyToFinish}
                                         loading={finishingCategory === section.key}
-                                        onClick={() => finishCategory(formatId, gender, section.key)}
+                                        onClick={() => finishCategory(startId, formatId, gender, section.key)}
                                       >
                                         Завершить гонку
                                       </Button>
@@ -1207,6 +1117,7 @@ export function EventPage() {
         open={isRegisterOpen}
         eventId={event.id}
         formats={event.formats}
+        starts={event.starts}
         initialFormatId={registerInitialFormatId}
         onClose={() => setIsRegisterOpen(false)}
         onRegistered={refreshEvent}
@@ -1231,6 +1142,7 @@ export function EventPage() {
         open={isRegisterParticipantOpen}
         eventId={event.id}
         formats={event.formats}
+        starts={event.starts}
         onClose={() => setIsRegisterParticipantOpen(false)}
         onRegistered={refreshEvent}
       />
