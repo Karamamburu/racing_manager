@@ -149,6 +149,19 @@ describe('parseCreateEventBody starts compatibility', () => {
       },
     ]);
   });
+
+  it('accepts starts without legacy laps or formatIds', () => {
+    const parsed = parseCreateEventBody({
+      name: 'Кубок',
+      sport: 'RUN',
+      eventDate: '2026-11-07',
+      starts: [validStart()],
+    });
+
+    expect(parsed.laps).toEqual([]);
+    expect(parsed.formatIds).toEqual([]);
+    expect(parsed.starts).toHaveLength(1);
+  });
 });
 
 describe('parseUpdateEventBody', () => {

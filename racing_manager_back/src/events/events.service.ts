@@ -21,7 +21,16 @@ import {
   parseCreateEventBody,
   isSport,
   type ParsedCreateEvent,
+  type ParsedStartInput,
+  type StartPurposeTypeCode,
 } from './parse-create-event';
+import { parseUpdateEventBody } from './parse-update-event';
+import {
+  areStartsIdentical,
+  findStartLabelCollisions,
+} from './starts-identity';
+import { resolveStartLabel, type StartNamingConfig } from './starts-label';
+import { displayedDistanceMeters } from './starts-distance';
 import {
   EventStatusCode,
   PAST_COMPLETED_EVENT_LOCKED_MESSAGE,
@@ -61,6 +70,20 @@ export type EventLapRef = {
   distanceKm: number;
 };
 
+export type EventStartRef = {
+  id: string;
+  purposeType: string;
+  formatIds: number[];
+  formats: EventFormatRef[];
+  lapCount: number;
+  lapLengthMeters: number;
+  displayName: string | null;
+  resolvedLabel: string;
+  sortOrder: number;
+  legacyEffectiveDistanceM: number | null;
+  displayedDistanceMeters: number;
+};
+
 export type EventResponse = {
   id: string;
   trackId: string;
@@ -79,6 +102,7 @@ export type EventResponse = {
   updatedAt: string;
   formats: EventFormatRef[];
   laps: EventLapRef[];
+  starts: EventStartRef[];
 };
 
 export type RecentEventRow = {
@@ -117,6 +141,7 @@ export type EventDetails = {
   } | null;
   formats: EventFormatRef[];
   laps: EventLapRef[];
+  starts: EventStartRef[];
   registrations: EventParticipant[] | null;
   registeredCount: number;
   finishedCategories: CategoryFinishRef[];
@@ -196,6 +221,18 @@ type StoredLap = {
   distanceKm: DecimalValue;
 };
 
+type StoredStart = {
+  id: string;
+  purposeType: string;
+  lapCount: number;
+  lapLengthMeters: number;
+  displayName: string | null;
+  sortOrder: number;
+  legacyEffectiveDistanceM: number | null;
+  formats: { format: StoredFormat }[];
+  enrollments?: { formatId: number }[];
+};
+
 type StoredResultLap = {
   timeMilliseconds: number;
   eventLap: { lapNumber: number };
@@ -229,6 +266,7 @@ type EventWithDetails = StoredEvent & {
   createdBy: PersonRow | null;
   eventFormats: { format: StoredFormat }[];
   laps: StoredLap[];
+  starts?: StoredStart[];
   registrations?: StoredRegistration[];
   _count: { registrations: number };
 };
@@ -250,6 +288,7 @@ type EventsStore = {
       StoredEvent & {
         eventFormats?: { format: StoredFormat }[];
         laps?: StoredLap[];
+        starts?: StoredStart[];
       }
     >;
     findMany: (args: object) => Promise<CatalogEvent[]>;
@@ -324,6 +363,93 @@ function mapParticipantLaps(
     .sort((a, b) => a.lapNumber - b.lapNumber);
 }
 
+type StartConfig = {
+  id?: string;
+  purposeType: StartPurposeTypeCode;
+  formatIds: number[];
+  lapCount: number;
+  lapLengthMeters: number;
+  displayName: string | null;
+  sortOrder: number;
+  legacyEffectiveDistanceM: number | null;
+};
+
+function toStartNamingConfig(
+  start: Pick<
+    StartConfig,
+    | 'purposeType'
+    | 'lapCount'
+    | 'lapLengthMeters'
+    | 'displayName'
+    | 'legacyEffectiveDistanceM'
+  >,
+): StartNamingConfig {
+  return {
+    purposeType: start.purposeType,
+    lapCount: start.lapCount,
+    lapLengthMeters: start.lapLengthMeters,
+    displayName: start.displayName,
+    legacyEffectiveDistanceM: start.legacyEffectiveDistanceM,
+  };
+}
+
+function primaryStart(starts: StartConfig[]): StartConfig {
+  return [...starts].sort(
+    (left, right) =>
+      left.sortOrder - right.sortOrder ||
+      (left.id ?? '').localeCompare(right.id ?? ''),
+  )[0];
+}
+
+function projectedEventLaps(
+  start: StartConfig,
+): { lapNumber: number; distanceKm: number }[] {
+  const distanceKm = Number((start.lapLengthMeters / 1000).toFixed(2));
+  return Array.from({ length: start.lapCount }, (_, index) => ({
+    lapNumber: index + 1,
+    distanceKm,
+  }));
+}
+
+function projectedEventDistanceKm(start: StartConfig): number {
+  return Number(
+    (displayedDistanceMeters(toStartNamingConfig(start)) / 1000).toFixed(2),
+  );
+}
+
+function toStartRef(start: StoredStart): EventStartRef {
+  const formats = [...start.formats]
+    .map((row) => toFormatRef(row.format))
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
+  const naming = toStartNamingConfig({
+    purposeType: start.purposeType as StartPurposeTypeCode,
+    lapCount: start.lapCount,
+    lapLengthMeters: start.lapLengthMeters,
+    displayName: start.displayName,
+    legacyEffectiveDistanceM: start.legacyEffectiveDistanceM,
+  });
+
+  return {
+    id: start.id,
+    purposeType: start.purposeType,
+    formatIds: formats.map((format) => format.id),
+    formats,
+    lapCount: start.lapCount,
+    lapLengthMeters: start.lapLengthMeters,
+    displayName: start.displayName,
+    resolvedLabel: resolveStartLabel(naming),
+    sortOrder: start.sortOrder,
+    legacyEffectiveDistanceM: start.legacyEffectiveDistanceM,
+    displayedDistanceMeters: displayedDistanceMeters(naming),
+  };
+}
+
+function mapEventStarts(starts: StoredStart[] | undefined): EventStartRef[] {
+  return [...(starts ?? [])]
+    .map(toStartRef)
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id));
+}
+
 @Injectable()
 export class EventsService {
   private readonly logger = new Logger(EventsService.name);
@@ -352,10 +478,23 @@ export class EventsService {
     }
 
     const parsed: ParsedCreateEvent = parseCreateEventBody(body);
-    const formatIds = await this.resolveFormatIds(
-      parsed.sport,
-      parsed.formatIds,
-    );
+    if (!parsed.starts) {
+      throw new BadRequestException('starts is required.');
+    }
+    if (parsed.starts.some((start) => start.id !== undefined)) {
+      throw new BadRequestException('starts[].id must be omitted on create.');
+    }
+
+    const startConfigs: StartConfig[] = parsed.starts.map((start) => ({
+      ...start,
+      legacyEffectiveDistanceM: null,
+    }));
+    await this.resolveStartFormats(parsed.sport, startConfigs);
+    this.assertStartSetValid(startConfigs);
+
+    const primary = primaryStart(startConfigs);
+    const laps = projectedEventLaps(primary);
+
     const track = await this.store.track.findUnique({
       where: { id: ALESHKINO_TRACK_ID },
     });
@@ -372,19 +511,32 @@ export class EventsService {
         eventType: asString(parsed.eventType),
         sport: asString(parsed.sport),
         eventDate: parsed.eventDate,
-        distanceKm: parsed.distanceKm,
+        distanceKm: projectedEventDistanceKm(primary),
         description: parsed.description,
         mapLink: parsed.mapLink,
         registrationOpen: parsed.registrationOpen,
         registrationClose: parsed.registrationClose,
         createdById: actor.id,
         eventFormats: {
-          create: formatIds.map((formatId) => ({ formatId })),
+          create: primary.formatIds.map((formatId) => ({ formatId })),
         },
         laps: {
-          create: parsed.laps.map((lap) => ({
+          create: laps.map((lap) => ({
             lapNumber: lap.lapNumber,
             distanceKm: lap.distanceKm,
+          })),
+        },
+        starts: {
+          create: startConfigs.map((start) => ({
+            purposeType: start.purposeType,
+            lapCount: start.lapCount,
+            lapLengthMeters: start.lapLengthMeters,
+            displayName: start.displayName,
+            sortOrder: start.sortOrder,
+            legacyEffectiveDistanceM: start.legacyEffectiveDistanceM,
+            formats: {
+              create: start.formatIds.map((formatId) => ({ formatId })),
+            },
           })),
         },
       },
@@ -394,6 +546,14 @@ export class EventsService {
         },
         laps: {
           orderBy: { lapNumber: 'asc' },
+        },
+        starts: {
+          orderBy: { sortOrder: 'asc' },
+          include: {
+            formats: {
+              include: { format: true },
+            },
+          },
         },
       },
     });
@@ -408,6 +568,7 @@ export class EventsService {
       created,
       mapEventFormats(created.eventFormats),
       mapEventLaps(created.laps),
+      mapEventStarts(created.starts),
     );
   }
 
@@ -504,6 +665,14 @@ export class EventsService {
         laps: {
           orderBy: { lapNumber: 'asc' },
         },
+        starts: {
+          orderBy: { sortOrder: 'asc' },
+          include: {
+            formats: {
+              include: { format: true },
+            },
+          },
+        },
         _count: {
           select: { registrations: { where: listedRegistrations } },
         },
@@ -591,6 +760,7 @@ export class EventsService {
         : null,
       formats: mapEventFormats(event.eventFormats),
       laps: mapEventLaps(event.laps),
+      starts: mapEventStarts(event.starts),
       registrations: event.registrations
         ? this.toRankedParticipants(
             event.registrations,
@@ -725,10 +895,7 @@ export class EventsService {
   ): Promise<EventDetails> {
     await this.assertCanManageCreatedEvent(authentikId, eventId);
     const parsed: ParsedCreateEvent = parseCreateEventBody(body);
-    const formatIds = await this.resolveFormatIds(
-      parsed.sport,
-      parsed.formatIds,
-    );
+    const startsPatch = parseUpdateEventBody(body);
 
     const current = await this.prisma.event.findUnique({
       where: { id: eventId },
@@ -755,6 +922,21 @@ export class EventsService {
         );
       }
     }
+
+    if (startsPatch.starts !== undefined) {
+      return this.applyStartsUpdate(
+        authentikId,
+        eventId,
+        parsed,
+        startsPatch.starts,
+        current,
+      );
+    }
+
+    const formatIds = await this.resolveFormatIds(
+      parsed.sport,
+      parsed.formatIds,
+    );
 
     const existingIds = current.eventFormats.map((row) => row.formatId);
     const toRemove = existingIds.filter((id) => !formatIds.includes(id));
@@ -853,6 +1035,335 @@ export class EventsService {
       userSub: authentikId,
     });
     return this.findById(eventId);
+  }
+
+  private async applyStartsUpdate(
+    authentikId: string | undefined,
+    eventId: string,
+    parsed: ParsedCreateEvent,
+    incoming: ParsedStartInput[],
+    current: {
+      sport: string;
+      eventFormats: { formatId: number }[];
+      laps: { id: string; lapNumber: number }[];
+    },
+  ): Promise<EventDetails> {
+    const incomingConfigs: StartConfig[] = incoming.map((start) => ({
+      ...start,
+      legacyEffectiveDistanceM: null,
+    }));
+    await this.resolveStartFormats(parsed.sport, incomingConfigs);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM events WHERE id = ${eventId} FOR UPDATE`;
+
+      const existingStarts = await tx.start.findMany({
+        where: { eventId },
+        include: {
+          formats: { include: { format: true } },
+          enrollments: { select: { formatId: true } },
+        },
+      });
+      const existingById = new Map(
+        existingStarts.map((start) => [start.id, start]),
+      );
+
+      const desired: StartConfig[] = [];
+      for (const start of incomingConfigs) {
+        if (!start.id) {
+          desired.push(start);
+          continue;
+        }
+
+        const existing = existingById.get(start.id);
+        if (!existing) {
+          throw new BadRequestException(
+            `Start ${start.id} does not belong to this event.`,
+          );
+        }
+
+        const hasEnrollments = (existing.enrollments ?? []).length > 0;
+        const lapChanged =
+          start.lapCount !== existing.lapCount ||
+          start.lapLengthMeters !== existing.lapLengthMeters;
+        if (
+          hasEnrollments &&
+          (start.purposeType !== existing.purposeType || lapChanged)
+        ) {
+          throw new BadRequestException(
+            'Cannot change purpose or lap setup of a start with enrollments.',
+          );
+        }
+        if (hasEnrollments) {
+          const usedFormatIds = new Set(
+            (existing.enrollments ?? []).map((row) => row.formatId),
+          );
+          for (const formatId of usedFormatIds) {
+            if (!start.formatIds.includes(formatId)) {
+              throw new BadRequestException(
+                'Cannot remove a format used by an enrollment.',
+              );
+            }
+          }
+        }
+
+        desired.push({
+          ...start,
+          legacyEffectiveDistanceM: lapChanged
+            ? null
+            : existing.legacyEffectiveDistanceM,
+        });
+      }
+
+      const desiredIds = new Set(
+        desired
+          .map((start) => start.id)
+          .filter((id): id is string => id !== undefined),
+      );
+      const removedStarts = existingStarts.filter(
+        (start) => !desiredIds.has(start.id),
+      );
+      for (const start of removedStarts) {
+        if ((start.enrollments ?? []).length > 0) {
+          throw new BadRequestException(
+            'Cannot remove a start that has enrollments.',
+          );
+        }
+      }
+
+      this.assertStartSetValid(desired);
+      const primary = primaryStart(desired);
+      const nextFormatIds = primary.formatIds;
+      const projectedLaps = projectedEventLaps(primary);
+      const removedFormatIds = current.eventFormats
+        .map((row) => row.formatId)
+        .filter((formatId) => !nextFormatIds.includes(formatId));
+
+      if (removedFormatIds.length > 0) {
+        const inUse = await tx.registration.findFirst({
+          where: {
+            eventId,
+            formatId: { in: removedFormatIds },
+            status: { in: [...LISTED_REGISTRATION_STATUSES] },
+          },
+          select: { id: true },
+        });
+        if (inUse) {
+          throw new BadRequestException(
+            'Cannot remove a format that already has registrations.',
+          );
+        }
+      }
+
+      const currentLapNumbers = current.laps
+        .map((lap) => lap.lapNumber)
+        .sort((left, right) => left - right);
+      const nextLapNumbers = projectedLaps.map((lap) => lap.lapNumber);
+      const sameLapStructure =
+        currentLapNumbers.length === nextLapNumbers.length &&
+        currentLapNumbers.every(
+          (lapNumber, index) => lapNumber === nextLapNumbers[index],
+        );
+
+      if (!sameLapStructure) {
+        const resultCount = await tx.result.count({
+          where: { registration: { eventId } },
+        });
+        if (resultCount > 0) {
+          throw new BadRequestException(
+            'Cannot change the projected lap setup while the event has results.',
+          );
+        }
+      }
+
+      await tx.event.update({
+        where: { id: eventId },
+        data: {
+          name: parsed.name,
+          eventType: parsed.eventType,
+          sport: parsed.sport,
+          eventDate: parsed.eventDate,
+          distanceKm: projectedEventDistanceKm(primary),
+          description: parsed.description,
+          mapLink: parsed.mapLink,
+          registrationOpen: parsed.registrationOpen,
+          registrationClose: parsed.registrationClose,
+        },
+      });
+
+      const formatIdsToAdd = nextFormatIds.filter(
+        (formatId) =>
+          !current.eventFormats.some((row) => row.formatId === formatId),
+      );
+      if (removedFormatIds.length > 0) {
+        await tx.eventFormat.deleteMany({
+          where: { eventId, formatId: { in: removedFormatIds } },
+        });
+      }
+      if (formatIdsToAdd.length > 0) {
+        await tx.eventFormat.createMany({
+          data: formatIdsToAdd.map((formatId) => ({ eventId, formatId })),
+        });
+      }
+
+      if (sameLapStructure) {
+        for (const lap of projectedLaps) {
+          await tx.eventLap.update({
+            where: {
+              eventId_lapNumber: { eventId, lapNumber: lap.lapNumber },
+            },
+            data: { distanceKm: lap.distanceKm },
+          });
+        }
+      } else {
+        await tx.eventLap.deleteMany({ where: { eventId } });
+        await tx.eventLap.createMany({
+          data: projectedLaps.map((lap) => ({ eventId, ...lap })),
+        });
+      }
+
+      if (removedStarts.length > 0) {
+        await tx.start.deleteMany({
+          where: {
+            eventId,
+            id: { in: removedStarts.map((start) => start.id) },
+          },
+        });
+      }
+
+      const reordered = desired.filter((start) => {
+        if (!start.id) return false;
+        const existing = existingById.get(start.id);
+        return existing !== undefined && existing.sortOrder !== start.sortOrder;
+      });
+      if (reordered.length > 0) {
+        let temporarySortOrder =
+          Math.max(
+            ...existingStarts.map((start) => start.sortOrder),
+            ...desired.map((start) => start.sortOrder),
+          ) +
+          desired.length +
+          1;
+        for (const start of reordered) {
+          await tx.start.update({
+            where: { id: start.id as string },
+            data: { sortOrder: temporarySortOrder },
+          });
+          temporarySortOrder += 1;
+        }
+      }
+
+      for (const start of desired) {
+        if (!start.id) {
+          await tx.start.create({
+            data: {
+              eventId,
+              purposeType: start.purposeType,
+              lapCount: start.lapCount,
+              lapLengthMeters: start.lapLengthMeters,
+              displayName: start.displayName,
+              sortOrder: start.sortOrder,
+              legacyEffectiveDistanceM: start.legacyEffectiveDistanceM,
+              formats: {
+                create: start.formatIds.map((formatId) => ({ formatId })),
+              },
+            },
+          });
+          continue;
+        }
+
+        const existing = existingById.get(start.id) as NonNullable<
+          ReturnType<typeof existingById.get>
+        >;
+        await tx.start.update({
+          where: { id: start.id },
+          data: {
+            purposeType: start.purposeType,
+            lapCount: start.lapCount,
+            lapLengthMeters: start.lapLengthMeters,
+            displayName: start.displayName,
+            sortOrder: start.sortOrder,
+            legacyEffectiveDistanceM: start.legacyEffectiveDistanceM,
+          },
+        });
+
+        const existingFormatIds = existing.formats.map((row) => row.format.id);
+        const formatIdsToRemoveStart = existingFormatIds.filter(
+          (formatId) => !start.formatIds.includes(formatId),
+        );
+        const formatIdsToAddStart = start.formatIds.filter(
+          (formatId) => !existingFormatIds.includes(formatId),
+        );
+        if (formatIdsToRemoveStart.length > 0) {
+          await tx.startFormat.deleteMany({
+            where: {
+              startId: start.id,
+              formatId: { in: formatIdsToRemoveStart },
+            },
+          });
+        }
+        if (formatIdsToAddStart.length > 0) {
+          await tx.startFormat.createMany({
+            data: formatIdsToAddStart.map((formatId) => ({
+              startId: start.id as string,
+              formatId,
+            })),
+          });
+        }
+      }
+    });
+
+    logEvent(this.logger, {
+      event: 'event.updated',
+      eventId,
+      userSub: authentikId,
+    });
+    return this.findById(eventId);
+  }
+
+  private assertStartSetValid(starts: StartConfig[]): void {
+    for (let left = 0; left < starts.length; left += 1) {
+      for (let right = left + 1; right < starts.length; right += 1) {
+        if (areStartsIdentical(starts[left], starts[right])) {
+          throw new BadRequestException(
+            'Two starts must not be fully identical.',
+          );
+        }
+      }
+    }
+
+    const collisions = findStartLabelCollisions(
+      starts.map(toStartNamingConfig),
+    );
+    if (collisions.length > 0) {
+      throw new BadRequestException(
+        `Start labels must be unique: ${collisions[0].labels.join(' / ')}.`,
+      );
+    }
+  }
+
+  private async resolveStartFormats(
+    sport: string,
+    starts: StartConfig[],
+  ): Promise<void> {
+    const catalog = await this.prisma.participationFormat.findMany({
+      where: { sport: sport as 'RUN' | 'SKI' | 'ROLLER_SKI' | 'BIKE' },
+      select: { id: true },
+    });
+    if (catalog.length === 0) {
+      throw new BadRequestException('This sport has no participation formats.');
+    }
+
+    const allowed = new Set(catalog.map((row) => row.id));
+    starts.forEach((start, index) => {
+      for (const formatId of start.formatIds) {
+        if (!allowed.has(formatId)) {
+          throw new BadRequestException(
+            `starts[${index}].formatIds must belong to the selected sport.`,
+          );
+        }
+      }
+    });
   }
 
   async updateStatus(
@@ -1019,6 +1530,7 @@ export class EventsService {
     event: StoredEvent,
     formats: EventFormatRef[] = [],
     laps: EventLapRef[] = [],
+    starts: EventStartRef[] = [],
   ): EventResponse {
     return {
       id: event.id,
@@ -1038,6 +1550,7 @@ export class EventsService {
       updatedAt: event.updatedAt.toISOString(),
       formats,
       laps,
+      starts,
     };
   }
 

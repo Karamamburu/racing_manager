@@ -326,6 +326,8 @@ export function parseCreateEventBody(body: unknown): ParsedCreateEvent {
   }
 
   const raw = body as Record<string, unknown>;
+  const starts =
+    raw.starts === undefined ? undefined : parseStartInputs(raw.starts);
   const name = readString(raw.name, 'name', true);
   if (!name) throw new BadRequestException('name is required.');
 
@@ -347,10 +349,11 @@ export function parseCreateEventBody(body: unknown): ParsedCreateEvent {
     ? parseDateOnly(eventDateRaw, 'eventDate')
     : parseDateTime(eventDateRaw, 'eventDate');
 
-  if (raw.laps === undefined || raw.laps === null) {
+  if ((raw.laps === undefined || raw.laps === null) && starts === undefined) {
     throw new BadRequestException('laps is required.');
   }
-  const laps = parseLaps(raw.laps);
+  const laps =
+    raw.laps === undefined || raw.laps === null ? [] : parseLaps(raw.laps);
   const distanceKm = Number(
     laps.reduce((sum, lap) => sum + lap.distanceKm, 0).toFixed(2),
   );
@@ -402,8 +405,6 @@ export function parseCreateEventBody(body: unknown): ParsedCreateEvent {
     registrationClose,
     formatIds: parseFormatIds(raw.formatIds),
     laps,
-    ...(raw.starts === undefined
-      ? {}
-      : { starts: parseStartInputs(raw.starts) }),
+    ...(starts === undefined ? {} : { starts }),
   };
 }
