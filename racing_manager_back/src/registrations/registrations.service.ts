@@ -1037,7 +1037,9 @@ export class RegistrationsService {
 
     for (const row of existing) {
       if (desiredByStart.has(row.startId)) continue;
-      if (row.result) {
+      // Omitting an already WITHDRAWN row is the documented way to leave a
+      // migrated WITHDRAWN+Result anomaly untouched.
+      if (row.result && row.status === 'REGISTERED') {
         throw new BadRequestException(
           'Cannot withdraw an enrollment that has a result.',
         );

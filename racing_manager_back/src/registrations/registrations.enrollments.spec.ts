@@ -318,6 +318,28 @@ describe('RegistrationsService PATCH enrollments', () => {
     expect(state.enrollments[0].status).toBe('REGISTERED');
   });
 
+  it('leaves an omitted WITHDRAWN+Result anomaly untouched', async () => {
+    const { service, state } = makeHarness({
+      enrollments: [
+        { startId: START_A, formatId: 1 },
+        {
+          startId: START_B,
+          formatId: 1,
+          status: 'WITHDRAWN',
+          hasResult: true,
+        },
+      ],
+    });
+
+    await service.update('admin-sub', EVENT_ID, REGISTRATION_ID, {
+      enrollments: [desired(START_A, 1)],
+    });
+
+    const byStart = new Map(state.enrollments.map((row) => [row.startId, row]));
+    expect(byStart.get(START_A)?.status).toBe('REGISTERED');
+    expect(byStart.get(START_B)?.status).toBe('WITHDRAWN');
+  });
+
   it('rejects reactivating a WITHDRAWN enrollment that has a result', async () => {
     const { service } = makeHarness({
       enrollments: [

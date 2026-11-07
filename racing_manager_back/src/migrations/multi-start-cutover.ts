@@ -536,6 +536,30 @@ function createPrismaTransaction(
       if (input.timeMilliseconds === null) {
         await assertNullableResultTiming(tx);
       }
+
+      // A pre-cutover Result is keyed by registration_id and has no
+      // enrollment_id. Adopt that row first; the contract patch drops the
+      // registration_id uniqueness, so ON CONFLICT must target enrollment_id.
+      const legacy = await tx.result.findFirst({
+        where: {
+          registrationId: input.registrationId,
+          enrollmentId: null,
+        },
+        select: { id: true },
+      });
+      if (legacy) {
+        await tx.$executeRaw`
+          UPDATE results SET
+            enrollment_id = ${input.enrollmentId}::uuid,
+            outcome = ${input.outcome}::result_outcome,
+            time_milliseconds = ${input.timeMilliseconds},
+            place = ${input.place},
+            updated_at = now()
+          WHERE id = ${legacy.id}::uuid
+        `;
+        return;
+      }
+
       await tx.$executeRaw`
         INSERT INTO results (
           registration_id,
@@ -551,8 +575,7 @@ function createPrismaTransaction(
           ${input.timeMilliseconds},
           ${input.place}
         )
-        ON CONFLICT (registration_id) DO UPDATE SET
-          enrollment_id = EXCLUDED.enrollment_id,
+        ON CONFLICT (enrollment_id) DO UPDATE SET
           outcome = EXCLUDED.outcome,
           time_milliseconds = EXCLUDED.time_milliseconds,
           place = EXCLUDED.place
