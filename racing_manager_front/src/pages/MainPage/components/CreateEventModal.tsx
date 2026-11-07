@@ -1,11 +1,15 @@
-import { Button, Checkbox, DatePicker, Form, Input, Modal, Result, Select } from 'antd';
+import { Button, DatePicker, Form, Input, Modal, Result, Select } from 'antd';
 import type { Dayjs } from 'dayjs';
 import { useEffect, useState } from 'react';
 import { authService } from '../../../features/auth/authService';
 import { eventsService } from '../../../features/events/eventsService';
-import { EventLapsFormItems } from '../../../features/events/EventLapsFormItems';
+import {
+  EventStartsFormItems,
+  buildStartsPayload,
+  defaultStartValue,
+  type StartFormValue,
+} from '../../../features/events/EventStartsFormItems';
 import { EventMapLinkFormItem } from '../../../features/events/EventMapLinkFormItem';
-import { buildEventLapsPayload } from '../../../features/events/eventLaps';
 import { dateTimePickerProps } from '../../../shared/formatDateTime';
 import type {
   CreateEventRequest,
@@ -19,13 +23,11 @@ type CreateEventFormValues = {
   eventType: EventTypeCode;
   sport: SportCode;
   eventDate: Dayjs;
-  lapCount: number;
-  lapDistanceKm: number;
   description?: string;
   mapLink?: string;
   registrationOpen?: Dayjs | null;
   registrationClose?: Dayjs | null;
-  formatIds?: number[];
+  starts: StartFormValue[];
 };
 
 type FeedbackStatus = 'success' | 'unauthorized' | 'forbidden' | 'error';
@@ -66,7 +68,6 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
       form.setFieldsValue({
         eventType: 'TIME_TRIAL',
         sport: 'SKI',
-        lapCount: 1,
       });
     } else {
       setFormats([]);
@@ -83,15 +84,12 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
       .then((rows) => {
         if (cancelled) return;
         setFormats(rows);
-        form.setFieldValue(
-          'formatIds',
-          rows.map((row) => row.id),
-        );
+        form.setFieldValue('starts', [defaultStartValue(rows)]);
       })
       .catch(() => {
         if (cancelled) return;
         setFormats([]);
-        form.setFieldValue('formatIds', []);
+        form.setFieldValue('starts', []);
       });
     return () => {
       cancelled = true;
@@ -115,15 +113,21 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
   };
 
   const handleFinish = async (values: CreateEventFormValues) => {
-    const laps = buildEventLapsPayload(values.lapCount, values.lapDistanceKm);
+    const starts = buildStartsPayload(values.starts ?? []);
+    const primary = starts[0];
     const payload: CreateEventRequest = {
       name: values.name.trim(),
       eventType: values.eventType,
       sport: values.sport,
       eventDate: values.eventDate.toDate().toISOString(),
-      formatIds: values.formatIds ?? [],
-      laps,
-      distanceKm: Number((values.lapCount * values.lapDistanceKm).toFixed(2)),
+      starts,
+      ...(primary
+        ? {
+            distanceKm: Number(
+              ((primary.lapCount * primary.lapLengthMeters) / 1000).toFixed(2),
+            ),
+          }
+        : {}),
     };
     if (values.description?.trim()) payload.description = values.description.trim();
     if (values.mapLink?.trim()) payload.mapLink = values.mapLink.trim();
@@ -205,7 +209,7 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ eventType: 'TIME_TRIAL', sport: 'SKI', lapCount: 1 }}
+          initialValues={{ eventType: 'TIME_TRIAL', sport: 'SKI' }}
           onFinish={handleFinish}
         >
           <Form.Item label="Трасса">
@@ -236,22 +240,6 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
             <Select options={sportOptions} />
           </Form.Item>
 
-          {formats.length > 0 ? (
-            <Form.Item
-              name="formatIds"
-              label="Форматы участия"
-              rules={[{ type: 'array', min: 1, message: 'Выберите хотя бы один формат' }]}
-            >
-              <Checkbox.Group
-                style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
-                options={formats.map((format) => ({
-                  label: format.name,
-                  value: format.id,
-                }))}
-              />
-            </Form.Item>
-          ) : null}
-
           <Form.Item
             name="eventDate"
             label="Дата проведения"
@@ -260,7 +248,7 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
             <DatePicker {...dateTimePickerProps} />
           </Form.Item>
 
-          <EventLapsFormItems />
+          <EventStartsFormItems formats={formats} />
 
           <Form.Item name="description" label="Описание">
             <Input.TextArea rows={3} placeholder="Необязательно" />

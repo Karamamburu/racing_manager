@@ -1,12 +1,16 @@
-import { Button, Checkbox, DatePicker, Form, Input, Modal, Result, Select } from 'antd';
+import { Button, DatePicker, Form, Input, Modal, Result, Select } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
 import { authService } from '../../../features/auth/authService';
 import { eventsService } from '../../../features/events/eventsService';
-import { EventLapsFormItems } from '../../../features/events/EventLapsFormItems';
+import {
+  EventStartsFormItems,
+  buildStartsPayload,
+  defaultStartValue,
+  type StartFormValue,
+} from '../../../features/events/EventStartsFormItems';
 import { EventMapLinkFormItem } from '../../../features/events/EventMapLinkFormItem';
-import { buildEventLapsPayload } from '../../../features/events/eventLaps';
 import { dateTimePickerProps } from '../../../shared/formatDateTime';
 import type {
   CreateEventRequest,
@@ -21,14 +25,38 @@ type EditEventFormValues = {
   eventType: EventTypeCode;
   sport: SportCode;
   eventDate: Dayjs;
-  lapCount: number;
-  lapDistanceKm: number;
   description?: string;
   mapLink?: string;
   registrationOpen?: Dayjs | null;
   registrationClose?: Dayjs | null;
-  formatIds?: number[];
+  starts: StartFormValue[];
 };
+
+function toStartFormValues(event: EventDetails): StartFormValue[] {
+  if (event.starts?.length) {
+    return event.starts.map((start) => ({
+      id: start.id,
+      purposeType: start.purposeType,
+      formatIds: start.formatIds,
+      lapCount: start.lapCount,
+      lapLengthKm: start.lapLengthMeters / 1000,
+      displayName: start.displayName ?? null,
+    }));
+  }
+  const lapCount = event.laps.length || 1;
+  const lapLengthKm =
+    event.laps[0]?.distanceKm ??
+    (event.distanceKm ? Number((event.distanceKm / lapCount).toFixed(2)) : 1);
+  return [
+    {
+      purposeType: 'CUP_RACE',
+      formatIds: event.formats.map((format) => format.id),
+      lapCount,
+      lapLengthKm,
+      displayName: null,
+    },
+  ];
+}
 
 type FeedbackStatus = 'success' | 'unauthorized' | 'forbidden' | 'error';
 
@@ -58,14 +86,21 @@ const sportOptions = [
 ];
 
 function toPayload(values: EditEventFormValues): CreateEventRequest {
-  const laps = buildEventLapsPayload(values.lapCount, values.lapDistanceKm);
+  const starts = buildStartsPayload(values.starts ?? []);
+  const primary = starts[0];
   const payload: CreateEventRequest = {
     name: values.name.trim(),
     eventType: values.eventType,
     sport: values.sport,
     eventDate: values.eventDate.toDate().toISOString(),
-    laps,
-    distanceKm: Number((values.lapCount * values.lapDistanceKm).toFixed(2)),
+    starts,
+    ...(primary
+      ? {
+          distanceKm: Number(
+            ((primary.lapCount * primary.lapLengthMeters) / 1000).toFixed(2),
+          ),
+        }
+      : {}),
   };
   if (values.description?.trim()) payload.description = values.description.trim();
   if (values.mapLink?.trim()) payload.mapLink = values.mapLink.trim();
@@ -75,7 +110,6 @@ function toPayload(values: EditEventFormValues): CreateEventRequest {
   if (values.registrationClose) {
     payload.registrationClose = values.registrationClose.toDate().toISOString();
   }
-  payload.formatIds = values.formatIds ?? [];
   return payload;
 }
 
@@ -96,17 +130,10 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
       eventType: event.eventType as EventTypeCode,
       sport: event.sport as SportCode,
       eventDate: dayjs(event.eventDate),
-      lapCount: event.laps.length || 1,
-      lapDistanceKm:
-        event.laps[0]?.distanceKm ??
-        (event.distanceKm && event.laps.length
-          ? Number((event.distanceKm / event.laps.length).toFixed(2))
-          : event.distanceKm ?? undefined),
       description: event.description ?? undefined,
       mapLink: event.mapLink ?? undefined,
       registrationOpen: event.registrationOpen ? dayjs(event.registrationOpen) : null,
       registrationClose: event.registrationClose ? dayjs(event.registrationClose) : null,
-      formatIds: event.formats.map((format) => format.id),
     });
   }, [event, form, open]);
 
@@ -119,21 +146,26 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
         if (cancelled) return;
         setFormats(rows);
         if (sport === event.sport) {
-          form.setFieldValue(
-            'formatIds',
-            event.formats.map((format) => format.id),
-          );
+          form.setFieldValue('starts', toStartFormValues(event));
         } else {
+          const current =
+            (form.getFieldValue('starts') as StartFormValue[] | undefined) ??
+            [];
+          const base =
+            current.length > 0 ? current : [defaultStartValue(rows)];
           form.setFieldValue(
-            'formatIds',
-            rows.map((row) => row.id),
+            'starts',
+            base.map((start) => ({
+              ...start,
+              formatIds: rows.map((row) => row.id),
+            })),
           );
         }
       })
       .catch(() => {
         if (cancelled) return;
         setFormats([]);
-        form.setFieldValue('formatIds', []);
+        form.setFieldValue('starts', []);
       });
     return () => {
       cancelled = true;
@@ -252,22 +284,6 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
             <Select options={sportOptions} />
           </Form.Item>
 
-          {formats.length > 0 ? (
-            <Form.Item
-              name="formatIds"
-              label="Форматы участия"
-              rules={[{ type: 'array', min: 1, message: 'Выберите хотя бы один формат' }]}
-            >
-              <Checkbox.Group
-                style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
-                options={formats.map((format) => ({
-                  label: format.name,
-                  value: format.id,
-                }))}
-              />
-            </Form.Item>
-          ) : null}
-
           <Form.Item
             name="eventDate"
             label="Дата проведения"
@@ -276,7 +292,7 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
             <DatePicker {...dateTimePickerProps} />
           </Form.Item>
 
-          <EventLapsFormItems />
+          <EventStartsFormItems formats={formats} />
 
           <Form.Item name="description" label="Описание">
             <Input.TextArea rows={3} />
