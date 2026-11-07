@@ -120,6 +120,7 @@ export class ResultsService {
         eventId,
         enrollment.formatId,
         enrollment.registration.gender,
+        enrollment.startId,
       )
     ) {
       throw new BadRequestException(CATEGORY_FINISHED_MESSAGE);
