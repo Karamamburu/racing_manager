@@ -4,7 +4,17 @@ import {
   registrationsService,
   type ParticipantSearchHit,
 } from '../../../features/registrations/registrationsService';
-import type { EventFormatRef, GenderCode } from '../../../shared/types/event';
+import {
+  buildEnrollments,
+  initialEnrollments,
+  type EnrollmentSelection,
+} from '../../../features/registrations/enrollmentPayload';
+import type {
+  EventFormatRef,
+  GenderCode,
+  StartResponse,
+} from '../../../shared/types/event';
+import { StartSelectionField } from './RegisterEventModal';
 
 type ManualFormValues = {
   firstName: string;
@@ -15,6 +25,7 @@ type ManualFormValues = {
   district?: string;
   team?: string;
   formatId?: number;
+  enrollments: EnrollmentSelection[];
   startNumber?: number | null;
 };
 
@@ -34,6 +45,7 @@ type RegisterParticipantModalProps = {
   open: boolean;
   eventId: string;
   formats: EventFormatRef[];
+  starts?: StartResponse[];
   onClose: () => void;
   onRegistered: () => Promise<void> | void;
 };
@@ -47,6 +59,7 @@ export function RegisterParticipantModal({
   open,
   eventId,
   formats,
+  starts = [],
   onClose,
   onRegistered,
 }: RegisterParticipantModalProps) {
@@ -55,7 +68,7 @@ export function RegisterParticipantModal({
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [formatId, setFormatId] = useState<number | undefined>(undefined);
+  const [enrollments, setEnrollments] = useState<EnrollmentSelection[]>([]);
   const [startNumber, setStartNumber] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [manual, setManual] = useState(false);
@@ -63,7 +76,7 @@ export function RegisterParticipantModal({
 
   useEffect(() => {
     if (open) {
-      setFormatId(formats.length === 1 ? formats[0].id : undefined);
+      setEnrollments(initialEnrollments(starts));
       return;
     }
     setQuery('');
@@ -71,16 +84,16 @@ export function RegisterParticipantModal({
     setSearchError(null);
     setSearching(false);
     setSelectedId(null);
-    setFormatId(undefined);
+    setEnrollments([]);
     setStartNumber(null);
     setManual(false);
     form.resetFields();
-  }, [formats, form, open]);
+  }, [form, open, starts]);
 
   useEffect(() => {
-    if (!open || !manual || formats.length !== 1) return;
-    form.setFieldValue('formatId', formats[0].id);
-  }, [formats, form, manual, open]);
+    if (!open || !manual) return;
+    form.setFieldValue('enrollments', initialEnrollments(starts));
+  }, [form, manual, open, starts]);
 
   useEffect(() => {
     if (!open) return;
@@ -119,11 +132,12 @@ export function RegisterParticipantModal({
   }, [eventId, open, query]);
 
   const selected = results.find((user) => user.id === selectedId) ?? null;
+  const hasEnrollments = starts.length === 0 || enrollments.length > 0;
   const canSubmit =
     selected != null &&
     selected.profileReady &&
     !selected.alreadyRegistered &&
-    (formats.length === 0 || formatId != null);
+    hasEnrollments;
 
   const submit = async () => {
     if (!selected || !canSubmit) return;
@@ -131,7 +145,7 @@ export function RegisterParticipantModal({
     try {
       await registrationsService.createForUser(eventId, {
         userId: selected.id,
-        ...(formatId != null ? { formatId } : {}),
+        enrollments: buildEnrollments(enrollments),
         ...(startNumber != null ? { startNumber } : {}),
       });
       message.success(
@@ -173,7 +187,7 @@ export function RegisterParticipantModal({
         city: blankToUndefined(values.city),
         district: blankToUndefined(values.district),
         team: blankToUndefined(values.team),
-        ...(values.formatId != null ? { formatId: values.formatId } : {}),
+        enrollments: buildEnrollments(values.enrollments ?? []),
         ...(assignedNumber != null ? { startNumber: assignedNumber } : {}),
       });
       const name = `${values.lastName.trim()} ${values.firstName.trim()}`;
@@ -247,7 +261,21 @@ export function RegisterParticipantModal({
           >
             <Select options={genderOptions} placeholder="Выберите пол" />
           </Form.Item>
-          {formats.length > 0 ? (
+          {starts.length > 0 ? (
+            <Form.Item
+              name="enrollments"
+              label="Старты"
+              rules={[
+                {
+                  type: 'array',
+                  min: 1,
+                  message: 'Выберите хотя бы один старт',
+                },
+              ]}
+            >
+              <StartSelectionField starts={starts} formats={formats} />
+            </Form.Item>
+          ) : formats.length > 0 ? (
             <Form.Item
               name="formatId"
               label="Формат участия"
@@ -338,19 +366,29 @@ export function RegisterParticipantModal({
           </div>
         )}
 
-        {selected && formats.length > 0 ? (
+        {selected && starts.length > 0 ? (
+          <div>
+            <Typography.Text>Старты</Typography.Text>
+            <div style={{ marginTop: 8 }}>
+              <StartSelectionField
+                starts={starts}
+                formats={formats}
+                value={enrollments}
+                onChange={setEnrollments}
+              />
+            </div>
+          </div>
+        ) : selected && formats.length > 0 ? (
           <div>
             <Typography.Text>Формат участия</Typography.Text>
             <Select
               style={{ width: '100%', marginTop: 8 }}
               placeholder="Выберите формат участия"
               disabled={formats.length === 1}
-              value={formatId}
               options={formats.map((format) => ({
                 value: format.id,
                 label: format.name,
               }))}
-              onChange={setFormatId}
             />
           </div>
         ) : null}

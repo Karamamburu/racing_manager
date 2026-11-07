@@ -1,4 +1,4 @@
-import { Alert, Button, DatePicker, Form, Input, InputNumber, Modal, Result, Select, Skeleton, Typography } from 'antd';
+import { Alert, Button, Checkbox, DatePicker, Form, Input, InputNumber, Modal, Result, Select, Skeleton, Typography } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
@@ -7,8 +7,20 @@ import { Link } from 'react-router-dom';
 import { personalQueryKey, usePersonalQuery } from '../../../features/auth/usePersonalQuery';
 import { useSessionQuery } from '../../../features/auth/useSessionQuery';
 import { personalService } from '../../../features/personal/personalService';
+import {
+  buildEnrollments,
+  initialEnrollments,
+  setEnrollmentFormat,
+  toggleEnrollmentStart,
+  type EnrollmentSelection,
+} from '../../../features/registrations/enrollmentPayload';
 import { registrationsService } from '../../../features/registrations/registrationsService';
-import type { CreateRegistrationRequest, EventFormatRef, GenderCode } from '../../../shared/types/event';
+import type {
+  CreateRegistrationRequest,
+  EventFormatRef,
+  GenderCode,
+  StartResponse,
+} from '../../../shared/types/event';
 import type { PersonalProfile, PersonalResponse, UpdatePersonalRequest } from '../../../shared/types/personal';
 
 type RegisterFormValues = {
@@ -20,6 +32,7 @@ type RegisterFormValues = {
   district?: string;
   team?: string;
   formatId?: number;
+  enrollments: EnrollmentSelection[];
 };
 
 type FieldLocks = Record<keyof RegisterFormValues, boolean>;
@@ -36,10 +49,59 @@ type RegisterEventModalProps = {
   open: boolean;
   eventId: string;
   formats: EventFormatRef[];
+  starts?: StartResponse[];
   initialFormatId?: number;
   onClose: () => void;
   onRegistered?: () => void;
 };
+
+export function StartSelectionField({
+  starts,
+  formats,
+  value = [],
+  onChange,
+}: {
+  starts: StartResponse[];
+  formats: EventFormatRef[];
+  value?: EnrollmentSelection[];
+  onChange?: (next: EnrollmentSelection[]) => void;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {starts.map((start) => {
+        const selected = value.find((row) => row.startId === start.id);
+        const options = formats.filter((format) => start.formatIds.includes(format.id));
+        return (
+          <div key={start.id}>
+            <Checkbox
+              checked={Boolean(selected)}
+              onChange={(event) =>
+                onChange?.(
+                  toggleEnrollmentStart(starts, value, start.id, event.target.checked),
+                )
+              }
+            >
+              {start.resolvedLabel}
+            </Checkbox>
+            {selected ? (
+              <Select
+                style={{ width: '100%', marginTop: 8 }}
+                value={selected.formatId}
+                options={options.map((format) => ({
+                  value: format.id,
+                  label: format.name,
+                }))}
+                onChange={(formatId) =>
+                  onChange?.(setEnrollmentFormat(value, start.id, formatId))
+                }
+              />
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 const genderOptions = [
   { value: 'M', label: 'Мужской' },
@@ -73,6 +135,7 @@ function fieldLocks(
       district: false,
       team: false,
       formatId: false,
+      enrollments: false,
     };
   }
   return {
@@ -84,6 +147,7 @@ function fieldLocks(
     district: Boolean(profile?.district?.trim()),
     team: Boolean(profile?.team?.trim()),
     formatId: false,
+    enrollments: false,
   };
 }
 
@@ -97,11 +161,14 @@ function toPayload(values: RegisterFormValues, locks: FieldLocks): CreateRegistr
   if (!locks.district && values.district?.trim()) payload.district = values.district.trim();
   if (!locks.team && values.team?.trim()) payload.team = values.team.trim();
   if (values.formatId != null) payload.formatId = values.formatId;
+  payload.enrollments = buildEnrollments(values.enrollments ?? []);
   return payload;
 }
 
 function hasSupplements(payload: CreateRegistrationRequest): boolean {
-  const { formatId: _formatId, ...personal } = payload;
+  const personal: CreateRegistrationRequest = { ...payload };
+  delete personal.formatId;
+  delete personal.enrollments;
   return Object.values(personal).some((value) => value !== undefined && value !== '');
 }
 
@@ -133,6 +200,7 @@ export function RegisterEventModal({
   open,
   eventId,
   formats,
+  starts = [],
   initialFormatId,
   onClose,
   onRegistered,
@@ -170,8 +238,9 @@ export function RegisterEventModal({
           : formats.length === 1
             ? formats[0].id
             : undefined,
+      enrollments: initialEnrollments(starts, initialFormatId),
     });
-  }, [form, formats, initialFormatId, open, profile]);
+  }, [form, formats, initialFormatId, open, profile, starts]);
 
   const resetLocalState = () => {
     form.resetFields();
@@ -352,7 +421,21 @@ export function RegisterEventModal({
             <Select options={genderOptions} disabled={locks.gender} />
           </Form.Item>
 
-          {formats.length > 0 ? (
+          {starts.length > 0 ? (
+            <Form.Item
+              name="enrollments"
+              label="Старты"
+              rules={[
+                {
+                  type: 'array',
+                  min: 1,
+                  message: 'Выберите хотя бы один старт',
+                },
+              ]}
+            >
+              <StartSelectionField starts={starts} formats={formats} />
+            </Form.Item>
+          ) : formats.length > 0 ? (
             <Form.Item
               name="formatId"
               label="Формат участия"
