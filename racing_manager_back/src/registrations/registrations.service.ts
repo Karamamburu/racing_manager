@@ -10,7 +10,11 @@ import { ADMIN_ROLE_CODES, RoleCode } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
 import { UsersService, type AppUser } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { categoryIsFinished, CATEGORY_FINISHED_MESSAGE } from '../events/category-finish';
+import type { Prisma, RegistrationStatus } from '../../generated/prisma';
+import {
+  categoryIsFinished,
+  CATEGORY_FINISHED_MESSAGE,
+} from '../events/category-finish';
 import { EventStatusSyncService } from '../events/event-status-sync.service';
 import {
   PAST_COMPLETED_EVENT_LOCKED_MESSAGE,
@@ -19,15 +23,21 @@ import {
 import {
   mergeRegistrationFields,
   parseCreateRegistrationBody,
+  parseEnrollments,
   registrationFieldsFromProfile,
   type ParsedCreateRegistration,
+  type ParsedEnrollment,
 } from './parse-create-registration';
 import {
   assertSupportedRegistrationUpdate,
   parseUpdateRegistrationBody,
 } from './parse-update-registration';
 import { parseUpdateRegistrationStatusBody } from './parse-update-registration-status';
-import { buildTestPeople, guestPersonKey } from './seed-test-people';
+import {
+  buildTestPeople,
+  guestPersonKey,
+  type TestPerson,
+} from './seed-test-people';
 import { logEvent } from '../logging/log-event';
 import {
   ACTIVE_REGISTRATION_STATUSES,
@@ -36,6 +46,15 @@ import {
   isListedRegistrationStatus,
   RegistrationStatusCode,
 } from './registration-status';
+
+export type EnrollmentResponse = {
+  id: string;
+  registrationId: string;
+  startId: string;
+  formatId: number;
+  status: string;
+  isCupEligible: boolean;
+};
 
 export type RegistrationResponse = {
   id: string;
@@ -54,6 +73,7 @@ export type RegistrationResponse = {
   note: string | null;
   registeredAt: string;
   updatedAt: string;
+  enrollments?: EnrollmentResponse[];
 };
 
 type StoredRegistration = {
@@ -75,6 +95,12 @@ type StoredRegistration = {
   updatedAt: Date;
 };
 
+type EventStartForRegistration = {
+  id: string;
+  purposeType: string;
+  formats: { formatId: number }[];
+};
+
 type EventRegistrationWindow = {
   id: string;
   status: string;
@@ -82,12 +108,19 @@ type EventRegistrationWindow = {
   registrationOpen: Date | null;
   registrationClose: Date | null;
   eventFormats: { formatId: number }[];
+  starts: EventStartForRegistration[];
+};
+
+type ResolvedEnrollment = {
+  startId: string;
+  formatId: number;
+  isCupEligible: boolean;
 };
 
 type RegistrationWritePayload = ParsedCreateRegistration & {
   eventId: string;
   userId: string | null;
-  status: string;
+  status: RegistrationStatus;
   startNumber: number | null;
 };
 
@@ -102,19 +135,30 @@ type RegistrationsStore = {
         registrationOpen: true;
         registrationClose: true;
         eventFormats: { select: { formatId: true } };
+        starts: {
+          select: {
+            id: true;
+            purposeType: true;
+            formats: { select: { formatId: true } };
+          };
+        };
       };
     }) => Promise<EventRegistrationWindow | null>;
   };
   registration: {
     findFirst: (args: object) => Promise<StoredRegistration | null>;
-    create: (args: { data: RegistrationWritePayload }) => Promise<StoredRegistration>;
+    create: (args: {
+      data: RegistrationWritePayload;
+    }) => Promise<StoredRegistration>;
     update: (args: {
       where: { id: string };
       data: object;
     }) => Promise<StoredRegistration>;
   };
   result: {
-    deleteMany: (args: { where: { registrationId: string } }) => Promise<unknown>;
+    deleteMany: (args: {
+      where: { registrationId: string };
+    }) => Promise<unknown>;
   };
 };
 
@@ -127,7 +171,12 @@ function parseSeedTestRegistrationsBody(body: unknown): {
     throw new BadRequestException('Request body must be a JSON object.');
   }
   const raw = body as Record<string, unknown>;
-  if (typeof raw.count !== 'number' || !Number.isInteger(raw.count) || raw.count < 1 || raw.count > 100) {
+  if (
+    typeof raw.count !== 'number' ||
+    !Number.isInteger(raw.count) ||
+    raw.count < 1 ||
+    raw.count > 100
+  ) {
     throw new BadRequestException('Количество заявок должно быть от 1 до 100.');
   }
   if (raw.gender !== 'M' && raw.gender !== 'F') {
@@ -135,7 +184,11 @@ function parseSeedTestRegistrationsBody(body: unknown): {
   }
   let formatId: number | null = null;
   if (raw.formatId != null && raw.formatId !== '') {
-    if (typeof raw.formatId !== 'number' || !Number.isInteger(raw.formatId) || raw.formatId < 1) {
+    if (
+      typeof raw.formatId !== 'number' ||
+      !Number.isInteger(raw.formatId) ||
+      raw.formatId < 1
+    ) {
       throw new BadRequestException('formatId must be a positive integer.');
     }
     formatId = raw.formatId;
@@ -148,7 +201,7 @@ const USER_ID_PATTERN =
 
 function parseStaffRegistrationBody(body: unknown): {
   userId: string;
-  formatId: number | null;
+  enrollments: ParsedEnrollment[];
   startNumber: number | null;
 } {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -158,25 +211,23 @@ function parseStaffRegistrationBody(body: unknown): {
   if (typeof raw.userId !== 'string' || !USER_ID_PATTERN.test(raw.userId)) {
     throw new BadRequestException('userId must be a UUID.');
   }
-  let formatId: number | null = null;
-  if (raw.formatId != null && raw.formatId !== '') {
-    if (typeof raw.formatId !== 'number' || !Number.isInteger(raw.formatId) || raw.formatId < 1) {
-      throw new BadRequestException('formatId must be a positive integer.');
-    }
-    formatId = raw.formatId;
-  }
   return {
     userId: raw.userId,
-    formatId,
+    enrollments: parseEnrollments(raw.enrollments),
     startNumber: readOptionalStartNumber(raw),
   };
 }
 
 function readOptionalStartNumber(raw: Record<string, unknown>): number | null {
   if (raw.startNumber == null || raw.startNumber === '') return null;
-  const numeric = typeof raw.startNumber === 'number' ? raw.startNumber : Number(raw.startNumber);
+  const numeric =
+    typeof raw.startNumber === 'number'
+      ? raw.startNumber
+      : Number(raw.startNumber);
   if (!Number.isInteger(numeric) || numeric < 1) {
-    throw new BadRequestException('startNumber must be an integer greater than 0.');
+    throw new BadRequestException(
+      'startNumber must be an integer greater than 0.',
+    );
   }
   return numeric;
 }
@@ -187,7 +238,8 @@ function sameGuestPerson(
 ): boolean {
   return (
     row.birthYear === payload.birthYear &&
-    row.firstName.trim().toLowerCase() === payload.firstName.trim().toLowerCase() &&
+    row.firstName.trim().toLowerCase() ===
+      payload.firstName.trim().toLowerCase() &&
     row.lastName.trim().toLowerCase() === payload.lastName.trim().toLowerCase()
   );
 }
@@ -206,9 +258,9 @@ function uniqueConstraintName(error: unknown): string {
 function isUniqueViolation(error: unknown): boolean {
   return Boolean(
     error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      (error as { code: unknown }).code === 'P2002',
+    typeof error === 'object' &&
+    'code' in error &&
+    error.code === 'P2002',
   );
 }
 
@@ -223,7 +275,7 @@ export class RegistrationsService {
     private readonly rolesService: RolesService,
     private readonly eventStatusSync: EventStatusSyncService,
   ) {
-    this.store = prisma as unknown as RegistrationsStore;
+    this.store = prisma;
   }
 
   async create(
@@ -240,8 +292,8 @@ export class RegistrationsService {
     const parsed = mergeRegistrationFields(actor, body);
     const event = await this.requirePlannedEvent(eventId);
     this.assertRegistrationWindow(event);
-    const formatId = this.resolveFormatId(event, parsed.formatId);
-    return this.persistUserRegistration(eventId, actor.id, { ...parsed, formatId });
+    const enrollments = this.resolveEnrollments(event, parsed.enrollments);
+    return this.persistUserRegistration(eventId, actor.id, parsed, enrollments);
   }
 
   async searchUsersForRegistration(
@@ -289,7 +341,12 @@ export class RegistrationsService {
     if (!target) {
       throw new NotFoundException('User not found.');
     }
-    if (!target.firstName || !target.lastName || !target.gender || !target.birthDate) {
+    if (
+      !target.firstName ||
+      !target.lastName ||
+      !target.gender ||
+      !target.birthDate
+    ) {
       throw new BadRequestException(
         'Профиль пользователя не заполнен: нужны имя, фамилия, пол и дата рождения.',
       );
@@ -297,11 +354,12 @@ export class RegistrationsService {
 
     const parsed = registrationFieldsFromProfile(target);
     const event = await this.requireStaffRegistrationEvent(eventId);
-    const formatId = this.resolveFormatId(event, parsedBody.formatId);
+    const enrollments = this.resolveEnrollments(event, parsedBody.enrollments);
     return this.persistUserRegistration(
       eventId,
       target.id,
-      { ...parsed, formatId },
+      parsed,
+      enrollments,
       authentikId,
       parsedBody.startNumber,
     );
@@ -314,12 +372,15 @@ export class RegistrationsService {
   ): Promise<RegistrationResponse> {
     await this.rolesService.assertHasAnyRole(authentikId, ADMIN_ROLE_CODES);
     const parsed = parseCreateRegistrationBody(body);
-    const startNumber = readOptionalStartNumber(body as Record<string, unknown>);
+    const startNumber = readOptionalStartNumber(
+      body as Record<string, unknown>,
+    );
     const event = await this.requireStaffRegistrationEvent(eventId);
-    const formatId = this.resolveFormatId(event, parsed.formatId);
+    const enrollments = this.resolveEnrollments(event, parsed.enrollments);
     return this.persistGuestRegistration(
       eventId,
-      { ...parsed, formatId },
+      parsed,
+      enrollments,
       authentikId,
       startNumber,
     );
@@ -330,7 +391,9 @@ export class RegistrationsService {
     eventId: string,
     body: unknown,
   ): Promise<{ created: number }> {
-    await this.rolesService.assertHasAnyRole(authentikId, [RoleCode.ADMINISTRATOR]);
+    await this.rolesService.assertHasAnyRole(authentikId, [
+      RoleCode.ADMINISTRATOR,
+    ]);
     const parsed = parseSeedTestRegistrationsBody(body);
     const event = await this.requireAssignableEvent(eventId);
     const formatId = this.resolveFormatId(event, parsed.formatId);
@@ -339,12 +402,14 @@ export class RegistrationsService {
       where: { eventId, userId: null },
       select: { firstName: true, lastName: true, birthYear: true },
     });
-    let people;
+    let people: TestPerson[];
     try {
       people = buildTestPeople(
         parsed.count,
         parsed.gender,
-        existing.map((row) => guestPersonKey(row.firstName, row.lastName, row.birthYear)),
+        existing.map((row) =>
+          guestPersonKey(row.firstName, row.lastName, row.birthYear),
+        ),
       );
     } catch {
       throw new BadRequestException(
@@ -552,6 +617,7 @@ export class RegistrationsService {
     eventId: string,
     userId: string,
     payload: ParsedCreateRegistration,
+    enrollments: ResolvedEnrollment[],
     registeredBy?: string,
     startNumber?: number | null,
   ): Promise<RegistrationResponse> {
@@ -586,47 +652,48 @@ export class RegistrationsService {
       },
       orderBy: { registeredAt: 'desc' },
     });
-    if (withdrawn) {
-      const restored = await this.store.registration.update({
-        where: { id: withdrawn.id },
-        data: {
-          ...payload,
-          status,
-          startNumber: assignedNumber,
-          registeredAt: new Date(),
-        },
-      });
-      logEvent(this.logger, {
-        event: 'registration.created',
-        eventId,
-        registrationId: restored.id,
-        userId,
-        restored: true,
-        startNumber: assignedNumber,
-        ...(registeredBy ? { registeredBy } : {}),
-      });
-      return this.toResponse(restored);
-    }
+
+    const registrationData: RegistrationWritePayload = {
+      eventId,
+      userId,
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      gender: payload.gender,
+      birthYear: payload.birthYear,
+      city: payload.city,
+      district: payload.district,
+      team: payload.team,
+      formatId: enrollments[0].formatId,
+      status,
+      startNumber: assignedNumber,
+    };
 
     try {
-      const created = await this.store.registration.create({
-        data: {
+      const saved = await this.prisma.$transaction(async (tx) => {
+        const registration = withdrawn
+          ? await tx.registration.update({
+              where: { id: withdrawn.id },
+              data: { ...registrationData, registeredAt: new Date() },
+            })
+          : await tx.registration.create({ data: registrationData });
+        const savedEnrollments = await this.upsertEnrollments(
+          tx,
           eventId,
-          userId,
-          ...payload,
-          status,
-          startNumber: assignedNumber,
-        },
+          registration.id,
+          enrollments,
+        );
+        return { registration, enrollments: savedEnrollments };
       });
       logEvent(this.logger, {
         event: 'registration.created',
         eventId,
-        registrationId: created.id,
+        registrationId: saved.registration.id,
         userId,
+        ...(withdrawn ? { restored: true } : {}),
         startNumber: assignedNumber,
         ...(registeredBy ? { registeredBy } : {}),
       });
-      return this.toResponse(created);
+      return this.toResponse(saved.registration, saved.enrollments);
     } catch (error) {
       if (isUniqueViolation(error)) {
         const constraint = uniqueConstraintName(error);
@@ -642,6 +709,7 @@ export class RegistrationsService {
   private async persistGuestRegistration(
     eventId: string,
     payload: ParsedCreateRegistration,
+    enrollments: ResolvedEnrollment[],
     registeredBy: string | undefined,
     startNumber: number | null,
   ): Promise<RegistrationResponse> {
@@ -678,61 +746,48 @@ export class RegistrationsService {
       orderBy: { registeredAt: 'desc' },
     });
     const previous = withdrawn.find((row) => sameGuestPerson(row, payload));
-    if (previous) {
-      const restored = await this.prisma.registration.update({
-        where: { id: previous.id },
-        data: {
-          firstName: payload.firstName,
-          lastName: payload.lastName,
-          gender: payload.gender,
-          birthYear: payload.birthYear,
-          city: payload.city,
-          district: payload.district,
-          team: payload.team,
-          formatId: payload.formatId,
-          status,
-          startNumber,
-          registeredAt: new Date(),
-        },
-      });
-      logEvent(this.logger, {
-        event: 'registration.created',
-        eventId,
-        registrationId: restored.id,
-        userId: null,
-        restored: true,
-        startNumber,
-        ...(registeredBy ? { registeredBy } : {}),
-      });
-      return this.toResponse(restored);
-    }
+
+    const registrationData: RegistrationWritePayload = {
+      eventId,
+      userId: null,
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      gender: payload.gender,
+      birthYear: payload.birthYear,
+      city: payload.city,
+      district: payload.district,
+      team: payload.team,
+      formatId: enrollments[0].formatId,
+      status,
+      startNumber,
+    };
 
     try {
-      const created = await this.prisma.registration.create({
-        data: {
+      const saved = await this.prisma.$transaction(async (tx) => {
+        const registration = previous
+          ? await tx.registration.update({
+              where: { id: previous.id },
+              data: { ...registrationData, registeredAt: new Date() },
+            })
+          : await tx.registration.create({ data: registrationData });
+        const savedEnrollments = await this.upsertEnrollments(
+          tx,
           eventId,
-          userId: null,
-          firstName: payload.firstName,
-          lastName: payload.lastName,
-          gender: payload.gender,
-          birthYear: payload.birthYear,
-          city: payload.city,
-          district: payload.district,
-          team: payload.team,
-          formatId: payload.formatId,
-          status,
-          startNumber,
-        },
+          registration.id,
+          enrollments,
+        );
+        return { registration, enrollments: savedEnrollments };
       });
       logEvent(this.logger, {
         event: 'registration.created',
         eventId,
-        registrationId: created.id,
+        registrationId: saved.registration.id,
         userId: null,
         startNumber,
+        ...(previous ? { restored: true } : {}),
         ...(registeredBy ? { registeredBy } : {}),
       });
-      return this.toResponse(created);
+      return this.toResponse(saved.registration, saved.enrollments);
     } catch (error) {
       if (isUniqueViolation(error)) {
         const constraint = uniqueConstraintName(error);
@@ -745,7 +800,55 @@ export class RegistrationsService {
     }
   }
 
-  private async requireAuthenticatedUser(authentikId: string): Promise<AppUser> {
+  private async upsertEnrollments(
+    tx: Prisma.TransactionClient,
+    eventId: string,
+    registrationId: string,
+    enrollments: ResolvedEnrollment[],
+  ): Promise<EnrollmentResponse[]> {
+    const rows: EnrollmentResponse[] = [];
+    for (const enrollment of enrollments) {
+      const saved = await tx.enrollment.upsert({
+        where: {
+          registrationId_startId: {
+            registrationId,
+            startId: enrollment.startId,
+          },
+        },
+        create: {
+          eventId,
+          registrationId,
+          startId: enrollment.startId,
+          formatId: enrollment.formatId,
+          status: 'REGISTERED',
+        },
+        update: {
+          formatId: enrollment.formatId,
+          status: 'REGISTERED',
+        },
+        select: {
+          id: true,
+          registrationId: true,
+          startId: true,
+          formatId: true,
+          status: true,
+        },
+      });
+      rows.push({
+        id: saved.id,
+        registrationId: saved.registrationId,
+        startId: saved.startId,
+        formatId: saved.formatId,
+        status: saved.status,
+        isCupEligible: enrollment.isCupEligible,
+      });
+    }
+    return rows;
+  }
+
+  private async requireAuthenticatedUser(
+    authentikId: string,
+  ): Promise<AppUser> {
     const actor = await this.usersService.findBySub(authentikId);
     if (!actor) {
       throw new UnauthorizedException(
@@ -768,6 +871,13 @@ export class RegistrationsService {
         registrationOpen: true,
         registrationClose: true,
         eventFormats: { select: { formatId: true } },
+        starts: {
+          select: {
+            id: true,
+            purposeType: true,
+            formats: { select: { formatId: true } },
+          },
+        },
       },
     });
     if (!event) {
@@ -806,6 +916,13 @@ export class RegistrationsService {
         registrationOpen: true,
         registrationClose: true,
         eventFormats: { select: { formatId: true } },
+        starts: {
+          select: {
+            id: true,
+            purposeType: true,
+            formats: { select: { formatId: true } },
+          },
+        },
       },
     });
     if (!event) {
@@ -844,6 +961,44 @@ export class RegistrationsService {
     }
   }
 
+  private resolveEnrollments(
+    event: EventRegistrationWindow,
+    enrollments: ParsedEnrollment[],
+  ): ResolvedEnrollment[] {
+    if (event.starts.length === 0) {
+      throw new BadRequestException('Event has no starts.');
+    }
+    const starts = new Map(
+      event.starts.map((start) => [start.id.toLowerCase(), start]),
+    );
+    const seen = new Set<string>();
+    return enrollments.map((enrollment, index) => {
+      const startId = enrollment.startId.toLowerCase();
+      if (seen.has(startId)) {
+        throw new BadRequestException(
+          'enrollments must not contain duplicate startId values.',
+        );
+      }
+      seen.add(startId);
+      const start = starts.get(startId);
+      if (!start) {
+        throw new BadRequestException(
+          `enrollments[${index}].startId does not belong to this event.`,
+        );
+      }
+      if (!start.formats.some((row) => row.formatId === enrollment.formatId)) {
+        throw new BadRequestException(
+          `enrollments[${index}].formatId is not enabled on the selected start.`,
+        );
+      }
+      return {
+        startId: start.id,
+        formatId: enrollment.formatId,
+        isCupEligible: start.purposeType === 'CUP_RACE',
+      };
+    });
+  }
+
   private resolveFormatId(
     event: EventRegistrationWindow,
     formatId: number | null,
@@ -863,14 +1018,15 @@ export class RegistrationsService {
       throw new BadRequestException('formatId is required.');
     }
     if (!enabled.includes(resolved)) {
-      throw new BadRequestException(
-        'formatId is not enabled for this event.',
-      );
+      throw new BadRequestException('formatId is not enabled for this event.');
     }
     return resolved;
   }
 
-  private toResponse(row: StoredRegistration): RegistrationResponse {
+  private toResponse(
+    row: StoredRegistration,
+    enrollments?: EnrollmentResponse[],
+  ): RegistrationResponse {
     return {
       id: row.id,
       eventId: row.eventId,
@@ -888,6 +1044,7 @@ export class RegistrationsService {
       note: row.note,
       registeredAt: row.registeredAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
+      ...(enrollments ? { enrollments } : {}),
     };
   }
 }
