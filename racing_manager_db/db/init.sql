@@ -200,7 +200,7 @@ CREATE TABLE registrations (
 -- ========================================
 CREATE TABLE results (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  registration_id UUID NOT NULL UNIQUE REFERENCES registrations(id) ON DELETE CASCADE,
+  registration_id UUID NOT NULL REFERENCES registrations(id) ON DELETE CASCADE,
   time_milliseconds INT,
   place INT CHECK (place IS NULL OR place > 0),
   recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -705,6 +705,7 @@ ALTER TABLE results ADD COLUMN outcome result_outcome;
 ALTER TABLE results ADD COLUMN enrollment_id UUID;
 
 CREATE UNIQUE INDEX uq_results_enrollment_id ON results (enrollment_id);
+CREATE INDEX idx_results_registration_id ON results (registration_id);
 ALTER TABLE results
   ADD CONSTRAINT results_enrollment_fk
   FOREIGN KEY (enrollment_id) REFERENCES enrollments (id) ON DELETE CASCADE;

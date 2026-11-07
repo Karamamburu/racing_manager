@@ -10,6 +10,12 @@ BEGIN;
 
 ALTER TABLE results ALTER COLUMN time_milliseconds DROP NOT NULL;
 
+-- A registration now owns one Result per enrollment, so registration_id is no
+-- longer unique. It stays populated as a denormalized convenience for legacy
+-- reads and CMS until the expand-contract removal.
+ALTER TABLE results DROP CONSTRAINT IF EXISTS results_registration_id_key;
+CREATE INDEX IF NOT EXISTS idx_results_registration_id ON results (registration_id);
+
 ALTER TABLE results
   DROP CONSTRAINT IF EXISTS results_time_milliseconds_check;
 ALTER TABLE results

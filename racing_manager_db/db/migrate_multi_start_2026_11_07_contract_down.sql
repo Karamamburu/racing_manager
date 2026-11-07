@@ -7,6 +7,10 @@ BEGIN;
 ALTER TABLE results
   DROP CONSTRAINT IF EXISTS results_outcome_timing_check;
 
+DROP INDEX IF EXISTS idx_results_registration_id;
+ALTER TABLE results
+  ADD CONSTRAINT results_registration_id_key UNIQUE (registration_id);
+
 ALTER TABLE results ALTER COLUMN time_milliseconds SET NOT NULL;
 ALTER TABLE results
   ADD CONSTRAINT results_time_milliseconds_check
