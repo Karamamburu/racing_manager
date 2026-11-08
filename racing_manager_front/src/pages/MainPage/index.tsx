@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { canCreateEvents } from '../../features/auth/canCreateEvents';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { visibleCatalogEvents } from '../../features/events/catalogEvents';
+import { UpcomingStartsList } from '../../features/events/UpcomingStartsList';
 import {
   recentEventsQueryKey,
   useRecentEventsQuery,
@@ -33,6 +34,7 @@ function toMainEventRow(event: RecentEventRow): MainEventRow {
         : 'PLANNED',
     track: event.trackName,
     registeredCount: event.registeredCount,
+    starts: event.starts ?? [],
   };
 }
 
@@ -87,6 +89,9 @@ export function MainPage() {
     (sum, event) => sum + event.registeredCount,
     0,
   );
+  const expandedEventKeys = visibleEvents
+    .filter((event) => (event.starts ?? []).length > 1)
+    .map((event) => event.id);
 
   const extra = canCreate ? (
     <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsCreateOpen(true)}>
@@ -174,10 +179,19 @@ export function MainPage() {
               />
             ) : (
               <Table
+                rowKey="key"
                 columns={getEventColumns((eventId) => navigate(`/events/${eventId}`))}
                 dataSource={visibleEvents.map(toMainEventRow)}
                 pagination={false}
                 scroll={{ x: 'max-content' }}
+                expandable={{
+                  expandedRowRender: (record) => (
+                    <UpcomingStartsList starts={record.starts} />
+                  ),
+                  rowExpandable: (record) => record.starts.length > 1,
+                  expandedRowKeys: expandedEventKeys,
+                  showExpandColumn: expandedEventKeys.length > 0,
+                }}
                 locale={{
                   emptyText: showPastEvents ? 'Пока нет мероприятий' : 'Нет ближайших мероприятий',
                 }}

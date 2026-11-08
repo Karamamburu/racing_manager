@@ -1,3 +1,5 @@
+import type { StartResponse } from './event';
+
 export type MainEventStatus = 'PLANNED' | 'IN_PROGRESS' | 'DONE';
 
 export type MainEventRow = {
@@ -8,6 +10,7 @@ export type MainEventRow = {
   status: MainEventStatus;
   track: string;
   registeredCount: number;
+  starts: StartResponse[];
 };
 
 export type MainSlide = {
