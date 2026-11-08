@@ -9,7 +9,7 @@ export type RankableRegistration = {
   status: string;
   registeredAt: Date;
   result: {
-    timeMilliseconds: number;
+    timeMilliseconds: number | null;
     place?: number | null;
     laps: { length: number };
   } | null;
@@ -25,6 +25,7 @@ export function isCompleteResult(
   eventLapCount: number,
 ): boolean {
   if (!registration.result) return false;
+  if (registration.result.timeMilliseconds == null) return false;
   if (eventLapCount === 0) return true;
   return registration.result.laps.length === eventLapCount;
 }

@@ -21,7 +21,7 @@ export type LegacyLap = { lapNumber: number; distanceKm: number };
 
 export type LegacyResult = {
   id: string;
-  timeMilliseconds: number;
+  timeMilliseconds: number | null;
   place: number | null;
 };
 
