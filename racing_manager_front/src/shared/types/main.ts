@@ -1,4 +1,4 @@
-import type { StartResponse } from './event';
+import type { CatalogStartResponse } from './event';
 
 export type MainEventStatus = 'PLANNED' | 'IN_PROGRESS' | 'DONE';
 
@@ -10,7 +10,9 @@ export type MainEventRow = {
   status: MainEventStatus;
   track: string;
   registeredCount: number;
-  starts: StartResponse[];
+  starts: CatalogStartResponse[];
+  isStart?: boolean;
+  children?: MainEventRow[];
 };
 
 export type MainSlide = {

@@ -37,6 +37,14 @@ export type CreateEventLapRequest = {
 
 export type StartPurposeType = 'CUP_RACE' | 'CONTROL_TRAINING';
 
+export type RouteColorCode =
+  | 'BLUE'
+  | 'ORANGE'
+  | 'CYAN'
+  | 'RED'
+  | 'MAGENTA'
+  | 'YELLOW';
+
 export type StartInputRequest = {
   id?: string;
   purposeType: StartPurposeType;
@@ -44,15 +52,21 @@ export type StartInputRequest = {
   lapCount: number;
   lapLengthMeters: number;
   displayName: string | null;
+  routeColor?: RouteColorCode | null;
   sortOrder: number;
 };
 
 export type StartResponse = StartInputRequest & {
   id: string;
   formats?: EventFormatRef[];
+  routeColor?: RouteColorCode | null;
   resolvedLabel: string;
   legacyEffectiveDistanceM: number | null;
   displayedDistanceMeters: number;
+};
+
+export type CatalogStartResponse = StartResponse & {
+  registeredCount: number;
 };
 
 export type CreateEventRequest = {
@@ -100,7 +114,7 @@ export type RecentEventRow = {
   status: EventStatusCode;
   trackName: string;
   registeredCount: number;
-  starts: StartResponse[];
+  starts: CatalogStartResponse[];
 };
 
 export type EventParticipant = {
