@@ -11,13 +11,18 @@ export type EnrollmentSelection = {
 export function initialEnrollments(
   starts: StartResponse[],
   initialFormatId?: number,
+  initialStartId?: string,
 ): EnrollmentSelection[] {
   if (starts.length === 0) return [];
+  const explicitStart =
+    initialStartId != null
+      ? starts.find((start) => start.id === initialStartId)
+      : undefined;
   const preferredStart =
     initialFormatId != null
       ? starts.find((start) => start.formatIds.includes(initialFormatId))
       : undefined;
-  const start = preferredStart ?? starts[0];
+  const start = explicitStart ?? preferredStart ?? starts[0];
   const formatId =
     initialFormatId != null && start.formatIds.includes(initialFormatId)
       ? initialFormatId

@@ -51,6 +51,7 @@ type RegisterEventModalProps = {
   formats: EventFormatRef[];
   starts?: StartResponse[];
   initialFormatId?: number;
+  initialStartId?: string;
   onClose: () => void;
   onRegistered?: () => void;
 };
@@ -202,6 +203,7 @@ export function RegisterEventModal({
   formats,
   starts = [],
   initialFormatId,
+  initialStartId,
   onClose,
   onRegistered,
 }: RegisterEventModalProps) {
@@ -238,9 +240,9 @@ export function RegisterEventModal({
           : formats.length === 1
             ? formats[0].id
             : undefined,
-      enrollments: initialEnrollments(starts, initialFormatId),
+      enrollments: initialEnrollments(starts, initialFormatId, initialStartId),
     });
-  }, [form, formats, initialFormatId, open, profile, starts]);
+  }, [form, formats, initialFormatId, initialStartId, open, profile, starts]);
 
   const resetLocalState = () => {
     form.resetFields();
@@ -278,6 +280,10 @@ export function RegisterEventModal({
       const result = await registrationsService.create(eventId, payload);
       if (result.status === 201 || result.status === 200) {
         const extra = isAuthenticated && hasSupplements(payload) ? payload : null;
+        const startLabels = (payload.enrollments ?? [])
+          .map((enrollment) => starts.find((start) => start.id === enrollment.startId)?.resolvedLabel)
+          .filter((label): label is string => Boolean(label));
+        const startsText = startLabels.length > 0 ? `Старты: ${startLabels.join(', ')}. ` : '';
         setDidRegister(true);
         setSupplements(extra);
         setProfileBirthDate(null);
@@ -285,8 +291,8 @@ export function RegisterEventModal({
           status: 'success',
           title: 'Вы зарегистрированы',
           subtitle: extra
-            ? 'Заявка добавлена в список участников. Можно сохранить новые данные в профиле, чтобы не вводить их снова.'
-            : 'Заявка добавлена в список участников.',
+            ? `${startsText}Заявка добавлена в список участников. Можно сохранить новые данные в профиле, чтобы не вводить их снова.`
+            : `${startsText}Заявка добавлена в список участников.`,
         });
         return;
       }

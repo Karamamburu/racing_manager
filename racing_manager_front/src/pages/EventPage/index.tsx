@@ -370,6 +370,7 @@ export function EventPage() {
     format: EventFormatRef;
   } | null>(null);
   const [isRegisteringByFormat, setIsRegisteringByFormat] = useState(false);
+  const [registerInitialStartId, setRegisterInitialStartId] = useState<string | undefined>();
   const [isRegisterParticipantOpen, setIsRegisterParticipantOpen] = useState(false);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
   const [isCancelRegistrationOpen, setIsCancelRegistrationOpen] = useState(false);
@@ -528,6 +529,7 @@ export function EventPage() {
       if (statusCode === 400 && isIncompleteProfileError(text)) {
         setPendingRegistration(null);
         setRegisterInitialFormatId(format.id);
+        setRegisterInitialStartId(start.id);
         setIsRegisterOpen(true);
         message.info('Чтобы зарегистрироваться, заполните недостающие данные заявки.');
         return;
@@ -789,6 +791,7 @@ export function EventPage() {
                     disabled={registerDisabled}
                     onClick={() => {
                       setRegisterInitialFormatId(undefined);
+                      setRegisterInitialStartId(undefined);
                       setIsRegisterOpen(true);
                     }}
                   >
@@ -1092,6 +1095,7 @@ export function EventPage() {
         formats={event.formats}
         starts={event.starts}
         initialFormatId={registerInitialFormatId}
+        initialStartId={registerInitialStartId}
         onClose={() => setIsRegisterOpen(false)}
         onRegistered={refreshEvent}
       />
