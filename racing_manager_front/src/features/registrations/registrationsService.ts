@@ -2,6 +2,7 @@ import { AxiosError } from 'axios';
 import { apiClient } from '../../shared/api/ApiClient';
 import type {
   CreateRegistrationRequest,
+  EnrollmentInputRequest,
   RegistrationResponse,
   ResultResponse,
   UpdateRegistrationRequest,
@@ -41,7 +42,12 @@ export class RegistrationsService {
 
   public async createForUser(
     eventId: string,
-    payload: { userId: string; formatId?: number; startNumber?: number },
+    payload: {
+      userId: string;
+      formatId?: number;
+      enrollments?: EnrollmentInputRequest[];
+      startNumber?: number;
+    },
   ): Promise<{ status: number; data: RegistrationResponse }> {
     return apiClient.postResult<RegistrationResponse>(
       `/events/${eventId}/registrations/for-user`,
@@ -61,7 +67,12 @@ export class RegistrationsService {
 
   public async seedTestBatch(
     eventId: string,
-    payload: { count: number; gender: 'M' | 'F'; formatId?: number },
+    payload: {
+      count: number;
+      gender: 'M' | 'F';
+      startId: string;
+      formatId: number;
+    },
   ): Promise<{ status: number; data: { created: number } }> {
     return apiClient.postResult<{ created: number }>(
       `/events/${eventId}/registrations/test-batch`,
@@ -101,11 +112,11 @@ export class RegistrationsService {
 
   public async upsertResult(
     eventId: string,
-    registrationId: string,
+    enrollmentId: string,
     payload: UpsertResultRequest,
   ): Promise<{ status: number; data: ResultResponse }> {
     return apiClient.putResult<ResultResponse>(
-      `/events/${eventId}/registrations/${registrationId}/result`,
+      `/events/${eventId}/enrollments/${enrollmentId}/result`,
       payload,
     );
   }

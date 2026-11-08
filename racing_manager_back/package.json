@@ -10,10 +10,36 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"src/**/*.ts\"",
+    "test": "jest",
+    "migrate:multi-start": "ts-node src/migrations/run-multi-start-cutover.ts",
     "prisma:generate": "prisma generate",
     "postinstall": "prisma generate",
     "prisma:push": "prisma db push",
     "prisma:migrate:dev": "prisma migrate dev"
+  },
+  "jest": {
+    "rootDir": "src",
+    "testEnvironment": "node",
+    "moduleFileExtensions": ["js", "json", "ts"],
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "module": "nodenext",
+            "moduleResolution": "nodenext",
+            "isolatedModules": true,
+            "esModuleInterop": true,
+            "experimentalDecorators": true,
+            "emitDecoratorMetadata": true,
+            "target": "ES2022"
+          }
+        }
+      ]
+    },
+    "collectCoverageFrom": ["**/*.ts"],
+    "coverageDirectory": "../coverage"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1135.0",
@@ -37,17 +63,24 @@
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
+    "@nestjs/testing": "^11.2.8",
     "@types/express": "^5.0.0",
     "@types/express-session": "^1.19.0",
+    "@types/jest": "^29.5.14",
     "@types/multer": "^2.0.0",
     "@types/node": "^24.0.0",
     "@types/sanitize-html": "^2.16.1",
+    "@types/supertest": "^7.2.1",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-prettier": "^5.2.2",
+    "jest": "^29.7.0",
+    "jest-util": "^29.7.0",
     "prettier": "^3.4.2",
     "prisma": "^6.10.1",
     "source-map-support": "^0.5.21",
+    "supertest": "^7.3.1",
+    "ts-jest": "^29.4.15",
     "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",

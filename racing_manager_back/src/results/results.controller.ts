@@ -1,6 +1,9 @@
 import {
   Body,
   Controller,
+  GoneException,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Put,
@@ -14,25 +17,35 @@ import { RolesGuard } from '../auth/roles.guard';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
 import { ResultsService } from './results.service';
 
-@Controller('events/:eventId/registrations/:registrationId/result')
+@Controller('events/:eventId')
 export class ResultsController {
   constructor(private readonly resultsService: ResultsService) {}
 
-  @Put()
+  @Put('enrollments/:enrollmentId/result')
   @UseGuards(SessionAuthGuard, RolesGuard)
   @Roles(...ADMIN_ROLE_CODES)
   upsert(
     @Req() req: Request,
     @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
-    @Param('registrationId', new ParseUUIDPipe({ version: '4' }))
-    registrationId: string,
+    @Param('enrollmentId', new ParseUUIDPipe({ version: '4' }))
+    enrollmentId: string,
     @Body() body: unknown,
   ) {
     return this.resultsService.upsert(
       req.session?.userSub,
       eventId,
-      registrationId,
+      enrollmentId,
       body,
+    );
+  }
+
+  @Put('registrations/:registrationId/result')
+  @HttpCode(HttpStatus.GONE)
+  @UseGuards(SessionAuthGuard, RolesGuard)
+  @Roles(...ADMIN_ROLE_CODES)
+  retiredRegistrationResult() {
+    throw new GoneException(
+      'Registration-scoped result writes are retired. Use PUT /events/:eventId/enrollments/:enrollmentId/result.',
     );
   }
 }

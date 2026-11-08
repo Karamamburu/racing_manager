@@ -61,7 +61,7 @@ export class EventsService {
 
   public async finishCategory(
     id: string,
-    payload: { formatId: number | null; gender: 'M' | 'F' },
+    payload: { startId?: string; formatId: number | null; gender: 'M' | 'F' },
   ): Promise<EventDetails> {
     return apiClient.post<EventDetails>(`/admin/events/${id}/categories/finish`, payload);
   }

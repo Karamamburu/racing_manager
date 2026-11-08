@@ -23,7 +23,7 @@ export function FeaturesCard({
       <Descriptions
         bordered
         colon={false}
-        layout="vertical"
+        layout="horizontal"
         size="middle"
         column={column}
         styles={{
@@ -31,6 +31,7 @@ export function FeaturesCard({
             fontWeight: 600,
             color: token.colorText,
             background: token.colorFillAlter,
+            whiteSpace: 'nowrap',
           },
           content: {
             fontSize: token.fontSizeLG,

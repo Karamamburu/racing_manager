@@ -383,6 +383,78 @@ describe('CompetitionsService.updatePlan', () => {
   });
 });
 
+describe('CompetitionsService.updatePlan after a completed stage', () => {
+  it('allows removing a pending successor and rewires the completed stage', async () => {
+    const people = [p1Fixture(), p2Fixture(), p3Fixture(), p4Fixture()];
+    const loaded = {
+      id: competitionId,
+      name: 'Mini',
+      status: 'IN_PROGRESS',
+      formatId: null,
+      formatSnapshot: miniFormat,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      participants: people,
+      stageEntries: people.map((row) => ({
+        id: `entry-${row.externalId}`,
+        competitionId,
+        stageId: 'prologue',
+        participantId: row.id,
+        seed: row.seed,
+        eliminated: false,
+        participant: row,
+      })),
+      stageRuns: [
+        {
+          id: 'run-prologue',
+          competitionId,
+          stageId: 'prologue',
+          status: 'COMPLETED',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          rankings: [],
+          heats: [],
+        },
+        {
+          id: 'run-qf',
+          competitionId,
+          stageId: 'qf',
+          status: 'PENDING',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          rankings: [],
+          heats: [],
+        },
+      ],
+    };
+    const tx = {
+      stageRun: {
+        delete: jest.fn(),
+        create: jest.fn(),
+      },
+      competition: { update: jest.fn() },
+    };
+    const prisma = {
+      competition: { findUnique: jest.fn().mockResolvedValue(loaded) },
+      $transaction: jest.fn(async (fn: (client: typeof tx) => Promise<void>) => fn(tx)),
+    };
+    const service = new CompetitionsService(prisma as unknown as PrismaService);
+
+    await service.updatePlan(competitionId, { removeStageIds: ['qf'] });
+
+    expect(tx.stageRun.delete).toHaveBeenCalledWith({ where: { id: 'run-qf' } });
+    const update = tx.competition.update.mock.calls[0][0] as {
+      data: { formatSnapshot: CompetitionFormat };
+    };
+    expect(update.data.formatSnapshot.stages.map((stage) => stage.id)).toEqual([
+      'prologue',
+    ]);
+    expect(update.data.formatSnapshot.stages[0].advancement).toEqual({
+      type: 'NONE',
+    });
+  });
+});
+
 describe('CompetitionsService.reassignHeats', () => {
   it('replaces slots on a seeded stage that has no results', async () => {
     const people = [p1Fixture(), p2Fixture(), p3Fixture(), p4Fixture()];

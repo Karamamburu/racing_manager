@@ -1,4 +1,4 @@
-import { Button, Card, Col, Collapse, Divider, Grid, Modal, Result, Row, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Col, Collapse, Grid, Modal, Result, Row, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -16,6 +16,13 @@ import {
 } from '../../features/class-competitions/useClassCompetitionsQuery';
 import { eventsService } from '../../features/events/eventsService';
 import { recentEventsQueryKey } from '../../features/events/useRecentEventsQuery';
+import { EventStartBlocks } from '../../features/events/EventStartBlocks';
+import {
+  categoryHasResults,
+  categoryIsFinished,
+  categoryReadyToFinish,
+  groupParticipants,
+} from '../../features/events/protocolGroups';
 import {
   eventDetailsQueryKey,
   useEventDetailsQuery,
@@ -28,7 +35,6 @@ import {
 import { registrationsService } from '../../features/registrations/registrationsService';
 import { FeaturesCard } from '../../shared/components';
 import { formatDateTime } from '../../shared/formatDateTime';
-import { formatFinishTime } from '../../shared/formatFinishTime';
 import { eventStatusMeta, isPastCompletedEvent, PAST_COMPLETED_EVENT_LOCKED_MESSAGE, type EventStatusCode } from '../../shared/eventStatus';
 import {
   isActiveRegistrationStatus,
@@ -37,7 +43,11 @@ import {
   type RegistrationStatusCode,
 } from '../../shared/registrationStatus';
 import { AppShell } from '../../shared/layout';
-import type { EventFormatRef, EventLap, EventParticipant } from '../../shared/types/event';
+import type {
+  EventFormatRef,
+  EventParticipant,
+  StartResponse,
+} from '../../shared/types/event';
 import type { FeatureItem } from '../../shared/types/track';
 import { ClassCompetitionPanel } from './components/ClassCompetitionPanel';
 import { EditEventModal } from './components/EditEventModal';
@@ -66,50 +76,6 @@ const genderLabels: Record<string, string> = {
   M: 'Мужской',
   F: 'Женский',
 };
-
-const genderGroupLabels: Record<string, string> = {
-  M: 'Мужчины',
-  F: 'Женщины',
-};
-
-const GENDER_ORDER = ['M', 'F'] as const;
-
-type ClassificationSection = {
-  key: string;
-  title: string;
-  rows: EventParticipant[];
-};
-
-type GenderGroup = {
-  key: string;
-  title: string;
-  sections: ClassificationSection[];
-};
-
-type SavingLap = {
-  registrationId: string;
-  lapNumber: number;
-};
-
-function formatLapCount(count: number): string {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${count} круг`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} круга`;
-  return `${count} кругов`;
-}
-
-function formatEventLaps(laps: EventLap[]): string {
-  if (laps.length === 0) return '—';
-  const first = laps[0].distanceKm;
-  const allEqual = laps.every((lap) => lap.distanceKm === first);
-  if (allEqual) return `${formatLapCount(laps.length)} по ${first} км`;
-  return laps.map((lap) => `${lap.lapNumber}: ${lap.distanceKm} км`).join(', ');
-}
-
-function participantLapTime(participant: EventParticipant, lapNumber: number): number | null {
-  return (participant.laps ?? []).find((lap) => lap.lapNumber === lapNumber)?.timeMilliseconds ?? null;
-}
 
 const REACHED_STAGE_LABELS: Record<string, string> = {
   PROLOGUE: 'Пролог',
@@ -200,18 +166,6 @@ function formatParticipantCount(count: number, gender: string): string {
   return `${count} участников`;
 }
 
-const UNPLACED_STATUSES = new Set(['DNS', 'DNF', 'DSQ', 'NQ', 'CANCELLED', 'WITHDRAWN']);
-
-function categoryHasResults(rows: EventParticipant[]): boolean {
-  return rows.some((row) => row.finishTimeMs != null);
-}
-
-function categoryReadyToFinish(rows: EventParticipant[]): boolean {
-  return rows
-    .filter((row) => !UNPLACED_STATUSES.has(row.status))
-    .every((row) => row.finishTimeMs != null);
-}
-
 function isIncompleteProfileError(text: string): boolean {
   return (
     text.includes('firstName') ||
@@ -221,62 +175,7 @@ function isIncompleteProfileError(text: string): boolean {
   );
 }
 
-function categoryIsFinished(
-  finishes: { formatId: number | null; gender: string }[],
-  formatId: number | null,
-  gender: string,
-): boolean {
-  return finishes.some((item) => item.formatId === formatId && item.gender === gender);
-}
-
-function groupParticipants(
-  participants: EventParticipant[],
-  formats: EventFormatRef[],
-): GenderGroup[] {
-  const sortedFormats = [...formats].sort(
-    (a, b) => a.sortOrder - b.sortOrder || a.id - b.id,
-  );
-  const groups: GenderGroup[] = [];
-
-  for (const gender of GENDER_ORDER) {
-    const sections: ClassificationSection[] = [];
-    if (sortedFormats.length === 0) {
-      const rows = participants.filter((participant) => participant.gender === gender);
-      if (rows.length) {
-        sections.push({
-          key: gender,
-          title: 'Участники',
-          rows,
-        });
-      }
-    } else {
-      for (const format of sortedFormats) {
-        const rows = participants.filter(
-          (participant) =>
-            participant.format?.id === format.id && participant.gender === gender,
-        );
-        if (rows.length) {
-          sections.push({
-            key: `${format.id}-${gender}`,
-            title: format.name,
-            rows,
-          });
-        }
-      }
-    }
-    if (sections.length) {
-      groups.push({
-        key: gender,
-        title: genderGroupLabels[gender] ?? gender,
-        sections,
-      });
-    }
-  }
-  return groups;
-}
-
 function getParticipantColumns(options: {
-  eventLaps: EventLap[];
   showReachedStage?: boolean;
   canAssignNumbers: boolean;
   canAssignResults: boolean;
@@ -284,47 +183,15 @@ function getParticipantColumns(options: {
   savingNumberId: string | null;
   savingResultId: string | null;
   savingStatusId: string | null;
-  savingLap: SavingLap | null;
+  savingOutcomeId: string | null;
   onAssignNumber: (participant: EventParticipant, startNumber: number) => Promise<void>;
   onChangeStatus: (participant: EventParticipant, status: RegistrationStatusCode) => Promise<void>;
-  onAssignLap: (
+  onAssignOutcome: (
     participant: EventParticipant,
-    lapNumber: number,
-    timeMilliseconds: number,
+    outcome: 'DNS' | 'DNF' | 'DSQ',
   ) => Promise<void>;
   onAssignResult: (participant: EventParticipant, timeMilliseconds: number) => Promise<void>;
 }): ColumnsType<ProtocolParticipant> {
-  const recordsByLaps = options.eventLaps.length > 0;
-  const lapColumns: ColumnsType<EventParticipant> = options.eventLaps.map((lap) => ({
-    title: (
-      <span>
-        Круг {lap.lapNumber}
-        <div style={{ fontWeight: 400, fontSize: 12, color: 'rgba(0, 0, 0, 0.45)' }}>
-          {lap.distanceKm} км
-        </div>
-      </span>
-    ),
-    key: `lap-${lap.lapNumber}`,
-    width: 130,
-    render: (_value: unknown, record) => (
-      <FinishTimeCell
-        value={participantLapTime(record, lap.lapNumber)}
-        canEdit={
-          options.canAssignResults &&
-          record.startNumber != null &&
-          isRecordableRegistrationStatus(record.status)
-        }
-        saving={
-          options.savingLap?.registrationId === record.id &&
-          options.savingLap.lapNumber === lap.lapNumber
-        }
-        onSave={(timeMilliseconds) =>
-          options.onAssignLap(record, lap.lapNumber, timeMilliseconds)
-        }
-      />
-    ),
-  }));
-
   return [
     {
       title: 'Место',
@@ -356,43 +223,59 @@ function getParticipantColumns(options: {
           },
         ]
       : []),
-    ...lapColumns,
     {
-      title: recordsByLaps ? (
-        <Tooltip title="Сумма времени кругов">
-          <span>Время</span>
-        </Tooltip>
-      ) : (
-        'Время'
-      ),
+      title: 'Результат',
+      key: 'outcome',
+      width: 150,
+      render: (_value: unknown, record: ProtocolParticipant) => {
+        if (!options.canAssignResults) {
+          return record.outcome ?? '—';
+        }
+        const editable =
+          record.startNumber != null &&
+          isRecordableRegistrationStatus(record.status);
+        return (
+          <Select
+            size="small"
+            style={{ width: 120 }}
+            placeholder="—"
+            value={record.outcome ?? undefined}
+            disabled={!editable}
+            loading={options.savingOutcomeId === record.enrollmentId}
+            options={[
+              { value: 'FINISHED', label: 'Финиш' },
+              { value: 'DNS', label: 'DNS' },
+              { value: 'DNF', label: 'DNF' },
+              { value: 'DSQ', label: 'DSQ' },
+            ]}
+            onChange={(outcome) => {
+              if (outcome === 'FINISHED') return;
+              void options.onAssignOutcome(
+                record,
+                outcome as 'DNS' | 'DNF' | 'DSQ',
+              );
+            }}
+          />
+        );
+      },
+    },
+    {
+      title: 'Время',
       dataIndex: 'finishTimeMs',
       key: 'finishTimeMs',
       width: 150,
-      render: (value: number | null, record) => {
-        if (!recordsByLaps) {
-          return (
-            <FinishTimeCell
-              value={value}
-              canEdit={
-                options.canAssignResults &&
-                record.startNumber != null &&
-                isRecordableRegistrationStatus(record.status)
-              }
-              saving={options.savingResultId === record.id}
-              onSave={(timeMilliseconds) => options.onAssignResult(record, timeMilliseconds)}
-            />
-          );
-        }
-        const filled = (record.laps ?? []).length;
-        const incomplete = value != null && filled < options.eventLaps.length;
-        const label = formatFinishTime(value);
-        if (!incomplete) return label;
-        return (
-          <Tooltip title={`Заполнено кругов: ${filled} из ${options.eventLaps.length}`}>
-            <span>{label}</span>
-          </Tooltip>
-        );
-      },
+      render: (value: number | null, record) => (
+        <FinishTimeCell
+          value={value}
+          canEdit={
+            options.canAssignResults &&
+            record.startNumber != null &&
+            isRecordableRegistrationStatus(record.status)
+          }
+          saving={options.savingResultId === record.enrollmentId}
+          onSave={(timeMilliseconds) => options.onAssignResult(record, timeMilliseconds)}
+        />
+      ),
     },
     {
       title: 'Участник',
@@ -482,8 +365,12 @@ export function EventPage() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [registerInitialFormatId, setRegisterInitialFormatId] = useState<number | undefined>();
-  const [formatToRegister, setFormatToRegister] = useState<EventFormatRef | null>(null);
+  const [pendingRegistration, setPendingRegistration] = useState<{
+    start: StartResponse;
+    format: EventFormatRef;
+  } | null>(null);
   const [isRegisteringByFormat, setIsRegisteringByFormat] = useState(false);
+  const [registerInitialStartId, setRegisterInitialStartId] = useState<string | undefined>();
   const [isRegisterParticipantOpen, setIsRegisterParticipantOpen] = useState(false);
   const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
   const [isCancelRegistrationOpen, setIsCancelRegistrationOpen] = useState(false);
@@ -493,8 +380,8 @@ export function EventPage() {
   const [isCancellingRegistration, setIsCancellingRegistration] = useState(false);
   const [savingStartNumberId, setSavingStartNumberId] = useState<string | null>(null);
   const [savingFinishTimeId, setSavingFinishTimeId] = useState<string | null>(null);
+  const [savingOutcomeId, setSavingOutcomeId] = useState<string | null>(null);
   const [savingRegistrationStatusId, setSavingRegistrationStatusId] = useState<string | null>(null);
-  const [savingLap, setSavingLap] = useState<SavingLap | null>(null);
   const [finishingCategory, setFinishingCategory] = useState<string | null>(null);
   const [fullProtocolKeys, setFullProtocolKeys] = useState<string[]>([]);
   const screens = Grid.useBreakpoint();
@@ -613,14 +500,25 @@ export function EventPage() {
   };
 
   const confirmFormatRegistration = async () => {
-    if (!formatToRegister) return;
-    const format = formatToRegister;
+    if (!pendingRegistration) return;
+    const { start, format } = pendingRegistration;
     setIsRegisteringByFormat(true);
     try {
-      const result = await registrationsService.create(event.id, { formatId: format.id });
+      const result = await registrationsService.create(event.id, {
+        enrollments: [{ startId: start.id, formatId: format.id }],
+      });
       if (result.status === 201 || result.status === 200) {
-        message.success('Вы зарегистрированы');
-        setFormatToRegister(null);
+        setPendingRegistration(null);
+        Modal.success({
+          title: 'Вы зарегистрированы',
+          content: (
+            <>
+              Старт: {start.resolvedLabel}
+              <br />
+              Формат: {format.name}
+            </>
+          ),
+        });
         await refreshEvent();
         return;
       }
@@ -629,8 +527,9 @@ export function EventPage() {
       const statusCode = registrationsService.getStatus(error);
       const text = registrationsService.getErrorMessage(error);
       if (statusCode === 400 && isIncompleteProfileError(text)) {
-        setFormatToRegister(null);
+        setPendingRegistration(null);
         setRegisterInitialFormatId(format.id);
+        setRegisterInitialStartId(start.id);
         setIsRegisterOpen(true);
         message.info('Чтобы зарегистрироваться, заполните недостающие данные заявки.');
         return;
@@ -661,37 +560,14 @@ export function EventPage() {
     }
   };
 
-  const assignLapTime = async (
-    participant: EventParticipant,
-    lapNumber: number,
-    timeMilliseconds: number,
-  ) => {
-    setSavingLap({ registrationId: participant.id, lapNumber });
-    try {
-      await registrationsService.upsertResult(event.id, participant.id, {
-        laps: [{ lapNumber, timeMilliseconds }],
-      });
-      await refreshEvent();
-      message.success(`Время круга ${lapNumber} записано`);
-    } catch (error) {
-      const statusCode = registrationsService.getStatus(error);
-      const text =
-        statusCode === 403
-          ? 'Недостаточно прав. Записывать результаты может организатор или администратор.'
-          : registrationsService.getErrorMessage(error);
-      throw new Error(text);
-    } finally {
-      setSavingLap(null);
-    }
-  };
-
   const assignFinishTime = async (
     participant: EventParticipant,
     timeMilliseconds: number,
   ) => {
-    setSavingFinishTimeId(participant.id);
+    setSavingFinishTimeId(participant.enrollmentId);
     try {
-      await registrationsService.upsertResult(event.id, participant.id, {
+      await registrationsService.upsertResult(event.id, participant.enrollmentId, {
+        outcome: 'FINISHED',
         timeMilliseconds,
       });
       await refreshEvent();
@@ -708,11 +584,39 @@ export function EventPage() {
     }
   };
 
-  const finishCategory = async (formatId: number | null, gender: string, key: string) => {
+  const assignOutcome = async (
+    participant: EventParticipant,
+    outcome: 'DNS' | 'DNF' | 'DSQ',
+  ) => {
+    setSavingOutcomeId(participant.enrollmentId);
+    try {
+      await registrationsService.upsertResult(event.id, participant.enrollmentId, {
+        outcome,
+      });
+      await refreshEvent();
+      message.success('Результат записан');
+    } catch (error) {
+      const statusCode = registrationsService.getStatus(error);
+      const text =
+        statusCode === 403
+          ? 'Недостаточно прав. Записывать результаты может организатор или администратор.'
+          : registrationsService.getErrorMessage(error);
+      throw new Error(text);
+    } finally {
+      setSavingOutcomeId(null);
+    }
+  };
+
+  const finishCategory = async (
+    startId: string,
+    formatId: number | null,
+    gender: string,
+    key: string,
+  ) => {
     if (gender !== 'M' && gender !== 'F') return;
     setFinishingCategory(key);
     try {
-      await eventsService.finishCategory(event.id, { formatId, gender });
+      await eventsService.finishCategory(event.id, { startId, formatId, gender });
       await refreshEvent();
       message.success('Гонка завершена');
     } catch (error) {
@@ -770,20 +674,23 @@ export function EventPage() {
   const registrationClosed = isRegistrationWindowClosed(event);
   const classCompetitions = classCompetitionsQuery.data ?? [];
   const participantColumns = getParticipantColumns({
-    eventLaps: event.laps ?? [],
     canAssignNumbers,
     canAssignResults,
     canChangeStatus: canChangeRegistrationStatus,
     savingNumberId: savingStartNumberId,
     savingResultId: savingFinishTimeId,
     savingStatusId: savingRegistrationStatusId,
-    savingLap,
+    savingOutcomeId,
     onAssignNumber: assignStartNumber,
     onChangeStatus: assignRegistrationStatus,
-    onAssignLap: assignLapTime,
+    onAssignOutcome: assignOutcome,
     onAssignResult: assignFinishTime,
   });
-  const participantGroups = groupParticipants(registrations, event.formats);
+  const participantGroups = groupParticipants(
+    registrations,
+    event.formats,
+    event.starts,
+  );
 
   const handleStatusChange = (nextStatus: EventStatusCode) => {
     if (nextStatus === 'CANCELLED') {
@@ -884,6 +791,7 @@ export function EventPage() {
                     disabled={registerDisabled}
                     onClick={() => {
                       setRegisterInitialFormatId(undefined);
+                      setRegisterInitialStartId(undefined);
                       setIsRegisterOpen(true);
                     }}
                   >
@@ -949,50 +857,18 @@ export function EventPage() {
 
         <Row gutter={[24, 24]}>
           <Col xs={24} xl={event.mapLink ? 12 : 24}>
-            <Card title="Описание" style={{ height: '100%' }}>
-              <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                <Typography.Text>
-                  <Typography.Text type="secondary">Круги: </Typography.Text>
-                  {formatEventLaps(event.laps ?? [])}
-                </Typography.Text>
-                <Typography.Text>
-                  <Typography.Text type="secondary">Дистанция: </Typography.Text>
-                  {event.distanceKm === null ? '—' : `${event.distanceKm} км`}
-                </Typography.Text>
-                <Space wrap size={[4, 8]} align="center">
-                  <Typography.Text type="secondary">Форматы участия:</Typography.Text>
-                  {event.formats.length > 0
-                    ? event.formats.map((format: EventFormatRef) =>
-                        canPickFormat ? (
-                          <Tooltip
-                            key={format.id}
-                            title={registerDisabled ? registerTooltip : undefined}
-                          >
-                            <span>
-                              <Button
-                                size="small"
-                                disabled={registerDisabled}
-                                onClick={() => setFormatToRegister(format)}
-                              >
-                                {format.name}
-                              </Button>
-                            </span>
-                          </Tooltip>
-                        ) : (
-                          <Tag key={format.id}>{format.name}</Tag>
-                        ),
-                      )
-                    : '—'}
-                </Space>
-              </Space>
-              <Divider style={{ margin: '12px 0 16px' }} />
-              {event.description ? (
-                <Typography.Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
-                  {event.description}
-                </Typography.Paragraph>
-              ) : (
-                <Typography.Text type="secondary">Описание не указано</Typography.Text>
-              )}
+            <Card title="Старты" style={{ height: '100%' }}>
+              <EventStartBlocks
+                starts={event.starts}
+                formats={event.formats}
+                stacked={Boolean(event.mapLink)}
+                canRegister={canPickFormat}
+                registerDisabled={registerDisabled}
+                registerTooltip={registerTooltip}
+                onRegister={(start, format) =>
+                  setPendingRegistration({ start, format })
+                }
+              />
             </Card>
           </Col>
           {event.mapLink ? (
@@ -1001,6 +877,16 @@ export function EventPage() {
             </Col>
           ) : null}
         </Row>
+
+        <Card title="Положение о мероприятии">
+          {event.description ? (
+            <Typography.Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+              {event.description}
+            </Typography.Paragraph>
+          ) : (
+            <Typography.Text type="secondary">Положение не указано</Typography.Text>
+          )}
+        </Card>
 
         <Card
           title={`Зарегистрированные участники (${event.registeredCount})`}
@@ -1057,15 +943,16 @@ export function EventPage() {
                       const sample = section.rows[0];
                       const formatId = sample?.format?.id ?? null;
                       const gender = sample?.gender ?? '';
+                      const startId = sample?.startId ?? '';
                       const categoryFinished = categoryIsFinished(
                         event.finishedCategories ?? [],
+                        startId,
                         formatId,
                         gender,
                       );
                       const hasResults = categoryHasResults(section.rows);
                       const readyToFinish = categoryReadyToFinish(section.rows);
                       const lockedColumns = getParticipantColumns({
-                        eventLaps: event.laps ?? [],
                         showReachedStage: competition != null,
                         canAssignNumbers: competition ? false : canAssignNumbers,
                         canAssignResults: false,
@@ -1073,10 +960,10 @@ export function EventPage() {
                         savingNumberId: savingStartNumberId,
                         savingResultId: savingFinishTimeId,
                         savingStatusId: savingRegistrationStatusId,
-                        savingLap,
+                        savingOutcomeId,
                         onAssignNumber: assignStartNumber,
                         onChangeStatus: assignRegistrationStatus,
-                        onAssignLap: assignLapTime,
+                        onAssignOutcome: assignOutcome,
                         onAssignResult: assignFinishTime,
                       });
                       const columns = competition || categoryFinished ? lockedColumns : participantColumns;
@@ -1120,7 +1007,7 @@ export function EventPage() {
                                         type="primary"
                                         disabled={!readyToFinish}
                                         loading={finishingCategory === section.key}
-                                        onClick={() => finishCategory(formatId, gender, section.key)}
+                                        onClick={() => finishCategory(startId, formatId, gender, section.key)}
                                       >
                                         Завершить гонку
                                       </Button>
@@ -1200,6 +1087,7 @@ export function EventPage() {
         open={isTestRegistrationsOpen}
         eventId={event.id}
         formats={event.formats}
+        starts={event.starts}
         onClose={() => setIsTestRegistrationsOpen(false)}
         onCreated={refreshEvent}
       />
@@ -1207,30 +1095,33 @@ export function EventPage() {
         open={isRegisterOpen}
         eventId={event.id}
         formats={event.formats}
+        starts={event.starts}
         initialFormatId={registerInitialFormatId}
+        initialStartId={registerInitialStartId}
         onClose={() => setIsRegisterOpen(false)}
         onRegistered={refreshEvent}
       />
       <Modal
         title="Регистрация на гонку"
-        open={formatToRegister != null}
+        open={pendingRegistration != null}
         onCancel={() => {
           if (isRegisteringByFormat) return;
-          setFormatToRegister(null);
+          setPendingRegistration(null);
         }}
         okText="Зарегистрироваться"
         cancelText="Отмена"
         confirmLoading={isRegisteringByFormat}
         onOk={() => void confirmFormatRegistration()}
       >
-        {formatToRegister
-          ? `Вы хотите зарегистрироваться на гонку «${event.name}» в категории «${formatToRegister.name}»?`
+        {pendingRegistration
+          ? `Вы хотите зарегистрироваться на гонку «${event.name}» на старте «${pendingRegistration.start.resolvedLabel}» в категории «${pendingRegistration.format.name}»?`
           : null}
       </Modal>
       <RegisterParticipantModal
         open={isRegisterParticipantOpen}
         eventId={event.id}
         formats={event.formats}
+        starts={event.starts}
         onClose={() => setIsRegisterParticipantOpen(false)}
         onRegistered={refreshEvent}
       />

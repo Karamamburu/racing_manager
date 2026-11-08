@@ -10,10 +10,16 @@ export async function categoryIsFinished(
   eventId: string,
   formatId: number | null,
   gender: string,
+  startId?: string | null,
 ): Promise<boolean> {
   if (gender !== 'M' && gender !== 'F') return false;
   const row = await db.categoryFinish.findFirst({
-    where: { eventId, formatId, gender },
+    where: {
+      eventId,
+      formatId,
+      gender,
+      ...(startId === undefined ? {} : { startId }),
+    },
     select: { id: true },
   });
   return row != null;

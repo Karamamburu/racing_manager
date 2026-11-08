@@ -16,6 +16,52 @@ export type ParsedCreateRegistration = {
   formatId: number | null;
 };
 
+export type ParsedEnrollment = {
+  startId: string;
+  formatId: number;
+};
+
+export type ParsedCreateRegistrationWithEnrollments =
+  ParsedCreateRegistration & {
+    enrollments: ParsedEnrollment[];
+  };
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function parseEnrollments(value: unknown): ParsedEnrollment[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new BadRequestException('enrollments is required.');
+  }
+  const seen = new Set<string>();
+  return value.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new BadRequestException(`enrollments[${index}] must be an object.`);
+    }
+    const raw = item as Record<string, unknown>;
+    if (typeof raw.startId !== 'string' || !UUID_PATTERN.test(raw.startId)) {
+      throw new BadRequestException(
+        `enrollments[${index}].startId must be a UUID.`,
+      );
+    }
+    const startId = raw.startId.toLowerCase();
+    if (seen.has(startId)) {
+      throw new BadRequestException(
+        'enrollments must not contain duplicate startId values.',
+      );
+    }
+    seen.add(startId);
+    const numeric =
+      typeof raw.formatId === 'number' ? raw.formatId : Number(raw.formatId);
+    if (!Number.isInteger(numeric) || numeric <= 0) {
+      throw new BadRequestException(
+        `enrollments[${index}].formatId must be a positive integer.`,
+      );
+    }
+    return { startId, formatId: numeric };
+  });
+}
+
 type OptionalRegistrationFields = {
   firstName: string | null;
   lastName: string | null;
@@ -118,7 +164,9 @@ function fieldsFromProfile(
   };
 }
 
-function parseOptionalRegistrationBody(body: unknown): OptionalRegistrationFields {
+function parseOptionalRegistrationBody(
+  body: unknown,
+): OptionalRegistrationFields {
   if (body === undefined || body === null) {
     return {
       firstName: null,
@@ -185,24 +233,31 @@ export function registrationFieldsFromProfile(
 export function mergeRegistrationFields(
   profile: RegistrationProfileSource,
   body: unknown,
-): ParsedCreateRegistration {
+): ParsedCreateRegistrationWithEnrollments {
   const fromProfile = fieldsFromProfile(profile);
   const fromBody = parseOptionalRegistrationBody(body);
-  return requireCompleteRegistration({
-    firstName: fromProfile.firstName ?? fromBody.firstName,
-    lastName: fromProfile.lastName ?? fromBody.lastName,
-    gender: fromProfile.gender ?? fromBody.gender,
-    birthYear: fromProfile.birthYear ?? fromBody.birthYear,
-    city: fromProfile.city ?? fromBody.city,
-    district: fromProfile.district ?? fromBody.district,
-    team: fromProfile.team ?? fromBody.team,
-    formatId: fromBody.formatId,
-  });
+  const raw =
+    body && typeof body === 'object' && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : {};
+  return {
+    ...requireCompleteRegistration({
+      firstName: fromProfile.firstName ?? fromBody.firstName,
+      lastName: fromProfile.lastName ?? fromBody.lastName,
+      gender: fromProfile.gender ?? fromBody.gender,
+      birthYear: fromProfile.birthYear ?? fromBody.birthYear,
+      city: fromProfile.city ?? fromBody.city,
+      district: fromProfile.district ?? fromBody.district,
+      team: fromProfile.team ?? fromBody.team,
+      formatId: fromBody.formatId,
+    }),
+    enrollments: parseEnrollments(raw.enrollments),
+  };
 }
 
 export function parseCreateRegistrationBody(
   body: unknown,
-): ParsedCreateRegistration {
+): ParsedCreateRegistrationWithEnrollments {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new BadRequestException('Request body must be a JSON object.');
   }
@@ -228,5 +283,6 @@ export function parseCreateRegistrationBody(
     district: readString(raw.district, 'district', false),
     team: readString(raw.team, 'team', false),
     formatId: readOptionalFormatId(raw.formatId),
+    enrollments: parseEnrollments(raw.enrollments),
   };
 }

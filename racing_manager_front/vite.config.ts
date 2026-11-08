@@ -1,5 +1,5 @@
 import type { Connect, Plugin } from 'vite';
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 const HEALTH_BODY = JSON.stringify({ status: 'ok' });
@@ -28,6 +28,11 @@ function healthEndpoint(): Plugin {
 
 export default defineConfig({
   plugins: [react(), healthEndpoint()],
+
+  test: {
+    environment: 'jsdom',
+    restoreMocks: true,
+  },
 
   server: {
     host: '0.0.0.0',

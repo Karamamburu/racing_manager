@@ -457,7 +457,7 @@ function StageBoard({
     editable &&
     stage.status === 'PENDING' &&
     stage.heats.length === 0 &&
-    (stage.entries.length > 0 || previousCompleted);
+    (stage.entries.length > 0 || previousCompleted || stage.sourceStageId == null);
   const stageActions = (
     <Space wrap onClick={(event) => event.stopPropagation()}>
       {onRemove ? (

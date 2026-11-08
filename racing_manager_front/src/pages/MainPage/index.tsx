@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { canCreateEvents } from '../../features/auth/canCreateEvents';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { visibleCatalogEvents } from '../../features/events/catalogEvents';
+import { buildUpcomingRows } from '../../features/events/upcomingRows';
 import {
   recentEventsQueryKey,
   useRecentEventsQuery,
@@ -15,26 +16,9 @@ import { mainSlides } from '../../features/main/mainSlides';
 import { usePlatformStatsQuery } from '../../features/main/usePlatformStatsQuery';
 import { PromoSlider } from '../../shared/components';
 import { eventStatusMeta } from '../../shared/eventStatus';
-import { formatDateTime } from '../../shared/formatDateTime';
 import { AppShell } from '../../shared/layout';
-import type { RecentEventRow } from '../../shared/types/event';
 import type { MainEventRow } from '../../shared/types/main';
 import { CreateEventModal } from './components';
-
-function toMainEventRow(event: RecentEventRow): MainEventRow {
-  return {
-    key: event.id,
-    event: event.name,
-    date: formatDateTime(event.eventDate),
-    distanceKm: event.distanceKm,
-    status:
-      event.status === 'IN_PROGRESS' || event.status === 'DONE'
-        ? event.status
-        : 'PLANNED',
-    track: event.trackName,
-    registeredCount: event.registeredCount,
-  };
-}
 
 function getEventColumns(onEventOpen: (eventId: string) => void): ColumnsType<MainEventRow> {
   return [
@@ -42,30 +26,45 @@ function getEventColumns(onEventOpen: (eventId: string) => void): ColumnsType<Ma
       title: 'Событие',
       dataIndex: 'event',
       key: 'event',
-      render: (event: string, record) => (
-        <Button type="link" onClick={() => onEventOpen(record.key)} style={{ paddingInline: 0 }}>
-          {event}
-        </Button>
-      ),
+      render: (event: string, record) =>
+        record.isStart ? (
+          <span style={{ paddingLeft: 16 }}>{event}</span>
+        ) : (
+          <Button type="link" onClick={() => onEventOpen(record.key)} style={{ paddingInline: 0 }}>
+            {event}
+          </Button>
+        ),
     },
-    { title: 'Дата', dataIndex: 'date', key: 'date' },
+    {
+      title: 'Дата',
+      dataIndex: 'date',
+      key: 'date',
+      render: (date: string, record) => (record.isStart ? '' : date),
+    },
     {
       title: 'Дистанция',
       dataIndex: 'distanceKm',
       key: 'distanceKm',
-      render: (distanceKm: number | null) => (distanceKm ? `${distanceKm} км` : '-'),
+      render: (distanceKm: number | null) =>
+        distanceKm == null ? '' : `${distanceKm} км`,
     },
     { title: 'Зарегистрировано', dataIndex: 'registeredCount', key: 'registeredCount' },
     {
       title: 'Статус',
       dataIndex: 'status',
       key: 'status',
-      render: (status: MainEventRow['status']) => {
+      render: (status: MainEventRow['status'], record) => {
+        if (record.isStart) return '';
         const meta = eventStatusMeta(status);
         return <Tag color={meta.color}>{meta.text}</Tag>;
       },
     },
-    { title: 'Трасса', dataIndex: 'track', key: 'track' },
+    {
+      title: 'Трасса',
+      dataIndex: 'track',
+      key: 'track',
+      render: (track: string, record) => (record.isStart ? '' : track),
+    },
   ];
 }
 
@@ -174,10 +173,12 @@ export function MainPage() {
               />
             ) : (
               <Table
+                rowKey="key"
                 columns={getEventColumns((eventId) => navigate(`/events/${eventId}`))}
-                dataSource={visibleEvents.map(toMainEventRow)}
+                dataSource={buildUpcomingRows(visibleEvents)}
                 pagination={false}
                 scroll={{ x: 'max-content' }}
+                defaultExpandAllRows
                 locale={{
                   emptyText: showPastEvents ? 'Пока нет мероприятий' : 'Нет ближайших мероприятий',
                 }}
