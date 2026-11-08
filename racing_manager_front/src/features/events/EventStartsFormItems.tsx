@@ -109,10 +109,14 @@ export function EventStartsFormItems({
                 label="Название"
                 extra="Если не заполнить, название построится автоматически по назначению и дистанции."
               >
-                <Input placeholder="Например, Элита" />
+                <Input placeholder="Например, Тушино" />
               </Form.Item>
 
-              <Form.Item name={[field.name, 'routeColor']} label="Цвет маршрута">
+              <Form.Item
+                name={[field.name, 'routeColor']}
+                label="Цвет маршрута"
+                extra="Должен совпадать с цветом маршрута на nakarte.me"
+              >
                 <Select
                   allowClear
                   placeholder="Без цвета"

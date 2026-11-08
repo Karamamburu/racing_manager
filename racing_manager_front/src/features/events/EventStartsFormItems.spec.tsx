@@ -132,8 +132,8 @@ describe('EventStartsFormItems', () => {
       </Form>,
     );
 
-    const [nameInput] = screen.getAllByPlaceholderText('Например, Элита');
-    fireEvent.change(nameInput, { target: { value: 'Элита' } });
+    const [nameInput] = screen.getAllByPlaceholderText('Например, Тушино');
+    fireEvent.change(nameInput, { target: { value: 'Тушино' } });
 
     fireEvent.click(screen.getByText('+ Добавить старт'));
     await waitFor(() => {
@@ -142,9 +142,9 @@ describe('EventStartsFormItems', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Старт 1' }));
     expect(
-      (screen.getAllByPlaceholderText('Например, Элита')[0] as HTMLInputElement)
+      (screen.getAllByPlaceholderText('Например, Тушино')[0] as HTMLInputElement)
         .value,
-    ).toBe('Элита');
+    ).toBe('Тушино');
 
     fireEvent.click(screen.getByRole('tab', { name: 'Старт 2' }));
     fireEvent.click(screen.getAllByText('Удалить старт')[1]);
@@ -176,6 +176,9 @@ describe('EventStartsFormItems', () => {
     expect(screen.queryByText('Дистанция: 10 км')).not.toBeNull();
     expect(screen.queryByLabelText('Дистанция')).toBeNull();
     expect(screen.queryByText('Цвет маршрута')).not.toBeNull();
+    expect(
+      screen.queryByText('Должен совпадать с цветом маршрута на nakarte.me'),
+    ).not.toBeNull();
   });
 
   it('renders one default start and adds a second', async () => {
