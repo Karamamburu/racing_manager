@@ -24,6 +24,7 @@ Create/update/cancel registrations (self, guest, for-user); enrollment selection
 
 - `EnrollmentResponseDto`: `id`, `registrationId`, `startId`, `formatId`, `status` (`REGISTERED` | `WITHDRAWN`), computed `isCupEligible` (from start `purposeType === CUP_RACE`).
 - Uniqueness: `(registrationId, startId)`; rows are never physically deleted.
+- The event catalog exposes a per-start `registeredCount` equal to the number of `REGISTERED` enrollments in that start (withdrawn rows excluded).
 - Desired-set rules: listed start with no row → create; `WITHDRAWN` without Result → reactivate same row; `REGISTERED` without Result → update format; Result-bearing enrollment listed unchanged → no-op; Result-bearing enrollment withdrawn/reactivated/format-changed → reject entire PATCH; omitted Result-bearing enrollment → reject; omitted Result-free enrollment → `WITHDRAWN`; at least one `REGISTERED` must remain.
 - One active registration per person key per event: user `(eventId, userId)`, guest `(eventId, trimmed case-insensitive name + birthYear)`; guest and user paths share the same enrollment rules; duplicates → 409/400 with no partials.
 - Concurrency: partial unique indexes on active person keys; concurrent duplicate creates cannot yield two active registrations.

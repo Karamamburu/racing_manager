@@ -2,6 +2,10 @@
 
 Append-only. Prefix every entry with `## [YYYY-MM-DD] ingest|query|lint | Title`.
 
+## [2026-11-08] ingest | UI-POLISH-3 starts card, route colours and nested rows
+
+Third UI iteration: the event page card is now “Старты”, with the map beside it and the description in a separate full-width auto-height card below; the admin description textarea auto-sizes. Starts accept an optional route colour from a fixed six-colour palette persisted with the start and exposed as `routeColor`; start card headers are tinted at 50% opacity and colour stays editable with enrollments. The main-page “Ближайшие события” table renders one child row per start with label, distance and per-start `REGISTERED` count; the parent distance cell is empty. Updated [domains/events.md](domains/events.md), [domains/registrations.md](domains/registrations.md). Spec: `specs/ui-polish-3-ears.md`.
+
 ## [2026-11-08] ingest | UI-POLISH-2 start-first registration and tabbed starts
 
 Second UI iteration after user testing: one-click registration moved from the removed event-level “Форматы участия” row into each start block (carrying `startId` + `formatId`); pre- and post-registration confirmations name the start; the per-start “Название” became the first field of each start tab; the create-event modal is wide with one tab per start, add/remove, preserved values and invalid-tab navigation; both create and edit use the same tabbed editor. Updated [domains/events.md](domains/events.md), [domains/registrations.md](domains/registrations.md). Spec: `specs/ui-polish-2-ears.md`.
