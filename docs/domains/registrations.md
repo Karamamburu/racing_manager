@@ -13,6 +13,7 @@ Create/update/cancel registrations (self, guest, for-user); enrollment selection
 
 - `POST /events/:eventId/registrations` (self), `/guest`, `/for-user` — body always includes non-empty `enrollments[]` (`{ startId, formatId }`), even for single-start events
 - Administrator “Зарегистрировать участника” lists the event starts up front; at least one start and a format valid for each selected start are required. The same rule applies to the search-based for-user flow and the manual guest flow
+- Authenticated one-click registration starts from a format inside a start block and sends exactly one `EnrollmentInputRequest` (`startId` + `formatId`). Confirmation and success dialogs name the chosen start and format; cancellation sends nothing
 - `PATCH /events/:eventId/registrations/:registrationId` — omit `enrollments` → unchanged; `[]` → 400; present array → desired REGISTERED set, applied atomically; `startNumber` may update in the same patch
 - `POST /events/:eventId/registrations/cancel` — whole cancel; forbidden when any enrollment on the registration has a Result
 - `PATCH …/:registrationId/status` — admin registration-container status; destructive statuses refuse when Results exist

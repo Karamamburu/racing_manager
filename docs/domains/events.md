@@ -31,7 +31,9 @@ Event catalog, admin CRUD, starts configuration, status sync, category finish, c
 ## UI surfaces (UI-POLISH)
 
 - Event page “Описание” renders one block per start (label, purpose, formats, laps, total distance). With a map link the blocks stack vertically; without a map they flow horizontally and wrap. A legacy distance override is shown as the total distance with a marker.
-- The create-event form places “Название” first, before the disabled track field.
+- Formats live inside their start block; there is no event-level “Форматы участия” row. For an eligible authenticated athlete each start format is a one-click registration control carrying `startId` + `formatId`; ineligible viewers see tags.
+- The one-click pre-confirmation names the event, the start label, and the format; the success confirmation names the same start and format. The full registration dialog lists every selected start in its success confirmation.
+- The create-event form places the event “Название” after the disabled track field. The create modal is wide; starts are edited in tabs (one per start), with add/remove, preserved tab values, and invalid-tab navigation. The per-start “Название” is the first field inside each tab.
 - The map-link field shows “Скопируйте ссылку на трек с nakarte.me. Необязательно.” with `nakarte.me` opening the site in a new tab.
 - The start editor shows “Дистанция” as read-only computed text (`lapCount × lapLengthMeters`, or the legacy override). Distance is never submitted as an input; changing laps or lap length recalculates it. Starts with enrollments keep laps, purpose, and distance read-only.
 - The main-page “Ближайшие события” widget expands events with more than one start and lists every start (label, purpose, distance) in `sortOrder`; single-start events stay compact.

@@ -2,6 +2,10 @@
 
 Append-only. Prefix every entry with `## [YYYY-MM-DD] ingest|query|lint | Title`.
 
+## [2026-11-08] ingest | UI-POLISH-2 start-first registration and tabbed starts
+
+Second UI iteration after user testing: one-click registration moved from the removed event-level “Форматы участия” row into each start block (carrying `startId` + `formatId`); pre- and post-registration confirmations name the start; the per-start “Название” became the first field of each start tab; the create-event modal is wide with one tab per start, add/remove, preserved values and invalid-tab navigation; both create and edit use the same tabbed editor. Updated [domains/events.md](domains/events.md), [domains/registrations.md](domains/registrations.md). Spec: `specs/ui-polish-2-ears.md`.
+
 ## [2026-11-08] ingest | UI-POLISH after MULTI-START user testing
 
 Shipped the UI refinements from `Tasks/UI-POLISH/PRD.md`: event description shows per-start blocks (vertical with a map, horizontal without) with read-only computed distance; the create form puts the name first and links the nakarte.me hint; administrator registration exposes start selection before choosing a participant; test seeding requires a start and creates enrollments; `GET /events` now carries ordered `starts[]`, and the main-page upcoming widget expands multi-start events. Updated [domains/events.md](domains/events.md), [domains/registrations.md](domains/registrations.md). Spec: `specs/ui-polish-ears.md`.
