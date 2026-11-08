@@ -41,6 +41,7 @@ function toStartFormValues(event: EventDetails): StartFormValue[] {
       lapCount: start.lapCount,
       lapLengthKm: start.lapLengthMeters / 1000,
       displayName: start.displayName ?? null,
+      legacyEffectiveDistanceM: start.legacyEffectiveDistanceM,
     }));
   }
   const lapCount = event.laps.length || 1;

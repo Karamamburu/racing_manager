@@ -212,16 +212,16 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
           initialValues={{ eventType: 'TIME_TRIAL', sport: 'SKI' }}
           onFinish={handleFinish}
         >
-          <Form.Item label="Трасса">
-            <Input value="Алёшкино" disabled />
-          </Form.Item>
-
           <Form.Item
             name="name"
             label="Название"
             rules={[{ required: true, message: 'Укажите название' }]}
           >
             <Input placeholder="КТ Алёшкино" />
+          </Form.Item>
+
+          <Form.Item label="Трасса">
+            <Input value="Алёшкино" disabled />
           </Form.Item>
 
           <Form.Item
