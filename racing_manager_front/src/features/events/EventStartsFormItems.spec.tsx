@@ -40,6 +40,21 @@ describe('buildStartsPayload', () => {
     ]);
   });
 
+  it('passes the selected route colour into the payload', () => {
+    expect(
+      buildStartsPayload([
+        {
+          purposeType: 'CUP_RACE',
+          formatIds: [1],
+          lapCount: 1,
+          lapLengthKm: 1,
+          displayName: null,
+          routeColor: 'MAGENTA',
+        },
+      ])[0],
+    ).toMatchObject({ routeColor: 'MAGENTA' });
+  });
+
   it('keeps ids for existing starts and assigns sort order by position', () => {
     const payload = buildStartsPayload([
       {
@@ -160,6 +175,7 @@ describe('EventStartsFormItems', () => {
 
     expect(screen.queryByText('Дистанция: 10 км')).not.toBeNull();
     expect(screen.queryByLabelText('Дистанция')).toBeNull();
+    expect(screen.queryByText('Цвет маршрута')).not.toBeNull();
   });
 
   it('renders one default start and adds a second', async () => {

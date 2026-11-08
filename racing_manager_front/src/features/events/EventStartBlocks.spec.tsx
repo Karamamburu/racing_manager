@@ -126,6 +126,28 @@ describe('EventStartBlocks', () => {
     expect(screen.queryByText('5 км')).not.toBeNull();
   });
 
+  it('tints the start header with the route colour at 50% opacity', () => {
+    const { container } = render(
+      <EventStartBlocks
+        stacked
+        formats={formats}
+        starts={[start({ routeColor: 'ORANGE' })]}
+      />,
+    );
+
+    const header = container.querySelector('.ant-card-head') as HTMLElement;
+    expect(header.style.backgroundColor).toBe('rgba(255, 153, 85, 0.5)');
+  });
+
+  it('keeps the default header when no colour is set', () => {
+    const { container } = render(
+      <EventStartBlocks stacked formats={formats} starts={[start()]} />,
+    );
+
+    const header = container.querySelector('.ant-card-head') as HTMLElement;
+    expect(header.style.backgroundColor).toBe('');
+  });
+
   it('formats distances without trailing zeros', () => {
     expect(formatStartKm(10000)).toBe('10');
     expect(formatStartKm(9500)).toBe('9.5');
