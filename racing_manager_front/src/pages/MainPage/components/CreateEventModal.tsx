@@ -294,7 +294,7 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
 
             <div style={{ gridColumn: '1 / -1' }}>
               <Form.Item name="description" label="Описание">
-                <Input.TextArea rows={3} placeholder="Необязательно" />
+                <Input.TextArea autoSize={{ minRows: 3, maxRows: 12 }} placeholder="Необязательно" />
               </Form.Item>
             </div>
 

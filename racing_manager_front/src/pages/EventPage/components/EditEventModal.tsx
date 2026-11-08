@@ -41,6 +41,7 @@ function toStartFormValues(event: EventDetails): StartFormValue[] {
       lapCount: start.lapCount,
       lapLengthKm: start.lapLengthMeters / 1000,
       displayName: start.displayName ?? null,
+      routeColor: start.routeColor ?? null,
       legacyEffectiveDistanceM: start.legacyEffectiveDistanceM,
     }));
   }
@@ -314,7 +315,7 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
           />
 
           <Form.Item name="description" label="Описание">
-            <Input.TextArea rows={3} />
+            <Input.TextArea autoSize={{ minRows: 3, maxRows: 12 }} />
           </Form.Item>
 
           <EventMapLinkFormItem />

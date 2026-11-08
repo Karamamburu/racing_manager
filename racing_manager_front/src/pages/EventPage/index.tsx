@@ -1,4 +1,4 @@
-import { Button, Card, Col, Collapse, Divider, Grid, Modal, Result, Row, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Col, Collapse, Grid, Modal, Result, Row, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -857,7 +857,7 @@ export function EventPage() {
 
         <Row gutter={[24, 24]}>
           <Col xs={24} xl={event.mapLink ? 12 : 24}>
-            <Card title="Описание" style={{ height: '100%' }}>
+            <Card title="Старты" style={{ height: '100%' }}>
               <EventStartBlocks
                 starts={event.starts}
                 formats={event.formats}
@@ -869,14 +869,6 @@ export function EventPage() {
                   setPendingRegistration({ start, format })
                 }
               />
-              <Divider style={{ margin: '12px 0 16px' }} />
-              {event.description ? (
-                <Typography.Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
-                  {event.description}
-                </Typography.Paragraph>
-              ) : (
-                <Typography.Text type="secondary">Описание не указано</Typography.Text>
-              )}
             </Card>
           </Col>
           {event.mapLink ? (
@@ -885,6 +877,16 @@ export function EventPage() {
             </Col>
           ) : null}
         </Row>
+
+        <Card title="Описание">
+          {event.description ? (
+            <Typography.Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+              {event.description}
+            </Typography.Paragraph>
+          ) : (
+            <Typography.Text type="secondary">Описание не указано</Typography.Text>
+          )}
+        </Card>
 
         <Card
           title={`Зарегистрированные участники (${event.registeredCount})`}
