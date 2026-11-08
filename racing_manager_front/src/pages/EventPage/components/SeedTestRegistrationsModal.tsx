@@ -1,12 +1,17 @@
 import { Form, InputNumber, Modal, Select, Typography, message } from 'antd';
 import { useEffect, useState } from 'react';
 import { registrationsService } from '../../../features/registrations/registrationsService';
-import type { EventFormatRef, GenderCode } from '../../../shared/types/event';
+import type {
+  EventFormatRef,
+  GenderCode,
+  StartResponse,
+} from '../../../shared/types/event';
 
 type SeedTestRegistrationsModalProps = {
   open: boolean;
   eventId: string;
   formats: EventFormatRef[];
+  starts?: StartResponse[];
   onClose: () => void;
   onCreated: () => Promise<void> | void;
 };
@@ -14,6 +19,7 @@ type SeedTestRegistrationsModalProps = {
 type FormValues = {
   count: number;
   gender: GenderCode;
+  startId?: string;
   formatId?: number;
 };
 
@@ -26,29 +32,57 @@ export function SeedTestRegistrationsModal({
   open,
   eventId,
   formats,
+  starts = [],
   onClose,
   onCreated,
 }: SeedTestRegistrationsModalProps) {
   const [form] = Form.useForm<FormValues>();
   const [saving, setSaving] = useState(false);
+  const startId = Form.useWatch('startId', form);
+  const selectedStart = starts.find((start) => start.id === startId);
+  const formatOptions = formats.filter((format) =>
+    selectedStart ? selectedStart.formatIds.includes(format.id) : true,
+  );
 
   useEffect(() => {
     if (!open) return;
+    const firstStart = starts[0];
+    const firstFormatId = firstStart
+      ? formats.find((format) => firstStart.formatIds.includes(format.id))?.id
+      : formats.length === 1
+        ? formats[0].id
+        : undefined;
     form.setFieldsValue({
       count: 12,
       gender: 'M',
-      formatId: formats.length === 1 ? formats[0].id : undefined,
+      startId: firstStart?.id,
+      formatId: firstFormatId,
     });
-  }, [form, formats, open]);
+  }, [form, formats, open, starts]);
+
+  useEffect(() => {
+    if (!selectedStart) return;
+    const current = form.getFieldValue('formatId') as number | undefined;
+    if (current != null && selectedStart.formatIds.includes(current)) return;
+    const next = formats.find((format) =>
+      selectedStart.formatIds.includes(format.id),
+    );
+    form.setFieldValue('formatId', next?.id);
+  }, [form, formats, selectedStart]);
 
   const submit = async () => {
     const values = await form.validateFields();
     setSaving(true);
     try {
+      if (values.startId == null || values.formatId == null) {
+        message.error('Выберите старт и дисциплину.');
+        return;
+      }
       const result = await registrationsService.seedTestBatch(eventId, {
         count: values.count,
         gender: values.gender,
-        ...(values.formatId != null ? { formatId: values.formatId } : {}),
+        startId: values.startId,
+        formatId: values.formatId,
       });
       message.success(`Создано тестовых заявок: ${result.data.created}`);
       await onCreated();
@@ -87,14 +121,32 @@ export function SeedTestRegistrationsModal({
         >
           <InputNumber min={1} max={100} style={{ width: '100%' }} />
         </Form.Item>
-        {formats.length > 0 ? (
+        {starts.length > 0 ? (
+          <Form.Item
+            name="startId"
+            label="Старт"
+            rules={[{ required: true, message: 'Выберите старт' }]}
+          >
+            <Select
+              options={starts.map((start) => ({
+                value: start.id,
+                label: start.resolvedLabel,
+              }))}
+              placeholder="Выберите старт"
+            />
+          </Form.Item>
+        ) : null}
+        {formatOptions.length > 0 ? (
           <Form.Item
             name="formatId"
             label="Дисциплина"
             rules={[{ required: true, message: 'Выберите дисциплину' }]}
           >
             <Select
-              options={formats.map((format) => ({ value: format.id, label: format.name }))}
+              options={formatOptions.map((format) => ({
+                value: format.id,
+                label: format.name,
+              }))}
               placeholder="Формат участия"
             />
           </Form.Item>

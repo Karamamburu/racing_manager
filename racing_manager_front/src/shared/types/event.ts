@@ -49,6 +49,7 @@ export type StartInputRequest = {
 
 export type StartResponse = StartInputRequest & {
   id: string;
+  formats?: EventFormatRef[];
   resolvedLabel: string;
   legacyEffectiveDistanceM: number | null;
   displayedDistanceMeters: number;
@@ -99,6 +100,7 @@ export type RecentEventRow = {
   status: EventStatusCode;
   trackName: string;
   registeredCount: number;
+  starts: StartResponse[];
 };
 
 export type EventParticipant = {
