@@ -162,7 +162,8 @@ type RegistrationsStore = {
 function parseSeedTestRegistrationsBody(body: unknown): {
   count: number;
   gender: 'M' | 'F';
-  formatId: number | null;
+  startId: string;
+  formatId: number;
 } {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new BadRequestException('Request body must be a JSON object.');
@@ -179,18 +180,22 @@ function parseSeedTestRegistrationsBody(body: unknown): {
   if (raw.gender !== 'M' && raw.gender !== 'F') {
     throw new BadRequestException('Укажите пол: мужской или женский.');
   }
-  let formatId: number | null = null;
-  if (raw.formatId != null && raw.formatId !== '') {
-    if (
-      typeof raw.formatId !== 'number' ||
-      !Number.isInteger(raw.formatId) ||
-      raw.formatId < 1
-    ) {
-      throw new BadRequestException('formatId must be a positive integer.');
-    }
-    formatId = raw.formatId;
+  if (typeof raw.startId !== 'string' || !USER_ID_PATTERN.test(raw.startId)) {
+    throw new BadRequestException('startId must be a UUID.');
   }
-  return { count: raw.count, gender: raw.gender, formatId };
+  if (
+    typeof raw.formatId !== 'number' ||
+    !Number.isInteger(raw.formatId) ||
+    raw.formatId < 1
+  ) {
+    throw new BadRequestException('formatId must be a positive integer.');
+  }
+  return {
+    count: raw.count,
+    gender: raw.gender,
+    startId: raw.startId,
+    formatId: raw.formatId,
+  };
 }
 
 const USER_ID_PATTERN =
@@ -393,7 +398,18 @@ export class RegistrationsService {
     ]);
     const parsed = parseSeedTestRegistrationsBody(body);
     const event = await this.requireAssignableEvent(eventId);
-    const formatId = this.resolveFormatId(event, parsed.formatId);
+
+    const start = event.starts.find(
+      (row) => row.id.toLowerCase() === parsed.startId.toLowerCase(),
+    );
+    if (!start) {
+      throw new BadRequestException('startId does not belong to this event.');
+    }
+    if (!start.formats.some((row) => row.formatId === parsed.formatId)) {
+      throw new BadRequestException(
+        'formatId is not enabled on the selected start.',
+      );
+    }
 
     const existing = await this.prisma.registration.findMany({
       where: { eventId, userId: null },
@@ -418,27 +434,38 @@ export class RegistrationsService {
       where: { eventId, startNumber: { not: null } },
       _max: { startNumber: true },
     });
-    let startNumber = (highest._max.startNumber ?? 0) + 1;
+    const firstNumber = (highest._max.startNumber ?? 0) + 1;
 
-    await this.prisma.registration.createMany({
-      data: people.map((person) => {
-        const number = startNumber;
-        startNumber += 1;
-        return {
-          eventId,
-          userId: null,
-          firstName: person.firstName,
-          lastName: person.lastName,
-          gender: parsed.gender,
-          birthYear: person.birthYear,
-          city: person.city,
-          team: 'Тест',
-          formatId,
-          startNumber: number,
-          status: RegistrationStatusCode.CONFIRMED,
-          note: 'test',
-        };
-      }),
+    await this.prisma.$transaction(async (tx) => {
+      for (let index = 0; index < people.length; index += 1) {
+        const person = people[index];
+        const registration = await tx.registration.create({
+          data: {
+            eventId,
+            userId: null,
+            firstName: person.firstName,
+            lastName: person.lastName,
+            gender: parsed.gender,
+            birthYear: person.birthYear,
+            city: person.city,
+            team: 'Тест',
+            formatId: parsed.formatId,
+            startNumber: firstNumber + index,
+            status: RegistrationStatusCode.CONFIRMED,
+            note: 'test',
+          },
+          select: { id: true },
+        });
+        await tx.enrollment.create({
+          data: {
+            eventId,
+            registrationId: registration.id,
+            startId: start.id,
+            formatId: parsed.formatId,
+            status: 'REGISTERED',
+          },
+        });
+      }
     });
 
     return { created: people.length };
@@ -1179,30 +1206,6 @@ export class RegistrationsService {
         isCupEligible: start.purposeType === 'CUP_RACE',
       };
     });
-  }
-
-  private resolveFormatId(
-    event: EventRegistrationWindow,
-    formatId: number | null,
-  ): number | null {
-    const enabled = event.eventFormats.map((row) => row.formatId);
-    if (enabled.length === 0) {
-      if (formatId != null) {
-        throw new BadRequestException(
-          'This event has no participation formats.',
-        );
-      }
-      return null;
-    }
-    const resolved =
-      formatId == null && enabled.length === 1 ? enabled[0] : formatId;
-    if (resolved == null) {
-      throw new BadRequestException('formatId is required.');
-    }
-    if (!enabled.includes(resolved)) {
-      throw new BadRequestException('formatId is not enabled for this event.');
-    }
-    return resolved;
   }
 
   private toResponse(
