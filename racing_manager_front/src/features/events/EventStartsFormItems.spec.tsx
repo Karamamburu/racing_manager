@@ -119,7 +119,7 @@ describe('EventStartsFormItems', () => {
     );
 
     const name = screen.getByText('Название');
-    const purpose = screen.getByText('Назначение');
+    const purpose = screen.getByText('Тип старта');
     expect(
       name.compareDocumentPosition(purpose) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();

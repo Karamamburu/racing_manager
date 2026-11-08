@@ -140,8 +140,8 @@ export function EventStartsFormItems({
 
               <Form.Item
                 name={[field.name, 'purposeType']}
-                label="Назначение"
-                rules={[{ required: true, message: 'Выберите назначение' }]}
+                label="Тип старта"
+                rules={[{ required: true, message: 'Выберите тип старта' }]}
               >
                 <Select options={purposeOptions} />
               </Form.Item>
