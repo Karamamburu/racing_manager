@@ -16,6 +16,7 @@ import {
 } from '../../features/class-competitions/useClassCompetitionsQuery';
 import { eventsService } from '../../features/events/eventsService';
 import { recentEventsQueryKey } from '../../features/events/useRecentEventsQuery';
+import { EventStartBlocks } from '../../features/events/EventStartBlocks';
 import {
   categoryHasResults,
   categoryIsFinished,
@@ -42,7 +43,7 @@ import {
   type RegistrationStatusCode,
 } from '../../shared/registrationStatus';
 import { AppShell } from '../../shared/layout';
-import type { EventFormatRef, EventLap, EventParticipant } from '../../shared/types/event';
+import type { EventFormatRef, EventParticipant } from '../../shared/types/event';
 import type { FeatureItem } from '../../shared/types/track';
 import { ClassCompetitionPanel } from './components/ClassCompetitionPanel';
 import { EditEventModal } from './components/EditEventModal';
@@ -71,22 +72,6 @@ const genderLabels: Record<string, string> = {
   M: 'Мужской',
   F: 'Женский',
 };
-
-function formatLapCount(count: number): string {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${count} круг`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} круга`;
-  return `${count} кругов`;
-}
-
-function formatEventLaps(laps: EventLap[]): string {
-  if (laps.length === 0) return '—';
-  const first = laps[0].distanceKm;
-  const allEqual = laps.every((lap) => lap.distanceKm === first);
-  if (allEqual) return `${formatLapCount(laps.length)} по ${first} км`;
-  return laps.map((lap) => `${lap.lapNumber}: ${lap.distanceKm} км`).join(', ');
-}
 
 const REACHED_STAGE_LABELS: Record<string, string> = {
   PROLOGUE: 'Пролог',
@@ -859,40 +844,35 @@ export function EventPage() {
         <Row gutter={[24, 24]}>
           <Col xs={24} xl={event.mapLink ? 12 : 24}>
             <Card title="Описание" style={{ height: '100%' }}>
-              <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                <Typography.Text>
-                  <Typography.Text type="secondary">Круги: </Typography.Text>
-                  {formatEventLaps(event.laps ?? [])}
-                </Typography.Text>
-                <Typography.Text>
-                  <Typography.Text type="secondary">Дистанция: </Typography.Text>
-                  {event.distanceKm === null ? '—' : `${event.distanceKm} км`}
-                </Typography.Text>
-                <Space wrap size={[4, 8]} align="center">
-                  <Typography.Text type="secondary">Форматы участия:</Typography.Text>
-                  {event.formats.length > 0
-                    ? event.formats.map((format: EventFormatRef) =>
-                        canPickFormat ? (
-                          <Tooltip
-                            key={format.id}
-                            title={registerDisabled ? registerTooltip : undefined}
-                          >
-                            <span>
-                              <Button
-                                size="small"
-                                disabled={registerDisabled}
-                                onClick={() => setFormatToRegister(format)}
-                              >
-                                {format.name}
-                              </Button>
-                            </span>
-                          </Tooltip>
-                        ) : (
-                          <Tag key={format.id}>{format.name}</Tag>
-                        ),
-                      )
-                    : '—'}
-                </Space>
+              <EventStartBlocks
+                starts={event.starts}
+                formats={event.formats}
+                stacked={Boolean(event.mapLink)}
+              />
+              <Space wrap size={[4, 8]} align="center" style={{ marginTop: 12 }}>
+                <Typography.Text type="secondary">Форматы участия:</Typography.Text>
+                {event.formats.length > 0
+                  ? event.formats.map((format: EventFormatRef) =>
+                      canPickFormat ? (
+                        <Tooltip
+                          key={format.id}
+                          title={registerDisabled ? registerTooltip : undefined}
+                        >
+                          <span>
+                            <Button
+                              size="small"
+                              disabled={registerDisabled}
+                              onClick={() => setFormatToRegister(format)}
+                            >
+                              {format.name}
+                            </Button>
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        <Tag key={format.id}>{format.name}</Tag>
+                      ),
+                    )
+                  : '—'}
               </Space>
               <Divider style={{ margin: '12px 0 16px' }} />
               {event.description ? (
@@ -1110,6 +1090,7 @@ export function EventPage() {
         open={isTestRegistrationsOpen}
         eventId={event.id}
         formats={event.formats}
+        starts={event.starts}
         onClose={() => setIsTestRegistrationsOpen(false)}
         onCreated={refreshEvent}
       />
