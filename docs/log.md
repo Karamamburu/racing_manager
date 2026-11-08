@@ -2,6 +2,10 @@
 
 Append-only. Prefix every entry with `## [YYYY-MM-DD] ingest|query|lint | Title`.
 
+## [2026-11-08] ingest | UI-POLISH after MULTI-START user testing
+
+Shipped the UI refinements from `Tasks/UI-POLISH/PRD.md`: event description shows per-start blocks (vertical with a map, horizontal without) with read-only computed distance; the create form puts the name first and links the nakarte.me hint; administrator registration exposes start selection before choosing a participant; test seeding requires a start and creates enrollments; `GET /events` now carries ordered `starts[]`, and the main-page upcoming widget expands multi-start events. Updated [domains/events.md](domains/events.md), [domains/registrations.md](domains/registrations.md). Spec: `specs/ui-polish-ears.md`.
+
 ## [2026-11-08] ingest | MULTI-START contracts shipped (T1–T12)
 
 Compiled the implemented MULTI-START surface into the wiki. Events now persist `starts[]` as SoT (create requires ≥ 1; PATCH omit/`[]`/full-set, AD-7 lock, AD-8 projection). Registrations require `enrollments[]` on create and PATCH applies the desired `REGISTERED` set with Result-freeze and result-aware whole cancel. Authoritative results move to `PUT /events/:eventId/enrollments/:enrollmentId/result`; the registration-scoped route returns **410**; place is computed on read per gender × start × format. Category finish requires `startId`. Mutating routes honour Postgres-backed `Idempotency-Key`. Updated [domains/events.md](domains/events.md), [domains/registrations.md](domains/registrations.md), [domains/results.md](domains/results.md). Spec: `specs/multi-start-ears.md`; architecture: `Tasks/MULTI-START/ARCHITECTURE.md`.

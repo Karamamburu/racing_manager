@@ -12,9 +12,11 @@ Create/update/cancel registrations (self, guest, for-user); enrollment selection
 ## Public contracts
 
 - `POST /events/:eventId/registrations` (self), `/guest`, `/for-user` — body always includes non-empty `enrollments[]` (`{ startId, formatId }`), even for single-start events
+- Administrator “Зарегистрировать участника” lists the event starts up front; at least one start and a format valid for each selected start are required. The same rule applies to the search-based for-user flow and the manual guest flow
 - `PATCH /events/:eventId/registrations/:registrationId` — omit `enrollments` → unchanged; `[]` → 400; present array → desired REGISTERED set, applied atomically; `startNumber` may update in the same patch
 - `POST /events/:eventId/registrations/cancel` — whole cancel; forbidden when any enrollment on the registration has a Result
 - `PATCH …/:registrationId/status` — admin registration-container status; destructive statuses refuse when Results exist
+- `POST /events/:eventId/registrations/test-batch` — admin test seeding; body `SeedTestRegistrationsDto` requires `count`, `gender`, `startId` and a `formatId` enabled on that start. Every generated registration gets one `REGISTERED` enrollment in that start; an invalid start/format or a partial failure creates nothing
 - Entity: [Registration](../entities/registration.md)
 
 ## Enrollments (MULTI-START)

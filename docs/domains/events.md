@@ -11,7 +11,7 @@ Event catalog, admin CRUD, starts configuration, status sync, category finish, c
 
 ## Public contracts
 
-- `GET /events`, `GET /events/:id` (catalog/details; details include `starts[]`, `registrations[]` protocol rows and `finishedCategories[]`)
+- `GET /events`, `GET /events/:id` (catalog/details; both include `starts[]` with the same `EventStartRef` shape, ordered by `sortOrder`; details also include `registrations[]` protocol rows and `finishedCategories[]`)
 - `POST /admin/events` — `CreateEventDto` with required `starts[]` (length ≥ 1); server generates each `startId`
 - `PATCH /admin/events/:id` — omit `starts` → unchanged; `starts: []` → 400; present array → full desired set, applied atomically
 - `POST /admin/events/:id/categories/finish` — body includes required `startId`; uniqueness is `(eventId, startId, formatId, gender)`
@@ -27,6 +27,14 @@ Event catalog, admin CRUD, starts configuration, status sync, category finish, c
 - `EventLap` / `EventFormat` remain for ranking/CMS during the transition and are projected from the lowest-`sortOrder` start (AD-8); they are not a second writable SoT.
 - Legacy cutover: exactly one start per legacy event, distance table + lifecycle mapping, anomaly report; re-run per `eventId` is idempotent (`npm run migrate:multi-start`).
 - Idempotency: mutating admin routes honour `Idempotency-Key` (Postgres store, ≥ 24 h; same key + same payload replays, different payload → 409).
+
+## UI surfaces (UI-POLISH)
+
+- Event page “Описание” renders one block per start (label, purpose, formats, laps, total distance). With a map link the blocks stack vertically; without a map they flow horizontally and wrap. A legacy distance override is shown as the total distance with a marker.
+- The create-event form places “Название” first, before the disabled track field.
+- The map-link field shows “Скопируйте ссылку на трек с nakarte.me. Необязательно.” with `nakarte.me` opening the site in a new tab.
+- The start editor shows “Дистанция” as read-only computed text (`lapCount × lapLengthMeters`, or the legacy override). Distance is never submitted as an input; changing laps or lap length recalculates it. Starts with enrollments keep laps, purpose, and distance read-only.
+- The main-page “Ближайшие события” widget expands events with more than one start and lists every start (label, purpose, distance) in `sortOrder`; single-start events stay compact.
 
 ## Protocol rows
 
