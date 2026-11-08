@@ -144,6 +144,7 @@ describe('parseCreateEventBody starts compatibility', () => {
         formatIds: [1, 2],
         lapCount: 5,
         lapLengthMeters: 2000,
+        routeColor: null,
         displayName: 'Элита',
         sortOrder: 0,
       },

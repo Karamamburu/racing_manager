@@ -23,6 +23,7 @@ import {
   type ParsedCreateEvent,
   type ParsedStartInput,
   type StartPurposeTypeCode,
+  type StartRouteColorCode,
 } from './parse-create-event';
 import { parseUpdateEventBody } from './parse-update-event';
 import {
@@ -74,6 +75,7 @@ export type EventStartRef = {
   lapCount: number;
   lapLengthMeters: number;
   displayName: string | null;
+  routeColor: StartRouteColorCode | null;
   resolvedLabel: string;
   sortOrder: number;
   legacyEffectiveDistanceM: number | null;
@@ -101,6 +103,10 @@ export type EventResponse = {
   starts: EventStartRef[];
 };
 
+export type CatalogStartRef = EventStartRef & {
+  registeredCount: number;
+};
+
 export type RecentEventRow = {
   id: string;
   name: string;
@@ -109,7 +115,7 @@ export type RecentEventRow = {
   status: string;
   trackName: string;
   registeredCount: number;
-  starts: EventStartRef[];
+  starts: CatalogStartRef[];
 };
 
 export type EventDetails = {
@@ -233,10 +239,12 @@ type StoredStart = {
   lapCount: number;
   lapLengthMeters: number;
   displayName: string | null;
+  routeColor: string | null;
   sortOrder: number;
   legacyEffectiveDistanceM: number | null;
   formats: { format: StoredFormat }[];
   enrollments?: { formatId: number }[];
+  _count?: { enrollments: number };
 };
 
 type StoredResultLap = {
@@ -381,6 +389,7 @@ type StartConfig = {
   lapCount: number;
   lapLengthMeters: number;
   displayName: string | null;
+  routeColor: StartRouteColorCode | null;
   sortOrder: number;
   legacyEffectiveDistanceM: number | null;
 };
@@ -448,6 +457,7 @@ function toStartRef(start: StoredStart): EventStartRef {
     lapCount: start.lapCount,
     lapLengthMeters: start.lapLengthMeters,
     displayName: start.displayName,
+    routeColor: start.routeColor as StartRouteColorCode | null,
     resolvedLabel: resolveStartLabel(naming),
     sortOrder: start.sortOrder,
     legacyEffectiveDistanceM: start.legacyEffectiveDistanceM,
@@ -458,6 +468,17 @@ function toStartRef(start: StoredStart): EventStartRef {
 function mapEventStarts(starts: StoredStart[] | undefined): EventStartRef[] {
   return [...(starts ?? [])]
     .map(toStartRef)
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id));
+}
+
+function mapCatalogStarts(
+  starts: StoredStart[] | undefined,
+): CatalogStartRef[] {
+  return [...(starts ?? [])]
+    .map((start) => ({
+      ...toStartRef(start),
+      registeredCount: start._count?.enrollments ?? 0,
+    }))
     .sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id));
 }
 
@@ -543,6 +564,7 @@ export class EventsService {
             lapCount: start.lapCount,
             lapLengthMeters: start.lapLengthMeters,
             displayName: start.displayName,
+            routeColor: start.routeColor,
             sortOrder: start.sortOrder,
             legacyEffectiveDistanceM: start.legacyEffectiveDistanceM,
             formats: {
@@ -563,6 +585,11 @@ export class EventsService {
           include: {
             formats: {
               include: { format: true },
+            },
+            _count: {
+              select: {
+                enrollments: { where: { status: 'REGISTERED' } },
+              },
             },
           },
         },
@@ -625,6 +652,11 @@ export class EventsService {
             formats: {
               include: { format: true },
             },
+            _count: {
+              select: {
+                enrollments: { where: { status: 'REGISTERED' } },
+              },
+            },
           },
         },
         _count: {
@@ -645,7 +677,7 @@ export class EventsService {
       status: row.status,
       trackName: row.track.name,
       registeredCount: row._count.registrations,
-      starts: mapEventStarts(row.starts),
+      starts: mapCatalogStarts(row.starts),
     }));
   }
 
@@ -690,6 +722,11 @@ export class EventsService {
           include: {
             formats: {
               include: { format: true },
+            },
+            _count: {
+              select: {
+                enrollments: { where: { status: 'REGISTERED' } },
+              },
             },
           },
         },
@@ -751,6 +788,7 @@ export class EventsService {
                           lapCount: true,
                           lapLengthMeters: true,
                           displayName: true,
+                          routeColor: true,
                           sortOrder: true,
                           legacyEffectiveDistanceM: true,
                           formats: {
@@ -1352,6 +1390,7 @@ export class EventsService {
               lapCount: start.lapCount,
               lapLengthMeters: start.lapLengthMeters,
               displayName: start.displayName,
+              routeColor: start.routeColor,
               sortOrder: start.sortOrder,
               legacyEffectiveDistanceM: start.legacyEffectiveDistanceM,
               formats: {
@@ -1372,6 +1411,7 @@ export class EventsService {
             lapCount: start.lapCount,
             lapLengthMeters: start.lapLengthMeters,
             displayName: start.displayName,
+            routeColor: start.routeColor,
             sortOrder: start.sortOrder,
             legacyEffectiveDistanceM: start.legacyEffectiveDistanceM,
           },

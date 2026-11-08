@@ -644,6 +644,14 @@ INSERT INTO personal_consent_documents (
 -- Keep in sync with the migration until the baseline is squashed.
 -- ========================================
 CREATE TYPE start_purpose_type AS ENUM ('CUP_RACE', 'CONTROL_TRAINING');
+CREATE TYPE start_route_color AS ENUM (
+  'BLUE',
+  'ORANGE',
+  'CYAN',
+  'RED',
+  'MAGENTA',
+  'YELLOW'
+);
 CREATE TYPE enrollment_status AS ENUM ('REGISTERED', 'WITHDRAWN');
 CREATE TYPE result_outcome AS ENUM ('FINISHED', 'DNS', 'DNF', 'DSQ');
 
@@ -654,6 +662,7 @@ CREATE TABLE starts (
   lap_count INT NOT NULL CHECK (lap_count > 0),
   lap_length_meters INT NOT NULL CHECK (lap_length_meters > 0),
   display_name TEXT,
+  route_color start_route_color,
   sort_order INT NOT NULL CHECK (sort_order >= 0),
   legacy_effective_distance_m INT
     CHECK (legacy_effective_distance_m IS NULL OR legacy_effective_distance_m > 0),

@@ -16,6 +16,17 @@ export type EventTypeCode = (typeof EVENT_TYPES)[number];
 export type SportCode = (typeof SPORTS)[number];
 export type StartPurposeTypeCode = (typeof START_PURPOSE_TYPES)[number];
 
+const START_ROUTE_COLORS = [
+  'BLUE',
+  'ORANGE',
+  'CYAN',
+  'RED',
+  'MAGENTA',
+  'YELLOW',
+] as const;
+
+export type StartRouteColorCode = (typeof START_ROUTE_COLORS)[number];
+
 export type ParsedStartInput = {
   id?: string;
   purposeType: StartPurposeTypeCode;
@@ -23,6 +34,7 @@ export type ParsedStartInput = {
   lapCount: number;
   lapLengthMeters: number;
   displayName: string | null;
+  routeColor: StartRouteColorCode | null;
   sortOrder: number;
 };
 
@@ -248,6 +260,22 @@ function parseStartLapLengthMeters(value: unknown, field: string): number {
   return numeric;
 }
 
+function parseStartRouteColor(
+  value: unknown,
+  field: string,
+): StartRouteColorCode | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (
+    typeof value !== 'string' ||
+    !(START_ROUTE_COLORS as readonly string[]).includes(value)
+  ) {
+    throw new BadRequestException(
+      `${field} must be BLUE, ORANGE, CYAN, RED, MAGENTA, YELLOW or null.`,
+    );
+  }
+  return value as StartRouteColorCode;
+}
+
 function parseStartSortOrder(value: unknown, field: string): number {
   const numeric = typeof value === 'number' ? value : Number(value);
   if (!Number.isInteger(numeric) || numeric < 0) {
@@ -313,6 +341,7 @@ export function parseStartInputs(value: unknown): ParsedStartInput[] {
         `${field}.lapLengthMeters`,
       ),
       displayName: readString(raw.displayName, `${field}.displayName`, false),
+      routeColor: parseStartRouteColor(raw.routeColor, `${field}.routeColor`),
       sortOrder,
     });
   }
