@@ -60,11 +60,13 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
   const [form] = Form.useForm<CreateEventFormValues>();
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
+  const [startTabIndex, setStartTabIndex] = useState(0);
   const [formats, setFormats] = useState<ParticipationFormat[]>([]);
   const sport = Form.useWatch('sport', form);
 
   useEffect(() => {
     if (open) {
+      setStartTabIndex(0);
       form.setFieldsValue({
         eventType: 'TIME_TRIAL',
         sport: 'SKI',
@@ -196,6 +198,8 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
         title="Создать мероприятие"
         open={open}
         onCancel={handleCancel}
+        width={1040}
+        styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}
         destroyOnClose
         footer={[
           <Button key="cancel" onClick={handleCancel} disabled={submitting}>
@@ -211,75 +215,101 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
           layout="vertical"
           initialValues={{ eventType: 'TIME_TRIAL', sport: 'SKI' }}
           onFinish={handleFinish}
+          onFinishFailed={({ errorFields }) => {
+            const firstStartError = errorFields.find(
+              (field) => field.name[0] === 'starts',
+            );
+            if (firstStartError) {
+              setStartTabIndex(Number(firstStartError.name[1]));
+            }
+          }}
         >
-          <Form.Item
-            name="name"
-            label="Название"
-            rules={[{ required: true, message: 'Укажите название' }]}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              gap: 16,
+            }}
           >
-            <Input placeholder="КТ Алёшкино" />
-          </Form.Item>
+            <Form.Item label="Трасса">
+              <Input value="Алёшкино" disabled />
+            </Form.Item>
 
-          <Form.Item label="Трасса">
-            <Input value="Алёшкино" disabled />
-          </Form.Item>
+            <Form.Item
+              name="name"
+              label="Название"
+              rules={[{ required: true, message: 'Укажите название' }]}
+            >
+              <Input placeholder="КТ Алёшкино" />
+            </Form.Item>
 
-          <Form.Item
-            name="eventType"
-            label="Тип"
-            rules={[{ required: true, message: 'Выберите тип' }]}
-          >
-            <Select options={eventTypeOptions} />
-          </Form.Item>
+            <Form.Item
+              name="eventType"
+              label="Тип"
+              rules={[{ required: true, message: 'Выберите тип' }]}
+            >
+              <Select options={eventTypeOptions} />
+            </Form.Item>
 
-          <Form.Item
-            name="sport"
-            label="Вид спорта"
-            rules={[{ required: true, message: 'Выберите вид спорта' }]}
-          >
-            <Select options={sportOptions} />
-          </Form.Item>
+            <Form.Item
+              name="sport"
+              label="Вид спорта"
+              rules={[{ required: true, message: 'Выберите вид спорта' }]}
+            >
+              <Select options={sportOptions} />
+            </Form.Item>
 
-          <Form.Item
-            name="eventDate"
-            label="Дата проведения"
-            rules={[{ required: true, message: 'Укажите дату' }]}
-          >
-            <DatePicker {...dateTimePickerProps} />
-          </Form.Item>
+            <Form.Item
+              name="eventDate"
+              label="Дата проведения"
+              rules={[{ required: true, message: 'Укажите дату' }]}
+            >
+              <DatePicker {...dateTimePickerProps} />
+            </Form.Item>
 
-          <EventStartsFormItems formats={formats} />
+            <Form.Item name="registrationOpen" label="Начало выдачи номеров">
+              <DatePicker {...dateTimePickerProps} />
+            </Form.Item>
 
-          <Form.Item name="description" label="Описание">
-            <Input.TextArea rows={3} placeholder="Необязательно" />
-          </Form.Item>
+            <Form.Item
+              name="registrationClose"
+              label="Окончание выдачи номеров"
+              dependencies={['registrationOpen']}
+              rules={[
+                ({ getFieldValue }) => ({
+                  validator(_, value: Dayjs | null) {
+                    const openAt = getFieldValue('registrationOpen') as Dayjs | null | undefined;
+                    if (openAt && value && value.isBefore(openAt)) {
+                      return Promise.reject(
+                        new Error('Окончание выдачи номеров не может быть раньше начала'),
+                      );
+                    }
+                    return Promise.resolve();
+                  },
+                }),
+              ]}
+            >
+              <DatePicker {...dateTimePickerProps} />
+            </Form.Item>
 
-          <EventMapLinkFormItem />
+            <div style={{ gridColumn: '1 / -1' }}>
+              <Form.Item name="description" label="Описание">
+                <Input.TextArea rows={3} placeholder="Необязательно" />
+              </Form.Item>
+            </div>
 
-          <Form.Item name="registrationOpen" label="Начало выдачи номеров">
-            <DatePicker {...dateTimePickerProps} />
-          </Form.Item>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <EventMapLinkFormItem />
+            </div>
 
-          <Form.Item
-            name="registrationClose"
-            label="Окончание выдачи номеров"
-            dependencies={['registrationOpen']}
-            rules={[
-              ({ getFieldValue }) => ({
-                validator(_, value: Dayjs | null) {
-                  const openAt = getFieldValue('registrationOpen') as Dayjs | null | undefined;
-                  if (openAt && value && value.isBefore(openAt)) {
-                    return Promise.reject(
-                      new Error('Окончание выдачи номеров не может быть раньше начала'),
-                    );
-                  }
-                  return Promise.resolve();
-                },
-              }),
-            ]}
-          >
-            <DatePicker {...dateTimePickerProps} />
-          </Form.Item>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <EventStartsFormItems
+                formats={formats}
+                activeIndex={startTabIndex}
+                onActiveIndexChange={setStartTabIndex}
+              />
+            </div>
+          </div>
         </Form>
       </Modal>
 

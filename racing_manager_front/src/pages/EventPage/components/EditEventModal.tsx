@@ -117,6 +117,7 @@ function toPayload(values: EditEventFormValues): CreateEventRequest {
 export function EditEventModal({ open, event, onClose, onUpdated }: EditEventModalProps) {
   const [form] = Form.useForm<EditEventFormValues>();
   const [submitting, setSubmitting] = useState(false);
+  const [startTabIndex, setStartTabIndex] = useState(0);
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [formats, setFormats] = useState<ParticipationFormat[]>([]);
   const sport = Form.useWatch('sport', form);
@@ -126,6 +127,7 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
       setFormats([]);
       return;
     }
+    setStartTabIndex(0);
     form.setFieldsValue({
       name: event.name,
       eventType: event.eventType as EventTypeCode,
@@ -256,7 +258,19 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
           </Button>,
         ]}
       >
-        <Form form={form} layout="vertical" onFinish={handleFinish}>
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleFinish}
+          onFinishFailed={({ errorFields }) => {
+            const firstStartError = errorFields.find(
+              (field) => field.name[0] === 'starts',
+            );
+            if (firstStartError) {
+              setStartTabIndex(Number(firstStartError.name[1]));
+            }
+          }}
+        >
           <Form.Item label="Трасса">
             <Input value={event.track.name} disabled />
           </Form.Item>
@@ -293,7 +307,11 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
             <DatePicker {...dateTimePickerProps} />
           </Form.Item>
 
-          <EventStartsFormItems formats={formats} />
+          <EventStartsFormItems
+            formats={formats}
+            activeIndex={startTabIndex}
+            onActiveIndexChange={setStartTabIndex}
+          />
 
           <Form.Item name="description" label="Описание">
             <Input.TextArea rows={3} />
