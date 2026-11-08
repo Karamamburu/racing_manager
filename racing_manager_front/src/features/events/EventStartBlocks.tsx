@@ -1,4 +1,4 @@
-import { Card, Space, Tag, Typography } from 'antd';
+import { Button, Card, Space, Tag, Tooltip, Typography } from 'antd';
 import type { EventFormatRef, StartResponse } from '../../shared/types/event';
 
 const PURPOSE_LABELS: Record<string, string> = {
@@ -20,10 +20,18 @@ export function EventStartBlocks({
   starts,
   formats,
   stacked,
+  canRegister = false,
+  registerDisabled = false,
+  registerTooltip,
+  onRegister,
 }: {
   starts: StartResponse[];
   formats: EventFormatRef[];
   stacked: boolean;
+  canRegister?: boolean;
+  registerDisabled?: boolean;
+  registerTooltip?: string;
+  onRegister?: (start: StartResponse, format: EventFormatRef) => void;
 }) {
   const ordered = [...starts].sort(
     (left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id),
@@ -69,9 +77,26 @@ export function EventStartBlocks({
               <Space wrap size={[4, 4]}>
                 <Typography.Text type="secondary">Форматы:</Typography.Text>
                 {startFormats.length > 0
-                  ? startFormats.map((format) => (
-                      <Tag key={format.id}>{format.name}</Tag>
-                    ))
+                  ? startFormats.map((format) =>
+                      canRegister && onRegister ? (
+                        <Tooltip
+                          key={format.id}
+                          title={registerDisabled ? registerTooltip : undefined}
+                        >
+                          <span>
+                            <Button
+                              size="small"
+                              disabled={registerDisabled}
+                              onClick={() => onRegister(start, format)}
+                            >
+                              {format.name}
+                            </Button>
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        <Tag key={format.id}>{format.name}</Tag>
+                      ),
+                    )
                   : '—'}
               </Space>
             </Space>
