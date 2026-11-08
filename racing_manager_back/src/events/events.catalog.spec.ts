@@ -30,6 +30,8 @@ function makeHarness() {
                 displayName: 'Разминка',
                 sortOrder: 1,
                 legacyEffectiveDistanceM: null,
+                routeColor: 'CYAN',
+                _count: { enrollments: 3 },
                 formats: [
                   { format: { id: 1, code: '5K', name: '5 км', sortOrder: 1 } },
                 ],
@@ -42,6 +44,8 @@ function makeHarness() {
                 displayName: null,
                 sortOrder: 0,
                 legacyEffectiveDistanceM: null,
+                routeColor: null,
+                _count: { enrollments: 5 },
                 formats: [
                   {
                     format: { id: 2, code: '10K', name: '10 км', sortOrder: 2 },
@@ -82,10 +86,14 @@ describe('EventsService.listRecent', () => {
       lapLengthMeters: 2000,
       resolvedLabel: 'Кубковая гонка — 10 км',
       displayedDistanceMeters: 10000,
+      routeColor: null,
+      registeredCount: 5,
     });
     expect(rows[0].starts[1]).toMatchObject({
       resolvedLabel: 'Разминка',
       displayedDistanceMeters: 1000,
+      routeColor: 'CYAN',
+      registeredCount: 3,
     });
   });
 });

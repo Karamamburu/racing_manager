@@ -28,6 +28,7 @@ type FakeStart = {
   lapCount: number;
   lapLengthMeters: number;
   displayName: string | null;
+  routeColor: string | null;
   sortOrder: number;
   legacyEffectiveDistanceM: number | null;
   formats: { format: FakeFormat }[];
@@ -41,6 +42,7 @@ type StartCreateData = {
   lapCount: number;
   lapLengthMeters: number;
   displayName: string | null;
+  routeColor?: string | null;
   sortOrder: number;
   legacyEffectiveDistanceM: number | null;
   formats?: { create?: { formatId: number }[] };
@@ -70,6 +72,7 @@ type StartUpdateData = Partial<
     | 'lapCount'
     | 'lapLengthMeters'
     | 'displayName'
+    | 'routeColor'
     | 'sortOrder'
     | 'legacyEffectiveDistanceM'
   >
@@ -102,6 +105,7 @@ function buildStart(
     lapCount: data.lapCount,
     lapLengthMeters: data.lapLengthMeters,
     displayName: data.displayName,
+    routeColor: data.routeColor ?? null,
     sortOrder: data.sortOrder,
     legacyEffectiveDistanceM: data.legacyEffectiveDistanceM,
     formats: (data.formats?.create ?? []).map((row) => ({
@@ -154,6 +158,7 @@ function makeStart(overrides: Partial<FakeStart> = {}): FakeStart {
     lapCount: 5,
     lapLengthMeters: 2000,
     displayName: null,
+    routeColor: null,
     sortOrder: 0,
     legacyEffectiveDistanceM: null,
     formats: [{ format: formatById(1) }, { format: formatById(2) }],
@@ -468,6 +473,29 @@ describe('EventsService starts integration', () => {
       expect(prisma.event.create).toHaveBeenCalledTimes(1);
     });
 
+    it('persists and returns the route colour', async () => {
+      const { service } = makeHarness();
+
+      const created = await service.create('sub', {
+        name: 'Кубок',
+        sport: 'RUN',
+        eventDate: '2026-11-07',
+        starts: [
+          {
+            purposeType: 'CUP_RACE',
+            formatIds: [1],
+            lapCount: 1,
+            lapLengthMeters: 1000,
+            displayName: null,
+            routeColor: 'ORANGE',
+            sortOrder: 0,
+          },
+        ],
+      });
+
+      expect(created.starts[0].routeColor).toBe('ORANGE');
+    });
+
     it('requires starts instead of synthesizing them', async () => {
       const { service } = makeHarness();
 
@@ -659,6 +687,38 @@ describe('EventsService starts integration', () => {
       ).rejects.toThrow(
         'Cannot change purpose or lap setup of a start with enrollments.',
       );
+    });
+
+    it('updates the route colour on a start with enrollments', async () => {
+      const { service, state } = makeHarness();
+      state.starts = [
+        makeStart({
+          id: START_A,
+          routeColor: 'BLUE',
+          formats: [{ format: formatById(1) }],
+          enrollments: [{ formatId: 1 }],
+        }),
+      ];
+
+      const updated = await service.update(
+        'sub',
+        EVENT_ID,
+        updateBody([
+          {
+            id: START_A,
+            purposeType: 'CUP_RACE',
+            formatIds: [1],
+            lapCount: 5,
+            lapLengthMeters: 2000,
+            displayName: null,
+            routeColor: 'YELLOW',
+            sortOrder: 0,
+          },
+        ]),
+      );
+
+      expect(updated.starts[0].routeColor).toBe('YELLOW');
+      expect(state.starts[0].routeColor).toBe('YELLOW');
     });
 
     it('rejects unknown start ids', async () => {
