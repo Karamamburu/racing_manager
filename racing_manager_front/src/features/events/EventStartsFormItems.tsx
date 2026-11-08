@@ -13,9 +13,11 @@ import {
 import { useState } from 'react';
 import type {
   ParticipationFormat,
+  RouteColorCode,
   StartInputRequest,
   StartPurposeType,
 } from '../../shared/types/event';
+import { ROUTE_COLORS } from './routeColors';
 
 export type StartFormValue = {
   id?: string;
@@ -24,6 +26,7 @@ export type StartFormValue = {
   lapCount: number;
   lapLengthKm: number;
   displayName?: string | null;
+  routeColor?: RouteColorCode | null;
   legacyEffectiveDistanceM?: number | null;
 };
 
@@ -64,6 +67,7 @@ export function buildStartsPayload(
     lapCount: Math.trunc(Number(start.lapCount)),
     lapLengthMeters: Math.round(Number(start.lapLengthKm) * 1000),
     displayName: start.displayName?.trim() ? start.displayName.trim() : null,
+    routeColor: start.routeColor ?? null,
     sortOrder: index,
   }));
 }
@@ -106,6 +110,32 @@ export function EventStartsFormItems({
                 extra="Если не заполнить, название построится автоматически по назначению и дистанции."
               >
                 <Input placeholder="Например, Элита" />
+              </Form.Item>
+
+              <Form.Item name={[field.name, 'routeColor']} label="Цвет маршрута">
+                <Select
+                  allowClear
+                  placeholder="Без цвета"
+                  options={ROUTE_COLORS.map((color) => ({
+                    value: color.code,
+                    label: (
+                      <span>
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            width: 14,
+                            height: 14,
+                            marginRight: 8,
+                            borderRadius: 3,
+                            verticalAlign: 'middle',
+                            backgroundColor: `rgb(${color.rgb.join(', ')})`,
+                          }}
+                        />
+                        {color.label}
+                      </span>
+                    ),
+                  }))}
+                />
               </Form.Item>
 
               <Form.Item

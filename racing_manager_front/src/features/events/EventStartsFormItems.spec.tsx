@@ -34,6 +34,7 @@ describe('buildStartsPayload', () => {
         lapCount: 5,
         lapLengthMeters: 2000,
         displayName: 'Элита',
+        routeColor: null,
         sortOrder: 0,
       },
     ]);

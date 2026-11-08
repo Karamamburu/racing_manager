@@ -1,5 +1,6 @@
 import { Button, Card, Space, Tag, Tooltip, Typography } from 'antd';
 import type { EventFormatRef, StartResponse } from '../../shared/types/event';
+import { routeColorHeaderStyle } from './routeColors';
 
 const PURPOSE_LABELS: Record<string, string> = {
   CUP_RACE: 'Кубковая гонка',
@@ -57,6 +58,7 @@ export function EventStartBlocks({
             size="small"
             title={start.resolvedLabel}
             style={{ flex: stacked ? undefined : '1 1 240px' }}
+            styles={{ header: routeColorHeaderStyle(start.routeColor) }}
           >
             <Space direction="vertical" size={4}>
               <Typography.Text>
