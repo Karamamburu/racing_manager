@@ -1,4 +1,16 @@
-import { Button, Card, Checkbox, Form, Input, InputNumber, Select, Space, Typography } from 'antd';
+import {
+  Button,
+  Card,
+  Checkbox,
+  Form,
+  Input,
+  InputNumber,
+  Select,
+  Space,
+  Tabs,
+  Typography,
+} from 'antd';
+import { useState } from 'react';
 import type {
   ParticipationFormat,
   StartInputRequest,
@@ -15,6 +27,11 @@ export type StartFormValue = {
   legacyEffectiveDistanceM?: number | null;
 };
 
+const purposeOptions = [
+  { value: 'CUP_RACE', label: 'Кубковая гонка' },
+  { value: 'CONTROL_TRAINING', label: 'Контрольная тренировка' },
+];
+
 function displayDistanceKm(start: StartFormValue | undefined): string {
   if (!start) return '—';
   const meters =
@@ -24,11 +41,6 @@ function displayDistanceKm(start: StartFormValue | undefined): string {
   const km = meters / 1000;
   return `${Number.isInteger(km) ? km : km.toFixed(2).replace(/\.?0+$/, '')} км`;
 }
-
-const purposeOptions = [
-  { value: 'CUP_RACE', label: 'Кубковая гонка' },
-  { value: 'CONTROL_TRAINING', label: 'Контрольная тренировка' },
-];
 
 export function defaultStartValue(
   formats: ParticipationFormat[],
@@ -58,36 +70,42 @@ export function buildStartsPayload(
 
 export function EventStartsFormItems({
   formats,
+  activeIndex,
+  onActiveIndexChange,
 }: {
   formats: ParticipationFormat[];
+  activeIndex?: number;
+  onActiveIndexChange?: (index: number) => void;
 }) {
   const form = Form.useFormInstance();
   const starts = Form.useWatch('starts', form) as StartFormValue[] | undefined;
+  const [internalActive, setInternalActive] = useState(0);
+  const active = activeIndex ?? internalActive;
+  const setActive = onActiveIndexChange ?? setInternalActive;
 
   return (
     <Form.List name="starts">
-      {(fields, { add, remove }) => (
-        <>
-          {fields.map((field, index) => (
-            <Card
-              key={field.key}
-              size="small"
-              style={{ marginBottom: 12 }}
-              title={`Старт ${index + 1}`}
-              extra={
-                fields.length > 1 ? (
-                  <Button
-                    type="link"
-                    danger
-                    onClick={() => remove(field.name)}
-                  >
-                    Удалить
-                  </Button>
-                ) : null
-              }
-            >
+      {(fields, { add, remove }) => {
+        const current = Math.min(
+          Math.max(active, 0),
+          Math.max(fields.length - 1, 0),
+        );
+        const items = fields.map((field, index) => ({
+          key: String(field.key),
+          label: `Старт ${index + 1}`,
+          forceRender: true,
+          children: (
+            <Card size="small" bordered={false}>
               <Form.Item name={[field.name, 'id']} hidden>
                 <Input />
+              </Form.Item>
+
+              <Form.Item
+                name={[field.name, 'displayName']}
+                label="Название"
+                extra="Если не заполнить, название построится автоматически по назначению и дистанции."
+              >
+                <Input placeholder="Например, Элита" />
               </Form.Item>
 
               <Form.Item
@@ -138,25 +156,45 @@ export function EventStartsFormItems({
                   : ''}
               </Typography.Text>
 
-              <Form.Item
-                name={[field.name, 'displayName']}
-                label="Название (необязательно)"
-                extra="Если не заполнить, название построится автоматически по назначению и дистанции."
-              >
-                <Input placeholder="Например, Элита" />
-              </Form.Item>
+              {fields.length > 1 ? (
+                <Button
+                  danger
+                  onClick={() => {
+                    remove(field.name);
+                    setActive(Math.max(0, index - 1));
+                  }}
+                >
+                  Удалить старт
+                </Button>
+              ) : null}
             </Card>
-          ))}
+          ),
+        }));
 
-          <Button
-            type="dashed"
-            block
-            onClick={() => add(defaultStartValue(formats))}
-          >
-            + Добавить старт
-          </Button>
-        </>
-      )}
+        return (
+          <Tabs
+            activeKey={String(fields[current]?.key ?? '')}
+            onChange={(key) => {
+              const index = fields.findIndex(
+                (field) => String(field.key) === key,
+              );
+              if (index >= 0) setActive(index);
+            }}
+            items={items}
+            tabBarExtraContent={
+              <Button
+                type="dashed"
+                onClick={() => {
+                  add(defaultStartValue(formats));
+                  setActive(fields.length);
+                }}
+              >
+                + Добавить старт
+              </Button>
+            }
+          />
+        );
+      }}
     </Form.List>
   );
 }
