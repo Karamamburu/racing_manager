@@ -47,6 +47,17 @@ enum StartPurposeType {
   @@map("start_purpose_type")
 }
 
+enum StartRouteColor {
+  BLUE
+  ORANGE
+  CYAN
+  RED
+  MAGENTA
+  YELLOW
+
+  @@map("start_route_color")
+}
+
 enum EnrollmentStatus {
   REGISTERED
   WITHDRAWN
@@ -292,6 +303,7 @@ model Start {
   lapCount                 Int              @map("lap_count")
   lapLengthMeters          Int              @map("lap_length_meters")
   displayName              String?          @map("display_name")
+  routeColor               StartRouteColor? @map("route_color")
   sortOrder                Int              @map("sort_order")
   legacyEffectiveDistanceM Int?             @map("legacy_effective_distance_m")
   createdAt                DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
