@@ -366,17 +366,18 @@ export function RegisterParticipantModal({
           </div>
         )}
 
-        {selected && starts.length > 0 ? (
+        {starts.length > 0 ? (
           <div>
             <Typography.Text>Старты</Typography.Text>
-            <div style={{ marginTop: 8 }}>
-              <StartSelectionField
-                starts={starts}
-                formats={formats}
-                value={enrollments}
-                onChange={setEnrollments}
-              />
-            </div>
+            <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+              Выберите один или несколько стартов и формат для каждого.
+            </Typography.Paragraph>
+            <StartSelectionField
+              starts={starts}
+              formats={formats}
+              value={enrollments}
+              onChange={setEnrollments}
+            />
           </div>
         ) : selected && formats.length > 0 ? (
           <div>
