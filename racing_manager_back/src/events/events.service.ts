@@ -109,6 +109,7 @@ export type RecentEventRow = {
   status: string;
   trackName: string;
   registeredCount: number;
+  starts: EventStartRef[];
 };
 
 export type EventDetails = {
@@ -202,6 +203,7 @@ type CatalogEvent = {
   distanceKm: DecimalValue;
   status: string;
   track: { name: string };
+  starts?: StoredStart[];
   _count: { registrations: number };
 };
 
@@ -617,6 +619,14 @@ export class EventsService {
       orderBy: [{ eventDate: 'asc' }, { createdAt: 'asc' }],
       include: {
         track: { select: { name: true } },
+        starts: {
+          orderBy: { sortOrder: 'asc' },
+          include: {
+            formats: {
+              include: { format: true },
+            },
+          },
+        },
         _count: {
           select: {
             registrations: {
@@ -635,6 +645,7 @@ export class EventsService {
       status: row.status,
       trackName: row.track.name,
       registeredCount: row._count.registrations,
+      starts: mapEventStarts(row.starts),
     }));
   }
 
