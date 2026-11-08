@@ -95,7 +95,7 @@ export function EventStartsFormItems({
           label: `Старт ${index + 1}`,
           forceRender: true,
           children: (
-            <Card size="small" bordered={false}>
+            <Card size="small" variant="borderless">
               <Form.Item name={[field.name, 'id']} hidden>
                 <Input />
               </Form.Item>

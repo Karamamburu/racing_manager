@@ -95,6 +95,49 @@ describe('EventStartsFormItems', () => {
     });
   });
 
+  it('keeps the per-start name before purpose and other fields', () => {
+    render(
+      <Form initialValues={{ starts: [defaultStartValue(formats)] }}>
+        <EventStartsFormItems formats={formats} />
+      </Form>,
+    );
+
+    const name = screen.getByText('Название');
+    const purpose = screen.getByText('Назначение');
+    expect(
+      name.compareDocumentPosition(purpose) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('adds and removes start tabs while preserving values', async () => {
+    render(
+      <Form initialValues={{ starts: [defaultStartValue(formats)] }}>
+        <EventStartsFormItems formats={formats} />
+      </Form>,
+    );
+
+    const [nameInput] = screen.getAllByPlaceholderText('Например, Элита');
+    fireEvent.change(nameInput, { target: { value: 'Элита' } });
+
+    fireEvent.click(screen.getByText('+ Добавить старт'));
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Старт 2' })).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Старт 1' }));
+    expect(
+      (screen.getAllByPlaceholderText('Например, Элита')[0] as HTMLInputElement)
+        .value,
+    ).toBe('Элита');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Старт 2' }));
+    fireEvent.click(screen.getAllByText('Удалить старт')[1]);
+    await waitFor(() => {
+      expect(screen.queryByRole('tab', { name: 'Старт 2' })).toBeNull();
+    });
+    expect(screen.getByRole('tab', { name: 'Старт 1' })).not.toBeNull();
+  });
+
   it('shows the computed distance as read-only text', () => {
     render(
       <Form

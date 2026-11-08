@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { EventFormatRef, StartResponse } from '../../shared/types/event';
 import { EventStartBlocks, formatStartKm, startTotalMeters } from './EventStartBlocks';
 
@@ -84,6 +84,46 @@ describe('EventStartBlocks', () => {
     expect(screen.queryByText('9.5 км')).not.toBeNull();
     expect(screen.queryByText('из протокола')).not.toBeNull();
     expect(screen.getAllByText(/5 × 2 км/).length).toBeGreaterThan(0);
+  });
+
+  it('turns each start format into a one-click registration control', () => {
+    const onRegister = vi.fn();
+    render(
+      <EventStartBlocks
+        stacked
+        formats={formats}
+        canRegister
+        onRegister={onRegister}
+        starts={[start({ formats: [formats[0], formats[1]], formatIds: [1, 2] })]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '5 км' }));
+    fireEvent.click(screen.getByRole('button', { name: '10 км' }));
+
+    expect(onRegister).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ id: 'start-a' }),
+      expect.objectContaining({ id: 1 }),
+    );
+    expect(onRegister).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ id: 'start-a' }),
+      expect.objectContaining({ id: 2 }),
+    );
+  });
+
+  it('keeps formats as tags when registration is unavailable', () => {
+    render(
+      <EventStartBlocks
+        stacked
+        formats={formats}
+        starts={[start({ formats: [formats[0]], formatIds: [1] })]}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: '5 км' })).toBeNull();
+    expect(screen.queryByText('5 км')).not.toBeNull();
   });
 
   it('formats distances without trailing zeros', () => {

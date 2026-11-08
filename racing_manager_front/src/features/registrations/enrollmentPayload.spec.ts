@@ -50,6 +50,12 @@ describe('initialEnrollments', () => {
     ]);
   });
 
+  it('prefers an explicitly clicked start over the first matching format', () => {
+    expect(initialEnrollments(starts, 1, 'start-b')).toEqual([
+      { startId: 'start-b', formatId: 1 },
+    ]);
+  });
+
   it('returns an empty selection when the event has no starts', () => {
     expect(initialEnrollments([])).toEqual([]);
   });
