@@ -429,7 +429,7 @@ model Result {
   enrollmentId     String?        @unique @map("enrollment_id") @db.Uuid
   enrollment       Enrollment?    @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
   outcome          ResultOutcome?
-  timeMilliseconds Int            @map("time_milliseconds")
+  timeMilliseconds Int?           @map("time_milliseconds")
   place            Int?
   recordedAt       DateTime       @default(now()) @map("recorded_at") @db.Timestamptz(6)
   updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)

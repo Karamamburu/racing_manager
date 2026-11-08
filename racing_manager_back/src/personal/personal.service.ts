@@ -1,7 +1,4 @@
-import {
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import type { SessionUser } from '../auth/session';
 import { RolesService } from '../auth/roles.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -190,7 +187,7 @@ function toStatsRegistration(row: {
   status: string;
   event: { status: string; eventDate: Date; _count: { laps: number } };
   result: {
-    timeMilliseconds: number;
+    timeMilliseconds: number | null;
     place: number | null;
     _count: { laps: number };
   } | null;

@@ -284,7 +284,7 @@ type StoredRegistration = {
   note: string | null;
   registeredAt: Date;
   result: {
-    timeMilliseconds: number;
+    timeMilliseconds: number | null;
     place: number | null;
     laps: StoredResultLap[];
   } | null;

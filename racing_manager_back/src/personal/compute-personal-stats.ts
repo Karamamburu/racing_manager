@@ -28,7 +28,7 @@ export type StatsRegistration = {
     lapCount: number;
   };
   result: {
-    timeMilliseconds: number;
+    timeMilliseconds: number | null;
     lapCount: number;
     place: number | null;
   } | null;
@@ -37,6 +37,7 @@ export type StatsRegistration = {
 export function isCompleteStatsResult(row: StatsRegistration): boolean {
   if (!isRankedRegistrationStatus(row.status)) return false;
   if (!row.result) return false;
+  if (row.result.timeMilliseconds == null) return false;
   if (row.event.lapCount === 0) return true;
   return row.result.lapCount === row.event.lapCount;
 }
@@ -48,8 +49,12 @@ export function computePersonalStats(
 ): PersonalStats {
   const today = toLocalIsoDate(now);
   const activeOwn = own.filter((row) => row.event.status !== 'CANCELLED');
-  const starts = activeOwn.filter((row) => isPastEvent(row.event, today)).length;
-  const upcomingStarts = activeOwn.filter((row) => !isPastEvent(row.event, today)).length;
+  const starts = activeOwn.filter((row) =>
+    isPastEvent(row.event, today),
+  ).length;
+  const upcomingStarts = activeOwn.filter(
+    (row) => !isPastEvent(row.event, today),
+  ).length;
 
   const completeOwn = activeOwn.filter(isCompleteStatsResult);
   const byClass = new Map<string, StatsRegistration[]>();
@@ -87,11 +92,16 @@ function isPastEvent(
   return event.status === 'DONE' || toLocalIsoDate(event.eventDate) < today;
 }
 
-function classKey(row: Pick<StatsRegistration, 'eventId' | 'formatId' | 'gender'>): string {
+function classKey(
+  row: Pick<StatsRegistration, 'eventId' | 'formatId' | 'gender'>,
+): string {
   return `${row.eventId}:${row.formatId ?? 'none'}:${row.gender}`;
 }
 
-function compareCompleteResults(left: StatsRegistration, right: StatsRegistration): number {
+function compareCompleteResults(
+  left: StatsRegistration,
+  right: StatsRegistration,
+): number {
   const leftTime = left.result?.timeMilliseconds ?? 0;
   const rightTime = right.result?.timeMilliseconds ?? 0;
   if (leftTime !== rightTime) return leftTime - rightTime;
