@@ -2,6 +2,10 @@
 
 Append-only. Prefix every entry with `## [YYYY-MM-DD] ingest|query|lint | Title`.
 
+## [2026-11-08] fix | UI-POLISH-4 edit parity, stretching map, hidden event type
+
+Edit-event modal now matches the create modal width/scroll bounds; the map card keeps its minimum height and stretches with the starts card; the event-type control is hidden in both forms while `eventType` stays in the payload; the start purpose label is now “Тип старта”. Also fixed the Postgres UUID row-lock 500 on event save in the same release (`::uuid` casts). Updated [domains/events.md](domains/events.md). Spec: `specs/ui-polish-4-ears.md`.
+
 ## [2026-11-08] ingest | UI-POLISH-3 starts card, route colours and nested rows
 
 Third UI iteration: the event page card is now “Старты”, with the map beside it and the description in a separate full-width auto-height card below; the admin description textarea auto-sizes. Starts accept an optional route colour from a fixed six-colour palette persisted with the start and exposed as `routeColor`; start card headers are tinted at 50% opacity and colour stays editable with enrollments. The main-page “Ближайшие события” table renders one child row per start with label, distance and per-start `REGISTERED` count; the parent distance cell is empty. Updated [domains/events.md](domains/events.md), [domains/registrations.md](domains/registrations.md). Spec: `specs/ui-polish-3-ears.md`.
