@@ -878,13 +878,13 @@ export function EventPage() {
           ) : null}
         </Row>
 
-        <Card title="Описание">
+        <Card title="Положение о мероприятии">
           {event.description ? (
             <Typography.Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
               {event.description}
             </Typography.Paragraph>
           ) : (
-            <Typography.Text type="secondary">Описание не указано</Typography.Text>
+            <Typography.Text type="secondary">Положение не указано</Typography.Text>
           )}
         </Card>
 
