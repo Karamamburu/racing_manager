@@ -319,14 +319,19 @@ export class ClassCompetitionsService {
     if (target && target.status === 'PENDING' && target.entries.length === 0) {
       const source = sourceOfStage(cms.format.stages, stageId);
       const qualified = this.qualifiedFromPreviousStage(frozen, cms, stageId);
-      if (qualified.length === 0) {
+      const field = fieldForSeeding(
+        source,
+        qualified,
+        cms.participants.map((participant) => participant.id),
+      );
+      if (field.length === 0) {
         throw new BadRequestException(
           source?.qualifierStatus === 'NQ'
             ? 'Нет участников со статусом NQ. Финал B разыгрывают проигравшие полуфинал.'
-            : 'Нет участников со статусом QQ. Сначала отметьте, кто проходит в следующий этап.',
+            : 'Нет участников для формирования заезда.',
         );
       }
-      await this.cms.setStageField(row.cmsCompetitionId, stageId, qualified);
+      await this.cms.setStageField(row.cmsCompetitionId, stageId, field);
     }
     const next = await this.cms.seedStage(row.cmsCompetitionId, stageId);
     await this.persistOutcome(row.id, next);
@@ -385,8 +390,33 @@ export class ClassCompetitionsService {
     const parsed = parseHeatTimesBody(body);
     const row = await this.requireOwned(eventId, classCompetitionId);
     this.assertMutableEvent(row.event);
-    const current = await this.cms.getCompetition(row.cmsCompetitionId);
-    const stage = current.stages.find((item) => item.stageId === stageId);
+    let current = await this.cms.getCompetition(row.cmsCompetitionId);
+    let stage = current.stages.find((item) => item.stageId === stageId);
+    if (!stage) {
+      throw new BadRequestException('Этап не найден.');
+    }
+    if (stage.status === 'PENDING' && stage.heats.length === 0) {
+      // A standalone final (for example, a judge removed every earlier stage)
+      // is run as a mass start: seed the stage with every participant on the
+      // first time entry instead of demanding a manual heat draw.
+      const source = sourceOfStage(current.format.stages, stageId);
+      const qualified = this.qualifiedFromPreviousStage(row, current, stageId);
+      const field = fieldForSeeding(
+        source,
+        qualified,
+        current.participants.map((participant) => participant.id),
+      );
+      if (field.length === 0) {
+        throw new BadRequestException(
+          source?.qualifierStatus === 'NQ'
+            ? 'Нет участников со статусом NQ. Финал B разыгрывают проигравшие полуфинал.'
+            : 'Нет участников для формирования заезда.',
+        );
+      }
+      await this.cms.setStageField(row.cmsCompetitionId, stageId, field);
+      current = await this.cms.seedStage(row.cmsCompetitionId, stageId);
+      stage = current.stages.find((item) => item.stageId === stageId);
+    }
     if (!stage || stage.status !== 'SEEDED') {
       throw new BadRequestException('Время можно записать только после формирования заездов.');
     }
@@ -1117,6 +1147,14 @@ function appearedOnLaterStage(
     const inField = stage.entries.some((entry) => entry.participantId === registrationId);
     return inHeat || inField;
   });
+}
+
+export function fieldForSeeding(
+  source: { sourceStageId: string; qualifierStatus: 'QQ' | 'NQ' } | null,
+  qualified: string[],
+  participants: string[],
+): string[] {
+  return source ? qualified : [...new Set(participants)];
 }
 
 function sourceOfStage(
