@@ -44,11 +44,6 @@ type CreateEventModalProps = {
   onCreated?: () => void;
 };
 
-const eventTypeOptions = [
-  { value: 'RACE', label: 'Гонка' },
-  { value: 'TIME_TRIAL', label: 'Контрольная тренировка' },
-];
-
 const sportOptions = [
   { value: 'SKI', label: 'Лыжи' },
   { value: 'RUN', label: 'Бег' },
@@ -224,6 +219,10 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
             }
           }}
         >
+          <Form.Item name="eventType" hidden>
+            <Input />
+          </Form.Item>
+
           <div
             style={{
               display: 'grid',
@@ -241,14 +240,6 @@ export function CreateEventModal({ open, onClose, onCreated }: CreateEventModalP
               rules={[{ required: true, message: 'Укажите название' }]}
             >
               <Input placeholder="КТ Алёшкино" />
-            </Form.Item>
-
-            <Form.Item
-              name="eventType"
-              label="Тип"
-              rules={[{ required: true, message: 'Выберите тип' }]}
-            >
-              <Select options={eventTypeOptions} />
             </Form.Item>
 
             <Form.Item

@@ -75,11 +75,6 @@ type EditEventModalProps = {
   onUpdated?: () => void;
 };
 
-const eventTypeOptions = [
-  { value: 'RACE', label: 'Гонка' },
-  { value: 'TIME_TRIAL', label: 'Контрольная тренировка' },
-];
-
 const sportOptions = [
   { value: 'SKI', label: 'Лыжи' },
   { value: 'RUN', label: 'Бег' },
@@ -249,6 +244,8 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
         title="Редактировать мероприятие"
         open={open}
         onCancel={handleCancel}
+        width={1040}
+        styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}
         destroyOnClose
         footer={[
           <Button key="cancel" onClick={handleCancel} disabled={submitting}>
@@ -272,6 +269,10 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
             }
           }}
         >
+          <Form.Item name="eventType" hidden>
+            <Input />
+          </Form.Item>
+
           <Form.Item label="Трасса">
             <Input value={event.track.name} disabled />
           </Form.Item>
@@ -282,14 +283,6 @@ export function EditEventModal({ open, event, onClose, onUpdated }: EditEventMod
             rules={[{ required: true, message: 'Укажите название' }]}
           >
             <Input />
-          </Form.Item>
-
-          <Form.Item
-            name="eventType"
-            label="Тип"
-            rules={[{ required: true, message: 'Выберите тип' }]}
-          >
-            <Select options={eventTypeOptions} />
           </Form.Item>
 
           <Form.Item
