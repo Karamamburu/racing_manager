@@ -1,4 +1,4 @@
-import { Button, Card, Checkbox, Form, Input, InputNumber, Select, Space } from 'antd';
+import { Button, Card, Checkbox, Form, Input, InputNumber, Select, Space, Typography } from 'antd';
 import type {
   ParticipationFormat,
   StartInputRequest,
@@ -12,7 +12,18 @@ export type StartFormValue = {
   lapCount: number;
   lapLengthKm: number;
   displayName?: string | null;
+  legacyEffectiveDistanceM?: number | null;
 };
+
+function displayDistanceKm(start: StartFormValue | undefined): string {
+  if (!start) return '—';
+  const meters =
+    start.legacyEffectiveDistanceM ??
+    Math.round(Number(start.lapLengthKm ?? 0) * 1000) *
+      Math.trunc(Number(start.lapCount ?? 0));
+  const km = meters / 1000;
+  return `${Number.isInteger(km) ? km : km.toFixed(2).replace(/\.?0+$/, '')} км`;
+}
 
 const purposeOptions = [
   { value: 'CUP_RACE', label: 'Кубковая гонка' },
@@ -50,6 +61,9 @@ export function EventStartsFormItems({
 }: {
   formats: ParticipationFormat[];
 }) {
+  const form = Form.useFormInstance();
+  const starts = Form.useWatch('starts', form) as StartFormValue[] | undefined;
+
   return (
     <Form.List name="starts">
       {(fields, { add, remove }) => (
@@ -116,6 +130,13 @@ export function EventStartsFormItems({
                   <InputNumber min={0.001} step={0.1} precision={3} />
                 </Form.Item>
               </Space>
+
+              <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                Дистанция: {displayDistanceKm(starts?.[field.name])}
+                {starts?.[field.name]?.legacyEffectiveDistanceM != null
+                  ? ' (из протокола)'
+                  : ''}
+              </Typography.Text>
 
               <Form.Item
                 name={[field.name, 'displayName']}
