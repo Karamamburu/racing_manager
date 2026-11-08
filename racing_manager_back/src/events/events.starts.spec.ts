@@ -198,6 +198,7 @@ function makeHarness() {
     starts: FakeStart[];
     eventFormats: { formatId: number }[];
     laps: FakeLap[];
+    lockSql: string;
   } = {
     event: {
       id: EVENT_ID,
@@ -217,6 +218,7 @@ function makeHarness() {
     },
     starts: [],
     eventFormats: [{ formatId: 1 }],
+    lockSql: '',
     laps: Array.from({ length: 5 }, (_, index) => ({
       id: `lap-${index + 1}`,
       lapNumber: index + 1,
@@ -243,7 +245,10 @@ function makeHarness() {
   });
 
   const tx = {
-    $queryRaw: jest.fn(() => Promise.resolve([{ id: EVENT_ID }])),
+    $queryRaw: jest.fn((strings: TemplateStringsArray) => {
+      state.lockSql = strings.join('?');
+      return Promise.resolve([{ id: EVENT_ID }]);
+    }),
     start: {
       findMany: jest.fn(() =>
         Promise.resolve(
@@ -719,6 +724,29 @@ describe('EventsService starts integration', () => {
 
       expect(updated.starts[0].routeColor).toBe('YELLOW');
       expect(state.starts[0].routeColor).toBe('YELLOW');
+    });
+
+    it('casts the event row-lock parameter to uuid', async () => {
+      const { service, state } = makeHarness();
+      state.starts = [makeStart({ id: START_A, sortOrder: 0 })];
+
+      await service.update(
+        'sub',
+        EVENT_ID,
+        updateBody([
+          {
+            id: START_A,
+            purposeType: 'CUP_RACE',
+            formatIds: [1, 2],
+            lapCount: 5,
+            lapLengthMeters: 2000,
+            displayName: null,
+            sortOrder: 0,
+          },
+        ]),
+      );
+
+      expect(state.lockSql).toContain('WHERE id = ?::uuid FOR UPDATE');
     });
 
     it('rejects unknown start ids', async () => {

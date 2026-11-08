@@ -1183,7 +1183,7 @@ export class EventsService {
     await this.resolveStartFormats(parsed.sport, incomingConfigs);
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM events WHERE id = ${eventId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM events WHERE id = ${eventId}::uuid FOR UPDATE`;
 
       const existingStarts = await tx.start.findMany({
         where: { eventId },

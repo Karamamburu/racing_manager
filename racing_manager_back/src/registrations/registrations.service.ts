@@ -554,7 +554,7 @@ export class RegistrationsService {
 
     try {
       const updated = await this.prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT id FROM registrations WHERE id = ${existing.id} FOR UPDATE`;
+        await tx.$queryRaw`SELECT id FROM registrations WHERE id = ${existing.id}::uuid FOR UPDATE`;
         const current = await tx.registration.findFirst({
           where: { id: existing.id, eventId },
         });

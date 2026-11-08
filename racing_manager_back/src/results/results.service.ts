@@ -128,7 +128,7 @@ export class ResultsService {
     this.assertRecordableRegistration(enrollment.registration);
 
     const saved = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM enrollments WHERE id = ${enrollment.id} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM enrollments WHERE id = ${enrollment.id}::uuid FOR UPDATE`;
       const current = await tx.enrollment.findFirst({
         where: { id: enrollment.id },
         select: { status: true },
