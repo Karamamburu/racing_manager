@@ -39,7 +39,7 @@ Event catalog, admin CRUD, starts configuration, status sync, category finish, c
 - The “Карта трассы” card keeps at least its current height and stretches to the starts card height when more starts make the left column taller; without a map link no map card is rendered.
 - The map-link field shows “Скопируйте ссылку на трек с nakarte.me. Необязательно.” with `nakarte.me` opening the site in a new tab.
 - The start editor shows “Дистанция” as read-only computed text (`lapCount × lapLengthMeters`, or the legacy override). Distance is never submitted as an input; changing laps or lap length recalculates it. Starts with enrollments keep laps, purpose, and distance read-only.
-- The main-page “Ближайшие события” table renders every start as a child row under its event row, in `sortOrder` (including single-start events). Child rows show the start label in “Событие”, the start distance in “Дистанция”, and the `REGISTERED` enrollment count in “Зарегистрировано”; other cells are empty. The parent row leaves “Дистанция” empty and keeps the event-level registration count. Child rows are visible by default and collapse with the parent.
+- The main-page “Ближайшие события” table renders every start as a child row under its event row, in `sortOrder` (including single-start events). Child rows show the start label in “Событие”, the start distance in “Дистанция”, and the `REGISTERED` enrollment count in “Зарегистрировано”; other cells are empty. The parent row leaves “Дистанция” empty; its “Зарегистрировано” value is the sum of the per-start `REGISTERED` counts (falling back to the event-level count only when no starts exist). Child rows are visible by default and collapse with the parent.
 
 ## Protocol rows
 

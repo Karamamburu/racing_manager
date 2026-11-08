@@ -2,6 +2,10 @@
 
 Append-only. Prefix every entry with `## [YYYY-MM-DD] ingest|query|lint | Title`.
 
+## [2026-11-08] fix | Upcoming parent registrations sum start enrollments
+
+Fixed the main-page “Ближайшие события” parent “Зарегистрировано” column: it now sums `REGISTERED` enrollments across the event’s starts instead of showing the event-level registration count (which undercounted multi-start participants). Events without starts keep the event-level fallback. Updated [domains/events.md](domains/events.md).
+
 ## [2026-11-08] fix | UI-POLISH-4 edit parity, stretching map, hidden event type
 
 Edit-event modal now matches the create modal width/scroll bounds; the map card keeps its minimum height and stretches with the starts card; the event-type control is hidden in both forms while `eventType` stays in the payload; the start purpose label is now “Тип старта”. Also fixed the Postgres UUID row-lock 500 on event save in the same release (`::uuid` casts). Updated [domains/events.md](domains/events.md). Spec: `specs/ui-polish-4-ears.md`.

@@ -22,6 +22,10 @@ export function buildUpcomingRows(events: RecentEventRow[]): MainEventRow[] {
       (left, right) =>
         left.sortOrder - right.sortOrder || left.id.localeCompare(right.id),
     );
+    const registeredCount =
+      starts.length > 0
+        ? starts.reduce((sum, start) => sum + start.registeredCount, 0)
+        : event.registeredCount;
     const children: MainEventRow[] = starts.map((start) => ({
       key: `${event.id}:${start.id}`,
       event: start.resolvedLabel,
@@ -40,7 +44,7 @@ export function buildUpcomingRows(events: RecentEventRow[]): MainEventRow[] {
       distanceKm: null,
       status: eventStatus(event.status),
       track: event.trackName,
-      registeredCount: event.registeredCount,
+      registeredCount,
       starts,
       ...(children.length > 0 ? { children } : {}),
     };

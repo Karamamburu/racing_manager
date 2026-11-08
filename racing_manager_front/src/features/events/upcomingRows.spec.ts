@@ -59,7 +59,7 @@ describe('buildUpcomingRows', () => {
     expect(rows[0]).toMatchObject({
       event: 'Кубок',
       distanceKm: null,
-      registeredCount: 12,
+      registeredCount: 8,
     });
     expect(rows[0].children?.map((row) => row.event)).toEqual([
       'Кубковая гонка — 10 км',
@@ -83,6 +83,7 @@ describe('buildUpcomingRows', () => {
 
     expect(rows[0].distanceKm).toBeNull();
     expect(rows[0].children).toHaveLength(1);
+    expect(rows[0].registeredCount).toBe(2);
   });
 
   it('adds no children when the event has no starts', () => {
@@ -90,6 +91,21 @@ describe('buildUpcomingRows', () => {
 
     expect(rows[0].children).toBeUndefined();
     expect(rows[0].distanceKm).toBeNull();
+    expect(rows[0].registeredCount).toBe(12);
+  });
+
+  it('sums per-start registrations for the parent instead of the event registrations', () => {
+    const rows = buildUpcomingRows([
+      event({
+        registeredCount: 1,
+        starts: [
+          { ...start({ id: 'start-a' }), registeredCount: 4 },
+          { ...start({ id: 'start-b', sortOrder: 1 }), registeredCount: 6 },
+        ],
+      }),
+    ]);
+
+    expect(rows[0].registeredCount).toBe(10);
   });
 
   it('uses the legacy override as the child distance', () => {
