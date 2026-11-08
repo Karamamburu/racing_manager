@@ -2,6 +2,10 @@
 
 Append-only. Prefix every entry with `## [YYYY-MM-DD] ingest|query|lint | Title`.
 
+## [2026-11-08] ingest | PR readiness: event UI and CMS fixes
+
+Compiled the final pre-PR changes. [domains/events.md](domains/events.md) now records the horizontal characteristics layout, the “Положение о мероприятии” card, the stretching map, hidden event type, the “Тип старта” label, the “Например, Тушино” placeholder and the nakarte colour hint. [domains/cms.md](domains/cms.md) records standalone-final mass starts (including auto-seeding on first time entry), plan rewiring after a `COMPLETED` stage, and the preserved removal/heats protections. The UUID row-lock casts and parent registration sum are internal/UI fixes with no further contract change.
+
 ## [2026-11-08] fix | Upcoming parent registrations sum start enrollments
 
 Fixed the main-page “Ближайшие события” parent “Зарегистрировано” column: it now sums `REGISTERED` enrollments across the event’s starts instead of showing the event-level registration count (which undercounted multi-start participants). Events without starts keep the event-level fallback. Updated [domains/events.md](domains/events.md).
