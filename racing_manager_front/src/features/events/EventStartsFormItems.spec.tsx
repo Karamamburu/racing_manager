@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Form } from 'antd';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ParticipationFormat } from '../../shared/types/event';
 import {
   EventStartsFormItems,
@@ -12,6 +12,8 @@ const formats: ParticipationFormat[] = [
   { id: 1, sport: 'RUN', code: '5K', name: '5 км', sortOrder: 1 },
   { id: 2, sport: 'RUN', code: '10K', name: '10 км', sortOrder: 2 },
 ];
+
+afterEach(cleanup);
 
 describe('buildStartsPayload', () => {
   it('builds one start with kilometre lengths converted to metres', () => {
@@ -93,6 +95,29 @@ describe('EventStartsFormItems', () => {
     });
   });
 
+  it('shows the computed distance as read-only text', () => {
+    render(
+      <Form
+        initialValues={{
+          starts: [
+            {
+              purposeType: 'CUP_RACE',
+              formatIds: [1],
+              lapCount: 5,
+              lapLengthKm: 2,
+              displayName: null,
+            },
+          ],
+        }}
+      >
+        <EventStartsFormItems formats={formats} />
+      </Form>,
+    );
+
+    expect(screen.queryByText('Дистанция: 10 км')).not.toBeNull();
+    expect(screen.queryByLabelText('Дистанция')).toBeNull();
+  });
+
   it('renders one default start and adds a second', async () => {
     render(
       <Form initialValues={{ starts: [defaultStartValue(formats)] }}>
@@ -100,13 +125,13 @@ describe('EventStartsFormItems', () => {
       </Form>,
     );
 
-    expect(screen.queryByText('Старт 1')).not.toBeNull();
-    expect(screen.queryByText('Старт 2')).toBeNull();
+    expect(screen.getAllByText('Старт 1').length).toBeGreaterThan(0);
+    expect(screen.queryAllByText('Старт 2')).toHaveLength(0);
 
     fireEvent.click(screen.getByText('+ Добавить старт'));
 
     await waitFor(() => {
-      expect(screen.queryByText('Старт 2')).not.toBeNull();
+      expect(screen.getAllByText('Старт 2').length).toBeGreaterThan(0);
     });
   });
 });
