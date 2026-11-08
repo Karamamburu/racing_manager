@@ -264,7 +264,7 @@ export class CompetitionsService {
       nextFormat = format;
     }
 
-    this.assertPlanReplaceAllowed(competition, current, nextFormat);
+    this.assertPlanReplaceAllowed(competition, current, nextFormat, hasMutations);
     const started = competition.stageRuns.some((run) => run.status !== 'PENDING');
     if (started) {
       await this.syncRemainingStageRuns(competition, nextFormat);
@@ -854,6 +854,7 @@ export class CompetitionsService {
     competition: LoadedCompetition,
     current: CompetitionFormat,
     nextFormat: CompetitionFormat,
+    allowCompletedRewire: boolean,
   ): void {
     const nextById = new Map(nextFormat.stages.map((stage) => [stage.id, stage]));
     const currentById = new Map(current.stages.map((stage) => [stage.id, stage]));
@@ -886,6 +887,7 @@ export class CompetitionsService {
         if (
           run.status === 'COMPLETED' &&
           currentStage &&
+          !allowCompletedRewire &&
           JSON.stringify(advancementKept(currentStage, nextById)) !==
             JSON.stringify(nextStage.advancement)
         ) {
