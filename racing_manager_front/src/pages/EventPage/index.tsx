@@ -391,6 +391,7 @@ export function EventPage() {
   const [savingRegistrationStatusId, setSavingRegistrationStatusId] = useState<string | null>(null);
   const [finishingCategory, setFinishingCategory] = useState<string | null>(null);
   const [fullProtocolKeys, setFullProtocolKeys] = useState<string[]>([]);
+  const [expandedProtocolKeys, setExpandedProtocolKeys] = useState<string[]>([]);
   const [protocolFilters, setProtocolFilters] =
     useState<ProtocolFiltersValue>(emptyProtocolFilters);
   const screens = Grid.useBreakpoint();
@@ -400,6 +401,17 @@ export function EventPage() {
     setFullProtocolKeys((current) =>
       current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
     );
+  };
+
+  const changeProtocolExpansion = (sectionKey: string, keys: string | string[]) => {
+    const protocolKey = `${sectionKey}-protocol`;
+    const nextKeys = Array.isArray(keys) ? keys : [keys];
+    setExpandedProtocolKeys((current) => {
+      const otherSections = current.filter((key) => key !== protocolKey);
+      return nextKeys.includes(protocolKey)
+        ? [...otherSections, protocolKey]
+        : otherSections;
+    });
   };
 
   if (eventQuery.isLoading) {
@@ -1056,7 +1068,8 @@ export function EventPage() {
                                 ) : null}
                                 {categoryFinished ? <Tag>Гонка завершена</Tag> : null}
                                 <Collapse
-                                defaultActiveKey={[]}
+                                activeKey={expandedProtocolKeys}
+                                onChange={(keys) => changeProtocolExpansion(section.key, keys)}
                                 items={[
                                   {
                                     key: `${section.key}-protocol`,

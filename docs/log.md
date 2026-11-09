@@ -4,7 +4,7 @@ Append-only. Prefix every entry with `## [YYYY-MM-DD] ingest|query|lint | Title`
 
 ## [2026-11-09] ingest | Protocol participant search and city/team filters
 
-Event protocol rows can be searched by participant name and filtered by distinct city/team values present in the loaded `event.registrations`. Filtering stays client-side, combines AND across controls and OR within each multi-select, hides empty groups/tabs, and keeps category actions on the full row set. Spec: `specs/protocol-search-ears.md`. Updated [domains/events.md](domains/events.md).
+Event protocol rows can be searched by participant name and filtered by distinct city/team values present in the loaded `event.registrations`. Filtering stays client-side, combines AND across controls and OR within each multi-select, hides empty groups/tabs, keeps category actions on the full row set, and keeps expanded protocol sections open across filter resets. Spec: `specs/protocol-search-ears.md`. Updated [domains/events.md](domains/events.md).
 
 ## [2026-11-09] ingest | Functional analysis as a two-model pipeline
 
