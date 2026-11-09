@@ -13,6 +13,9 @@ last_reviewed: 2026-11-03
 
 # Skill: Functional analysis
 
+> Superseded by `functional-analysis-v2`, the two-model author/reviewer
+> pipeline. This file is kept for reference; do not route new work here.
+
 ## 1. When
 
 - **Use when** new user-visible behavior or a contract change will need an EARS spec.

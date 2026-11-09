@@ -2,6 +2,10 @@
 
 Append-only. Prefix every entry with `## [YYYY-MM-DD] ingest|query|lint | Title`.
 
+## [2026-11-09] ingest | Functional analysis as a two-model pipeline
+
+Converted `functional-analysis-v2` into an author/reviewer pipeline: DeepSeek V4.1 Flash writes the PRD, Gemini 4 Argon reviews it read-only with P0/P1/P2 findings, and any P0/P1 returns the PRD for rework for at most three rounds. Added role files, handoff templates, model slots, and validator support in `verify_handoff.mjs` plus `verify_prd_coverage.mjs`. Updated the kit router, EARS/architecture inputs, prompts, and [concepts/agent-workflow.md](concepts/agent-workflow.md).
+
 ## [2026-11-08] ingest | PR readiness: event UI and CMS fixes
 
 Compiled the final pre-PR changes. [domains/events.md](domains/events.md) now records the horizontal characteristics layout, the “Положение о мероприятии” card, the stretching map, hidden event type, the “Тип старта” label, the “Например, Тушино” placeholder and the nakarte colour hint. [domains/cms.md](domains/cms.md) records standalone-final mass starts (including auto-seeding on first time entry), plan rewiring after a `COMPLETED` stage, and the preserved removal/heats protections. The UUID row-lock casts and parent registration sum are internal/UI fixes with no further contract change.

@@ -21,7 +21,7 @@ last_reviewed: 2026-11-03
 
 ## 2. Inputs
 
-- An **accepted** `Tasks/<KEY>/PRD.md` from `functional-analysis` (Meta status `accepted`). If the file is missing or still `draft`, stop and run that skill first.
+- An **accepted** `Tasks/<KEY>/PRD.md` from `functional-analysis-v2` (Meta status `accepted`). If the file is missing or still `draft`, stop and run that skill first.
 - PRD Meta must name a domain wiki page (e.g. `docs/domains/<domain>.md`). If missing, stop and ask the human to fix the PRD.
 - The ticket or a short statement of the user-visible outcome (must match the PRD).
 - `docs/INDEX.md` and that one domain page (neighbors only if the domain page links them).
@@ -89,7 +89,7 @@ When this kit is the workspace and the product is another directory, run the scr
 
 ## 6. Stop and rollback
 
-- Missing or non-accepted `Tasks/<KEY>/PRD.md` stops the skill. Run `functional-analysis` and wait for human acceptance.
+- Missing or non-accepted `Tasks/<KEY>/PRD.md` stops the skill. Run `functional-analysis-v2` and wait for human acceptance.
 - Missing domain page in PRD Meta, or a domain page that does not exist, stops the skill.
 - An `FR-*` with no EARS mapping stops the skill.
 - A requirement that fits no EARS pattern stops the skill. Ask the human to restate it.

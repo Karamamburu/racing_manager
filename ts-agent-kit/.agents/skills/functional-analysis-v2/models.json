@@ -1,0 +1,5 @@
+{
+  "author": "opencode-go/deepseek-v4.1-flash",
+  "reviewer": "opencode-go/gemini-4-argon",
+  "max_rework_rounds": 3
+}

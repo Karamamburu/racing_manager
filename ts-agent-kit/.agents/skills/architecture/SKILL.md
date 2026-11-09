@@ -16,7 +16,7 @@ last_reviewed: 2026-10-28
 
 ## When
 
-The task is a day or more, crosses modules, breaks a contract, or adds a service. Input is an accepted `Tasks/<KEY>/PRD.md` from `functional-analysis` (and usually an EARS spec). Output is the input to `feature`, `nest-feature`, or `react-feature`. A small fork that is cheap to undo is an ADR-lite via `docs`, not this skill.
+The task is a day or more, crosses modules, breaks a contract, or adds a service. Input is an accepted `Tasks/<KEY>/PRD.md` from `functional-analysis-v2` (and usually an EARS spec). Output is the input to `feature`, `nest-feature`, or `react-feature`. A small fork that is cheap to undo is an ADR-lite via `docs`, not this skill.
 
 ## Goal
 
@@ -28,7 +28,7 @@ Read `.agents/agents/architecture.md` first.
 
 | Input | Where | If missing |
 |---|---|---|
-| Accepted functional analysis with ids and a definition of done | `Tasks/<KEY>/PRD.md` from `functional-analysis` (status `accepted`) | Ask. Do not design from a guess or from a draft PRD. |
+| Accepted functional analysis with ids and a definition of done | `Tasks/<KEY>/PRD.md` from `functional-analysis-v2` (status `accepted`) | Ask. Do not design from a guess or from a draft PRD. |
 | Latency, volume, cost, or availability numbers | The requirements | Ask. Do not invent numbers. |
 | The code that exists today | The product repo | Read it before proposing a new module. |
 | Stack and security constraints | `AGENTS.md` | Read-only. A conflict is an escalation, not an override. |

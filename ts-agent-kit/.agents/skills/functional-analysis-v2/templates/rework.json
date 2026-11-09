@@ -1,0 +1,18 @@
+{
+  "role": "prd_rework",
+  "round": 2,
+  "blocking_count": 1,
+  "instructions": [
+    {
+      "id": "RW-001",
+      "source": "RF-001",
+      "priority": "P0",
+      "dimension": "lifecycle",
+      "location": "Tasks/KEY/PRD.md:1",
+      "issue": "",
+      "required_action": "",
+      "resolution": "author"
+    }
+  ],
+  "non_blocking": []
+}
