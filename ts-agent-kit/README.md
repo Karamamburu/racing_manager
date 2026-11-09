@@ -13,7 +13,7 @@ The rulebook is [AGENTS.md](AGENTS.md). Claude Code starts at [CLAUDE.md](CLAUDE
 - Root scripts: `pnpm lint`, `pnpm format:check`, `pnpm typecheck`, `pnpm test`
 - Feature-sized acceptance, from the product root: `node .agents/tools/verify_techlead_gate.mjs`
 
-New behavior is analysis-then-spec-first. `knowledge-index`, then `functional-analysis` (accepted `Tasks/<KEY>/PRD.md`), then `spec-kit-ears` run before code. `open-gsd-pipeline` stores waves in `.planning/`. `feature-pipeline` is the closed loop for a feature wave: coder, CODE_GATE, Skeptic, Realist, Visionary, then a summarizer only when a judge rejects. A one or two file fix with no schema change and no new contract uses `small-fix`.
+New behavior is analysis-then-spec-first. `knowledge-index`, then `functional-analysis-v2` (a two-model PRD pipeline with P0/P1 rework rounds, ending in an accepted `Tasks/<KEY>/PRD.md`), then `spec-kit-ears` run before code. `open-gsd-pipeline` stores waves in `.planning/`. `feature-pipeline` is the closed loop for a feature wave: coder, CODE_GATE, Skeptic, Realist, Visionary, then a summarizer only when a judge rejects. A one or two file fix with no schema change and no new contract uses `small-fix`.
 
 Checkers and templates live under `.agents/tools/` and `.agents/templates/`, so they are included when `.agents/` is copied into a product.
 
@@ -36,7 +36,7 @@ Edit the product `AGENTS.md` only to record path overrides. Leave the router and
 | Skill | When |
 |---|---|
 | `knowledge-index` | One domain page and the import neighbors before an edit |
-| `functional-analysis` | English PRD (problem, actors, use cases, FRs) before EARS |
+| `functional-analysis-v2` | Two-model PRD pipeline: DeepSeek author, Gemini reviewer, P0/P1 rework rounds |
 | `spec-kit-ears` | EARS acceptance spec before code |
 | `open-gsd-pipeline` | Wave plan in `.planning/` for a multi-file change |
 | `feature-pipeline` | Coder, CODE_GATE, three read-only judges, summarizer |

@@ -49,4 +49,4 @@ After public contract changes, update the matching `docs/domains/*.md` (and enti
 
 Follow the active kit skill. At minimum, do not leave the wiki contradicting a shipped public contract you just changed.
 
-Feature-sized work: accepted PRD under `Tasks/<KEY>/PRD.md` (`functional-analysis`) before EARS under `specs/` (`spec-kit-ears` must trace every PRD `FR-*` to the spec and bind to the domain wiki page); waves under `.planning/` when using open-gsd (≤3 files per wave).
+Feature-sized work: accepted PRD under `Tasks/<KEY>/PRD.md` (`functional-analysis-v2`: DeepSeek author + Gemini reviewer with P0/P1 rework rounds) before EARS under `specs/` (`spec-kit-ears` must trace every PRD `FR-*` to the spec and bind to the domain wiki page); waves under `.planning/` when using open-gsd (≤3 files per wave).

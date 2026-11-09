@@ -1,0 +1,35 @@
+{
+  "role": "prd_reviewer",
+  "cycle": 1,
+  "verdict": "REWORK",
+  "summary": "",
+  "coverage": [
+    { "dimension": "problem", "status": "PASS", "note": "" },
+    { "dimension": "actors", "status": "PASS", "note": "" },
+    { "dimension": "domain_model", "status": "PASS", "note": "" },
+    { "dimension": "lifecycle", "status": "GAP", "note": "Replace with the gap, or PASS." },
+    { "dimension": "invariants", "status": "PASS", "note": "" },
+    { "dimension": "configuration", "status": "PASS", "note": "" },
+    { "dimension": "calculations", "status": "PASS", "note": "" },
+    { "dimension": "compatibility", "status": "PASS", "note": "" },
+    { "dimension": "atomicity", "status": "PASS", "note": "" },
+    { "dimension": "requirements", "status": "PASS", "note": "" },
+    { "dimension": "acceptance", "status": "PASS", "note": "" },
+    { "dimension": "traceability", "status": "PASS", "note": "" },
+    { "dimension": "consistency", "status": "PASS", "note": "" },
+    { "dimension": "product_level", "status": "PASS", "note": "" },
+    { "dimension": "assumptions", "status": "PASS", "note": "" }
+  ],
+  "findings": [
+    {
+      "id": "RF-001",
+      "priority": "P1",
+      "dimension": "lifecycle",
+      "location": "Tasks/KEY/PRD.md:1",
+      "issue": "",
+      "evidence": "",
+      "required_action": "",
+      "resolution": "author"
+    }
+  ]
+}

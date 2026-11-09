@@ -1,4 +1,4 @@
-import { Button, Card, Col, Collapse, Grid, Modal, Result, Row, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Col, Collapse, Empty, Grid, Modal, Result, Row, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -23,6 +23,12 @@ import {
   categoryReadyToFinish,
   groupParticipants,
 } from '../../features/events/protocolGroups';
+import {
+  collectProtocolFilterValues,
+  emptyProtocolFilters,
+  filterProtocolParticipants,
+  type ProtocolFilters as ProtocolFiltersValue,
+} from '../../features/events/protocolFilters';
 import {
   eventDetailsQueryKey,
   useEventDetailsQuery,
@@ -54,6 +60,7 @@ import { EditEventModal } from './components/EditEventModal';
 import { EventTrackMap } from './components/EventTrackMap';
 import { EventStatusSelect } from './components/EventStatusSelect';
 import { FinishTimeCell } from './components/FinishTimeCell';
+import { ProtocolFilters } from './components/ProtocolFilters';
 import { RegisterEventModal } from './components/RegisterEventModal';
 import { RegisterParticipantModal } from './components/RegisterParticipantModal';
 import { SeedTestRegistrationsModal } from './components/SeedTestRegistrationsModal';
@@ -384,6 +391,9 @@ export function EventPage() {
   const [savingRegistrationStatusId, setSavingRegistrationStatusId] = useState<string | null>(null);
   const [finishingCategory, setFinishingCategory] = useState<string | null>(null);
   const [fullProtocolKeys, setFullProtocolKeys] = useState<string[]>([]);
+  const [expandedProtocolKeys, setExpandedProtocolKeys] = useState<string[]>([]);
+  const [protocolFilters, setProtocolFilters] =
+    useState<ProtocolFiltersValue>(emptyProtocolFilters);
   const screens = Grid.useBreakpoint();
   const compactProtocol = screens.md === false;
 
@@ -391,6 +401,17 @@ export function EventPage() {
     setFullProtocolKeys((current) =>
       current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
     );
+  };
+
+  const changeProtocolExpansion = (sectionKey: string, keys: string | string[]) => {
+    const protocolKey = `${sectionKey}-protocol`;
+    const nextKeys = Array.isArray(keys) ? keys : [keys];
+    setExpandedProtocolKeys((current) => {
+      const otherSections = current.filter((key) => key !== protocolKey);
+      return nextKeys.includes(protocolKey)
+        ? [...otherSections, protocolKey]
+        : otherSections;
+    });
   };
 
   if (eventQuery.isLoading) {
@@ -691,6 +712,21 @@ export function EventPage() {
     event.formats,
     event.starts,
   );
+  const cityOptions = collectProtocolFilterValues(registrations, 'city');
+  const teamOptions = collectProtocolFilterValues(registrations, 'team');
+  const filteredParticipantGroups = participantGroups
+    .map((group) => ({
+      ...group,
+      sections: group.sections
+        .map((section) => ({
+          ...section,
+          visibleRows: filterProtocolParticipants(section.rows, protocolFilters),
+        }))
+        .filter((section) => section.visibleRows.length > 0),
+    }))
+    .filter((group) => group.sections.length > 0);
+  const showProtocolToolbar =
+    event.registrations !== null && registrations.length > 0;
 
   const handleStatusChange = (nextStatus: EventStatusCode) => {
     if (nextStatus === 'CANCELLED') {
@@ -905,6 +941,16 @@ export function EventPage() {
             ) : null
           }
         >
+          {showProtocolToolbar ? (
+            <div style={{ marginBottom: 16 }}>
+              <ProtocolFilters
+                value={protocolFilters}
+                cityOptions={cityOptions}
+                teamOptions={teamOptions}
+                onChange={setProtocolFilters}
+              />
+            </div>
+          ) : null}
           {event.registrations === null ? (
             <Space direction="vertical" size={12}>
               <Typography.Text type="secondary">
@@ -923,6 +969,12 @@ export function EventPage() {
               scroll={{ x: 'max-content' }}
               locale={{ emptyText: 'Пока никто не зарегистрировался' }}
             />
+          ) : filteredParticipantGroups.length === 0 ? (
+            <Empty description="Участники не найдены">
+              <Button onClick={() => setProtocolFilters(emptyProtocolFilters)}>
+                Сбросить фильтры
+              </Button>
+            </Empty>
           ) : (
             <Space direction="vertical" size={24} style={{ width: '100%' }}>
               {classCompetitionsQuery.isError ? (
@@ -930,10 +982,10 @@ export function EventPage() {
                   Не удалось загрузить сетку многоэтапной гонки.
                 </Typography.Text>
               ) : null}
-              {participantGroups.map((group) => (
+              {filteredParticipantGroups.map((group) => (
                 <div key={group.key} className="event-participant-group">
                   <Typography.Title level={4} style={{ marginTop: 0, marginBottom: 12 }}>
-                    {group.title} ({group.sections.reduce((sum, section) => sum + section.rows.length, 0)})
+                    {group.title} ({group.sections.reduce((sum, section) => sum + section.visibleRows.length, 0)})
                   </Typography.Title>
                   <Tabs
                     type="card"
@@ -973,7 +1025,7 @@ export function EventPage() {
                           <Space size={8}>
                             <span>{section.title}</span>
                             <Typography.Text type="secondary">
-                              {formatParticipantCount(section.rows.length, group.key)}
+                              {formatParticipantCount(section.visibleRows.length, group.key)}
                             </Typography.Text>
                           </Space>
                         ),
@@ -1016,7 +1068,8 @@ export function EventPage() {
                                 ) : null}
                                 {categoryFinished ? <Tag>Гонка завершена</Tag> : null}
                                 <Collapse
-                                defaultActiveKey={[]}
+                                activeKey={expandedProtocolKeys}
+                                onChange={(keys) => changeProtocolExpansion(section.key, keys)}
                                 items={[
                                   {
                                     key: `${section.key}-protocol`,
@@ -1045,7 +1098,7 @@ export function EventPage() {
                                             columns,
                                             compactProtocol && !fullProtocolKeys.includes(section.key),
                                           )}
-                                          dataSource={rowsWithClassification(section.rows, competition)}
+                                          dataSource={rowsWithClassification(section.visibleRows, competition)}
                                           rowKey="id"
                                           pagination={false}
                                           tableLayout={

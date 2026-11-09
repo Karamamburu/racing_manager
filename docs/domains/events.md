@@ -1,6 +1,6 @@
 ---
 type: domain
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # Domain: events
@@ -45,6 +45,14 @@ Event catalog, admin CRUD, starts configuration, status sync, category finish, c
 ## Protocol rows
 
 `registrations[]` carries one row per active enrollment: `enrollmentId`, `startId`, `startLabel`, `sortOrder`, `enrollmentStatus`, `outcome`, `finishTimeMs`, computed `place`, `isCupEligible`. Place is computed on read per gender × start × format; WITHDRAWN enrollments are omitted.
+
+## Protocol search and filters
+
+- The “Зарегистрированные участники” card shows a toolbar above the gender groups: a search input on the “Участник” column (`EventParticipant.fullName`, case-insensitive substring, `ё` treated as `е`) and multi-select filters “Город” and “Команда”.
+- Filter options are the distinct trimmed non-empty `EventParticipant.city` / `EventParticipant.team` values from the loaded `event.registrations`, de-duplicated case-insensitively and sorted in Russian locale order.
+- Controls combine with AND across columns and OR within one multi-select. Groups, tabs, and sections without matching rows are hidden; their counters show matched rows.
+- Filtering is client-side only; no HTTP contract changes. An empty result keeps the toolbar and selections and shows “Участники не найдены” with a reset action. Reset restores every row and keeps previously expanded “Итоговый протокол” sections expanded.
+- Category actions (“Завершить гонку”, class-competition panel, result and registration-status editing) still evaluate against the full category row set, not the filtered subset.
 
 ## Code
 

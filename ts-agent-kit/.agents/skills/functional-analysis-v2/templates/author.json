@@ -1,0 +1,12 @@
+{
+  "role": "prd_author",
+  "cycle": 1,
+  "prd_path": "Tasks/KEY/PRD.md",
+  "changed_files": ["Tasks/KEY/PRD.md"],
+  "review_trace": [],
+  "human_answers": [],
+  "deferred": [],
+  "assumptions": [],
+  "open_questions": [],
+  "disagreements": []
+}

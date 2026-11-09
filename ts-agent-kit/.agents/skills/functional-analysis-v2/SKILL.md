@@ -1,288 +1,319 @@
 ---
-name: functional-analysis
+name: functional-analysis-v2
 description: >
-  Produces a complete English product-level PRD before EARS specification or
-  product implementation. Use for new user-visible behavior or domain-contract
-  changes that require a PRD under Tasks/<KEY>/PRD.md. Do not use for small fixes,
-  bugfixes, EARS, architecture, or implementation.
+  Runs functional analysis as a two-model pipeline: DeepSeek V4.1 Flash authors
+  an English Tasks/<KEY>/PRD.md, Gemini 4 Argon reviews it read-only and files
+  P0/P1/P2 findings, and any P0/P1 returns the PRD for rework for at most three
+  rounds. Use before EARS when new user-visible behavior or a domain/API contract
+  change needs a PRD. Do not use for small-fix, EARS, architecture, or implementation.
 owner: tbd
-freedom: guided
-last_reviewed: 2026-11-07
+freedom: strict
+last_reviewed: 2026-11-09
 ---
 
-# Skill: Functional analysis
+# Skill: Functional analysis pipeline
 
-## 1. Purpose
+The current context is the orchestrator. It never writes the PRD and never
+reviews it. The author and the reviewer run in separate fresh contexts with
+different models. The orchestrator owns round counting, the gate, the state
+files, and escalation.
 
-Produce a PRD that is sufficiently precise for a separate EARS specification
-without requiring repeated clarification rounds during implementation planning.
+The pipeline exists to produce a **more complete and more precise PRD** than a
+single pass can: the author drafts, an independent model attacks the draft, and
+only blocking findings force another round.
 
-The PRD describes **what the product must do and which domain rules it must
-preserve**. It does not prescribe technical architecture or implementation.
+## 1. When
 
-## 2. When to use
-
-- Use when new user-visible behavior or a domain/API contract change requires
+- **Use when** new user-visible behavior or a domain/API contract change needs
   an EARS specification.
-- Do not use for `small-fix`, isolated bugfixes/hotfixes without new behavior,
-  EARS authoring, architecture, or product code.
+- **Do not use** for `small-fix`, an isolated bugfix or hotfix with no new
+  behavior, EARS authoring, architecture, or product code.
+- Run from the product root.
 
-Run from the product root.
+## 2. Roles and models
 
-## 3. Inputs and discovery
+Read `.agents/skills/functional-analysis-v2/models.json` before the first
+launch.
+
+| Stage | Role file | Model | Access | Output |
+|---|---|---|---|---|
+| Author | `.agents/skills/functional-analysis-v2/roles/author.md` | `opencode-go/deepseek-v4.1-flash` | Writes only `Tasks/<KEY>/PRD.md` and its handoff | `handoff/prd/author-<round>.json` |
+| Reviewer | `.agents/skills/functional-analysis-v2/roles/reviewer.md` | `opencode-go/gemini-4-argon` | Read-only; writes only its review file | `handoff/prd/review-<round>.json` |
+| Orchestrator | this file | session default | Writes rework briefs and the verdict | `handoff/prd/rework-<round>.json`, `handoff/prd/verdict.json` |
+
+Rules:
+
+- Pass the exact model id from `models.json` to the subagent launcher. If the
+  runtime cannot choose a model per role, stop and tell the human. Do not run
+  both roles on one model.
+- If a model id is unavailable, stop. Do not substitute silently.
+- The reviewer does not receive the author chat. The author does not receive the
+  reviewer chat. Only files cross the boundary.
+- The reviewer is read-only toward the PRD. Any edit invalidates the review.
+- Do not let one context play both roles, and do not run the reviewer in the
+  orchestrator context.
+
+## 3. Inputs and preflight
 
 Required:
-- A ticket or short statement of the intended user-visible outcome.
-- A stable `KEY`.
-- `docs/INDEX.md` and the relevant domain page.
 
-Read exactly one domain page initially. Follow links to neighboring domain
-pages only when the feature crosses those boundaries.
+- A ticket or short statement of the user-visible outcome, plus a stable `KEY`.
+- `docs/INDEX.md` and exactly one domain page. Follow links to neighboring
+  domain pages only when the feature crosses those boundaries.
+- Optional As-Is facts via `investigate-codebase` when current behavior,
+  compatibility, or existing business rules are unclear.
 
-Use `investigate-codebase` when current behavior, compatibility, or existing
-business rules cannot be established from documentation. Investigation may
-read code and tests but must not edit product files.
+Before the first model call:
 
-Before drafting, identify:
-- Existing actors, workflows, terminology, and domain entities.
-- Existing rules that the feature changes, extends, or must preserve.
-- Related features and contracts explicitly referenced by the domain docs.
-- Migration and backward-compatibility implications, if existing data is affected.
+1. `mkdir -p handoff/prd`.
+2. Confirm the primary actor, the user pain, and one observable success signal.
+   If any is missing, ask the human once and stop. Do not let the author invent
+   them.
+3. If `Tasks/<KEY>/PRD.md` already exists, copy it to
+   `handoff/prd/PRD.baseline.md`. The pipeline may replace it only through the
+   author.
+4. Record the worktree, excluding the pipeline's own artifacts:
 
-Do not infer undocumented behavior from a technical implementation alone.
-Record it as `[ASSUMPTION]` or ask the human to confirm it.
+   ```bash
+   git status --porcelain -- . ':(exclude)handoff' > handoff/prd/git.before
+   ```
 
-## 4. Analysis workflow
+   A dirty tree is acceptable only when every dirty path is outside the PRD and
+   `handoff/`.
 
-### Phase 1: Frame the problem
+## 4. State machine
 
-Establish:
-1. Who experiences the problem?
-2. What are they trying to achieve?
-3. What happens today, including workarounds?
-4. Why is the change needed now?
-5. What observable result would demonstrate success?
+```text
+PREFLIGHT
+  → AUTHOR round 1
+  → REVIEW round 1
+      ├─ no P0/P1 and no human decision → VERDICT READY → human acceptance
+      ├─ P0/P1 and rework rounds used < 3 → REWORK → AUTHOR next round
+      └─ P0/P1 and rework rounds used = 3 → VERDICT ESCALATE
+```
 
-If the primary actor, user pain, or success signal is genuinely unclear, ask
-the human before proceeding. Do not ask questions whose answers can be derived
-from the supplied ticket or domain documentation.
+Round semantics:
 
-### Phase 2: Model the product behavior
+- Round 1 is the initial draft. A **rework round** is one return to the author
+  after a review.
+- `max_rework_rounds` is 3. The pipeline allows at most four author versions and
+  four reviews: rounds 1, 2, 3, and 4.
+- If review 4 still has a P0 or P1, stop. Do not start round 5.
 
-Before writing requirements, work through the following checklist. Include only
-items relevant to the feature, but explicitly consider each one.
+## 5. Stage 1: Author
 
-**Actors and permissions**
-- Who initiates each workflow?
-- Which roles may view, create, edit, cancel, or correct data?
-- Are self-service, guest, and administrator flows consistent?
-- Are there ownership or authorization boundaries?
+1. Start a fresh context with the author model. Give it
+   `.agents/skills/functional-analysis-v2/roles/author.md`, the `KEY`, the ticket
+   or outcome, `docs/INDEX.md`, the one domain page, and
+   `.agents/templates/tasks/PRD.md`.
+2. Round 1: no prior review. Round 2+: also give it the current PRD,
+   `handoff/prd/rework-<n>.json` when it exists, and
+   `handoff/prd/human-answers-<n>.md` when it exists. It must not read the
+   reviewer chat.
+3. The author writes `Tasks/<KEY>/PRD.md` in English and its handoff. It edits
+   no other product file.
+4. Validate. When round 2 or later has a rework brief, also prove every blocking
+   instruction was addressed or disputed:
 
-**Domain concepts and relationships**
-- What are the product-level entities and their responsibilities?
-- Which entity owns each piece of information and each lifecycle?
-- What is the identity of each entity? Which identifiers must remain stable?
-- What are the cardinalities and uniqueness rules?
-- Distinguish a container/aggregate from an individual participation,
-  occurrence, attempt, or outcome when their lifecycles differ.
+   ```bash
+   node .agents/tools/verify_handoff.mjs handoff/prd/author-<round>.json
 
-**Lifecycle and state transitions**
-- List states for each entity separately.
-- Define what creates, changes, ends, or reactivates each state.
-- Define whether records are deleted, retained, cancelled, or withdrawn.
-- State which transitions are allowed or forbidden and under what conditions.
-- Clarify whether an outcome/result is distinct from participation status.
-- Explain how corrections work and whether they update an existing record.
+   # only when handoff/prd/rework-<round>.json exists
+   node .agents/tools/verify_prd_coverage.mjs \
+     handoff/prd/author-<round>.json \
+     handoff/prd/rework-<round>.json
+   ```
 
-**Invariants and isolation**
-- Write down rules that must always hold, not merely happy-path behavior.
-- Check uniqueness under concurrent requests, not only sequential UI use.
-- Identify which changes are local to one entity and which affect related
-  entities.
-- State what must not change when an operation affects a sibling entity.
-- Define behavior when a parent is cancelled but child records already have
-  outcomes or history.
+   A blocking instruction may appear in `review_trace` or `disagreements`. It
+   may not appear in `deferred`; deferral is for P2 only. A round that only
+   applies human answers records them in `human_answers`.
 
-**Configuration and editing**
-- Identify shared settings versus per-item settings.
-- Define defaults and whether they apply on create, copy, or later additions.
-- Specify which fields can be changed before and after dependent records exist.
-- Define deletion/removal rules and whether historical references freeze fields.
-- Define ordering, labels, normalization, and collision behavior where relevant.
+5. One format retry. A second invalid handoff or uncovered blocking instruction
+   stops the pipeline with `ESCALATE`.
+6. Check the worktree against `handoff/prd/git.before`. Any new change under the
+   product apps, `racing_manager_*`, `competition_managment_service`, `specs/`,
+   `.planning/`, or Prisma is a violation: restore those paths and stop. The PRD
+   path itself is allowed.
+7. Save a checksum of the PRD:
 
-**Lists, grouping, and calculations**
-- Define the dimensions used to group, filter, compare, and rank records.
-- Separate stored facts from derived values and display-only values.
-- State which existing calculation or ranking rules remain unchanged.
-- Define treatment of incomplete, absent, cancelled, or disqualified records.
-- Explain when cached or persisted derived values must be recalculated.
+   ```bash
+   shasum -a 256 Tasks/<KEY>/PRD.md > handoff/prd/PRD.round-<n>.sha256
+   ```
 
-**Compatibility, migration, and integrations**
-- Identify existing records and workflows affected by the change.
-- Define how old data maps to the new product concepts.
-- Preserve meaningful historical values; do not silently rewrite source facts
-  merely to make new calculations convenient.
-- Specify how anomalies are retained, excluded from active behavior, and
-  reported for reconciliation.
-- Identify downstream consumers and the stable identifier they must use.
-- State explicit contracts with adjacent features; keep their implementation
-  details and unrelated scope out of this PRD.
+On rework, the author must:
 
-**Atomicity and failure behavior**
-- Identify multi-entity operations that must succeed or fail as one action.
-- State what happens when any part of a submitted operation is invalid.
-- Ensure failed operations do not leave partial configuration or records.
-- Define user-visible errors for forbidden transitions and conflicts.
+- address or explicitly dispute every `P0` and `P1` instruction;
+- either address or explicitly defer each `P2` in `non_blocking`;
+- record every blocking review id in `review_trace` or `disagreements`; P2 ids
+  may also go in `deferred`;
+- never delete a valid requirement or weaken scope just to clear a finding;
+- never invent a human decision. If a finding needs one, record it in
+  `open_questions` and leave the behavior clearly marked `[ASSUMPTION]` or
+  blocked for the human.
 
-### Phase 3: Resolve ambiguities
+## 6. Stage 2: Reviewer
 
-Create a short internal list of decisions that materially affect product
-behavior. For each, choose one:
-- Answer is supported by the ticket or domain documentation.
-- Answer is established by current product behavior, verified through
-  `investigate-codebase`.
-- Human decision is required.
-- It is a deliberate assumption and must be marked `[ASSUMPTION]`.
+1. Start a fresh context with the reviewer model. Give it
+   `.agents/skills/functional-analysis-v2/roles/reviewer.md`, the current
+   `Tasks/<KEY>/PRD.md`, `handoff/prd/author-<n>.json`, the domain
+   page, `docs/INDEX.md`, the PRD template, and on round 2+ the previous review,
+   the rework brief when it exists, and `handoff/prd/human-answers-<n>.md` when
+   it exists.
+2. Before it starts:
 
-Ask the human only about unresolved decisions that block a coherent PRD or
-could cause materially different product behavior. Group related questions
-into one concise clarification round. Do not ask about implementation choices
-that belong to EARS or architecture.
+   ```bash
+   cp Tasks/<KEY>/PRD.md handoff/prd/PRD.review-<n>.before.md
+   shasum -a 256 Tasks/<KEY>/PRD.md > handoff/prd/PRD.review-<n>.before.sha256
+   git status --porcelain -- . ':(exclude)handoff' > handoff/prd/git.review-<n>.before
+   ```
 
-If a decision is deferred, state the boundary clearly in the PRD. Do not leave
-a vague question that makes the feature impossible to specify.
+3. The reviewer writes only `handoff/prd/review-<n>.json`. It does not edit the
+   PRD or any product file.
+4. After it finishes:
 
-### Phase 4: Write the PRD
+   ```bash
+   shasum -a 256 -c handoff/prd/PRD.review-<n>.before.sha256
+   git status --porcelain -- . ':(exclude)handoff' > handoff/prd/git.review-<n>.after
+   diff -u handoff/prd/git.review-<n>.before handoff/prd/git.review-<n>.after
+   ```
 
-1. Create `Tasks/<KEY>/` if it does not exist.
-2. Start from `.agents/templates/tasks/PRD.md`.
-3. Save `Tasks/<KEY>/PRD.md` in English.
-4. Set Meta status to `draft`.
-5. Keep the PRD product-level: describe user-visible behavior and domain
-   contracts, not Nest, Prisma, React, DTOs, database tables, C4, or waves.
+5. If the checksum fails or the git diff is non-empty, the review is invalid.
+   Restore the PRD from `handoff/prd/PRD.review-<n>.before.md`, restore any
+   product path, and treat it as a format failure. A second invalid review stops
+   with `ESCALATE`.
+6. Validate:
 
-Required sections:
+   ```bash
+   node .agents/tools/verify_handoff.mjs handoff/prd/review-<n>.json
+   ```
 
-| Section | Content |
+The reviewer must return a coverage row for all 15 dimensions listed in
+`.agents/skills/functional-analysis-v2/roles/reviewer.md`. A `GAP` row without a
+matching `P0` or `P1` finding is invalid.
+
+## 7. Stage 3: Gate
+
+The orchestrator, not a model, applies the gate.
+
+1. `blocking` = findings with `priority` `P0` or `P1`.
+2. `human` = blocking findings with `resolution: "human"`, plus every entry in
+   the author handoff's `open_questions`.
+3. Stop early when the same P0/P1 location and issue survives two consecutive
+   reviews after being marked addressed. Do not spend the remaining rounds on
+   the same defect.
+4. Apply this table in order:
+
+| Condition | Next |
 |---|---|
-| Meta | KEY, title, status, domain, related systems |
-| Problem | Who hurts, current behavior/workaround, why now, observable success |
-| Solution | Product outcome, concepts, relationships, lifecycle, key rules |
-| Out of scope | Explicit non-goals and boundaries with adjacent features |
-| Actors / roles | Id, name, goal, relevant permissions and constraints |
-| Use cases | Each UC-NN: actor, precondition, trigger, main flow, alternatives/exceptions, postcondition |
-| Functional requirements | Each FR-NN is an unambiguous SHALL statement linked to UC ids |
-| Non-functional | Include NFR-NN only when the human stated a requirement |
-| Acceptance / DoD | Observable checks a human can verify without reading code |
-| Open questions | Empty before acceptance; assumptions are not hidden here |
-| Traceability | FR → UC; leave EARS column blank until `spec-kit-ears` runs |
+| Rework rounds used = 3 and (`blocking` or `human` is non-empty) | Write `verdict.json` with `ESCALATE`, list the surviving P0/P1 and unanswered questions, and stop. |
+| `blocking` and `human` are empty | Write `handoff/prd/verdict.json` with `READY`, cycle = review round, reason `no P0/P1 after review <n>`. Stop and ask the human to accept. |
+| `human` is non-empty | Group the human questions into one message. Record the answers in `handoff/prd/human-answers-<n+1>.md`. Launch author round n+1 with the rework brief when one exists and the answers. If no answer, `ESCALATE`. |
+| `blocking` non-empty | Write `handoff/prd/rework-<n+1>.json` with every blocking finding. Launch author round n+1. |
 
-For complex features, include concise domain tables for:
-- Entity responsibilities and relationships.
-- State transitions and forbidden transitions.
-- Uniqueness/invariants.
-- Editability rules by lifecycle state.
-- Migration mapping and anomaly handling.
+Rework brief shape. Write it from
+`.agents/skills/functional-analysis-v2/templates/rework.json`, not from prose:
 
-Do not add tables mechanically when they do not clarify the behavior.
+```json
+{
+  "role": "prd_rework",
+  "round": 2,
+  "blocking_count": 2,
+  "instructions": [
+    {
+      "id": "RW-001",
+      "source": "RF-003",
+      "priority": "P0",
+      "dimension": "lifecycle",
+      "location": "Tasks/KEY/PRD.md:88",
+      "issue": "The PRD never states whether a cancelled heat can be reactivated.",
+      "required_action": "Add the forbidden transition and the user-visible outcome.",
+      "resolution": "author"
+    }
+  ],
+  "non_blocking": [
+    {
+      "id": "RF-007",
+      "priority": "P2",
+      "dimension": "consistency",
+      "issue": "Two labels name the same entity.",
+      "required_action": "Use one term."
+    }
+  ]
+}
+```
 
-### Phase 5: Write requirements precisely
+Validate it:
 
-Every FR must:
-- Use one primary SHALL obligation; split unrelated obligations.
-- Identify the actor or system behavior and the condition under which it applies.
-- State the expected result, including rejection or preservation behavior.
-- Link to one or more use cases.
-- Be testable through acceptance criteria.
+```bash
+node .agents/tools/verify_handoff.mjs handoff/prd/rework-<n+1>.json
+```
 
-Avoid:
-- Vague words such as "properly", "normally", "as appropriate", or "seamlessly".
-- Requirements that merely repeat a use-case step without adding a rule.
-- Mixing several independent business rules into one oversized FR.
-- Technical prescriptions unless they are externally observable product
-  contracts (for example, a stable identifier required by an integration).
-- Requirements that contradict lifecycle tables or other requirements.
+The verdict uses the existing `orchestrator` handoff shape; write it from
+`.agents/skills/functional-analysis-v2/templates/verdict.json` and validate it
+with the same command.
 
-Use stable identifiers for domain entities in contracts. Do not use mutable
-display names, ordering positions, or labels as identity.
+Rules for the brief:
 
-### Phase 6: Derive acceptance criteria
+- Copy P0/P1 findings verbatim enough to act on. Do not add new requirements.
+- `non_blocking` carries `P2` only, and the author may defer it with a reason.
+- If the author recorded a `disagreement`, add it to the next reviewer's input as
+  an explicit item. The reviewer must uphold it with evidence or withdraw it.
+- A `P2` never blocks acceptance. It is reported as a follow-up.
+- Do not turn a `P2` into a `P0/P1` during the gate. Only the reviewer assigns
+  priority.
 
-Build acceptance checks from the domain rules, not only from the happy path.
-For each important workflow, cover:
-- Successful creation and normal use.
-- Invalid input and atomic rejection.
-- Boundary values and empty selections.
-- Duplicate and concurrent operations.
-- Allowed and forbidden lifecycle transitions.
-- Isolation between related records.
-- Historical data and migration anomalies, where applicable.
-- Compatibility with existing behavior and adjacent systems.
-
-Every critical invariant and every restrictive rule in the PRD must have at
-least one observable acceptance check. Acceptance criteria must not introduce
-new behavior that is absent from the solution or FRs.
-
-### Phase 7: Self-review (two passes)
-
-**Pass A — product/domain completeness**
-- Can a reader understand the concepts without knowing the codebase?
-- Are entity ownership, identity, cardinality, and lifecycle explicit?
-- Are states and transitions complete, including forbidden transitions?
-- Are uniqueness, isolation, cancellation, correction, and history rules clear?
-- Are defaults, editing restrictions, ordering, and label collisions defined?
-- Are grouping and ranking dimensions explicit?
-- Are migration, compatibility, and downstream identifier contracts covered?
-- Are atomicity and failure outcomes defined?
-
-**Pass B — consistency and testability**
-- Every use case has a primary actor listed under Actors.
-- Every FR maps to at least one UC; every critical rule is covered by an FR.
-- Every restrictive or conditional FR has a corresponding acceptance check.
-- Acceptance checks agree with the solution, lifecycle, and FRs.
-- No two sections define conflicting behavior.
-- No mutable label is used as entity identity.
-- No hidden assumptions or unresolved decisions remain.
-- No `TODO`, `TBD`, or `???` remain before handoff.
-
-Fix issues found in either pass before asking for acceptance. Do not send an
-obviously incomplete PRD for the human to discover defects that this checklist
-can catch.
-
-## 5. Human acceptance
+## 8. Stage 4: Human acceptance
 
 1. Keep Meta status as `draft`.
-2. Present the PRD path and a concise summary of the important product
-   decisions, assumptions, and any remaining risks.
+2. Present the PRD path and a short audit: rounds used, P0/P1 resolved, P2
+   follow-ups, assumptions, open questions, and remaining risks.
 3. Ask the human to accept the PRD.
 4. On explicit acceptance, set Meta status to `accepted`.
 5. Do not start `spec-kit-ears` in the same run before acceptance is explicit.
 
-A PRD with unresolved product decisions or non-empty Open questions is not
-ready for acceptance. If the human accepts a documented assumption, retain
-the `[ASSUMPTION]` marker unless the human explicitly confirms it as a rule.
+A PRD with a non-empty Open questions section is not ready for acceptance. An
+accepted `[ASSUMPTION]` stays marked unless the human explicitly confirms it as a
+rule.
 
-## 6. Outputs
+## 9. Stop and escalate
 
-- `Tasks/<KEY>/PRD.md`, English, initially `draft`.
-- After explicit human approval, the same PRD with status `accepted`.
+Write `verdict.json` with `ESCALATE` and a non-empty reason when:
+
+- A model id is unavailable, or the runtime cannot select a model per role.
+- Rework round 3 ends with a P0 or P1.
+- The same P0/P1 survives two consecutive reviews.
+- The reviewer edits the PRD or a product file.
+- An author or reviewer handoff fails validation twice.
+- The author changes product code, a spec, a migration, or `.planning/`.
+- A P0/P1 needs a human product decision and the human does not answer.
+- The author and reviewer disagree on scope and evidence does not settle it.
+
+Save the current PRD and the last review. Do not run another round without new
+information.
+
+## 10. Outputs
+
+- `Tasks/<KEY>/PRD.md`, English, `draft` until human acceptance.
+- `handoff/prd/author-<n>.json` for every author round.
+- `handoff/prd/review-<n>.json` for every review round.
+- `handoff/prd/rework-<n>.json` only when a review has P0/P1.
+- `handoff/prd/human-answers-<n>.md` only when a question needs a human decision.
+- `handoff/prd/verdict.json` with `READY` or `ESCALATE`.
 - No product code, tests, EARS specification, architecture document, or
-  `.planning/` wave is created or edited by this skill.
+  `.planning/` wave.
 
-## 7. Stop and rollback
+## 11. Definition of done
 
-- Missing pain, primary actor, or observable success signal: ask the human.
-- Material ambiguity that changes user-visible behavior: ask; do not guess.
-- Unsupported claims: remove them or mark `[ASSUMPTION]`.
-- Invented latency, volume, cost, or performance targets: remove them unless
-  stated by the human.
-- If product files under `apps/`, `racing_manager_*`, CMS, or Prisma changed,
-  restore them and stop.
-- Do not write EARS wording, C4 diagrams, DTO contracts, architecture, or
-  implementation plans in this skill.
+- The last review has no P0 or P1.
+- `handoff/prd/verdict.json` validates and says `READY`.
+- Every author and reviewer handoff validates.
+- The reviewer fingerprint shows no PRD edit and no product edit.
+- The PRD is `draft`, and the human has been asked to accept it.
+- P2 follow-ups and remaining assumptions are listed, not hidden.
 
-## 8. Exit
+## 12. Exit
 
-State the path to the PRD and whether it is `draft` or `accepted`.
-When accepted, say the next skill is `spec-kit-ears`; `architecture` may follow
-when system analysis is needed. Ask whether to proceed only after acceptance.
+State the PRD path, the number of rounds, the resolved P0/P1 count, and the P2
+follow-ups. When accepted, say the next skill is `spec-kit-ears`; `architecture`
+may follow when system analysis is needed. Ask whether to proceed only after
+acceptance.
