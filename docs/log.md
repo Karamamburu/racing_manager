@@ -2,6 +2,10 @@
 
 Append-only. Prefix every entry with `## [YYYY-MM-DD] ingest|query|lint | Title`.
 
+## [2026-11-09] ingest | Protocol participant search and city/team filters
+
+Event protocol rows can be searched by participant name and filtered by distinct city/team values present in the loaded `event.registrations`. Filtering stays client-side, combines AND across controls and OR within each multi-select, hides empty groups/tabs, and keeps category actions on the full row set. Spec: `specs/protocol-search-ears.md`. Updated [domains/events.md](domains/events.md).
+
 ## [2026-11-09] ingest | Functional analysis as a two-model pipeline
 
 Converted `functional-analysis-v2` into an author/reviewer pipeline: DeepSeek V4.1 Flash writes the PRD, Gemini 4 Argon reviews it read-only with P0/P1/P2 findings, and any P0/P1 returns the PRD for rework for at most three rounds. Added role files, handoff templates, model slots, and validator support in `verify_handoff.mjs` plus `verify_prd_coverage.mjs`. Updated the kit router, EARS/architecture inputs, prompts, and [concepts/agent-workflow.md](concepts/agent-workflow.md).
