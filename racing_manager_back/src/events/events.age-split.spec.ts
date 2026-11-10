@@ -35,6 +35,17 @@ type StoredSectionRow = StoredSectionSeed & {
   gender: string;
 };
 
+type CategorySeed = {
+  categoryNumber: number;
+  groupId: string;
+};
+
+type CategoryRow = CategorySeed & {
+  startId: string;
+  formatId: number;
+  gender: string;
+};
+
 type BracketSeed = {
   formatId: number | null;
   gender: string;
@@ -44,6 +55,7 @@ type HarnessOptions = {
   people?: PersonSeed[];
   starts?: 'one' | 'none';
   sections?: StoredSectionSeed[];
+  categories?: CategorySeed[];
   bracketGender?: Gender;
 };
 
@@ -113,10 +125,20 @@ function sectionsFor(seeds: StoredSectionSeed[]): StoredSectionRow[] {
   }));
 }
 
+function categoriesFor(seeds: CategorySeed[]): CategoryRow[] {
+  return seeds.map((seed) => ({
+    startId: START_ID,
+    formatId: FORMAT_ID,
+    gender: 'M',
+    ...seed,
+  }));
+}
+
 function makeHarness(options: HarnessOptions = {}) {
   const people = options.people ?? [];
   const starts = options.starts === 'none' ? [] : [startRow()];
   const sectionRows = sectionsFor(options.sections ?? []);
+  const categoryRows = categoriesFor(options.categories ?? []);
   const brackets: BracketSeed[] = options.bracketGender
     ? [{ formatId: FORMAT_ID, gender: options.bracketGender }]
     : [];
@@ -156,6 +178,9 @@ function makeHarness(options: HarnessOptions = {}) {
     categoryFinish: { findMany: jest.fn(() => Promise.resolve([])) },
     classCompetition: { findMany: jest.fn(() => Promise.resolve(brackets)) },
     ageSplitSection: { findMany: jest.fn(() => Promise.resolve(sectionRows)) },
+    ageSplitCategory: {
+      findMany: jest.fn(() => Promise.resolve(categoryRows)),
+    },
   };
   const roles = { assertAdminAccess: jest.fn(), assertHasAnyRole: jest.fn() };
   const users = { findBySub: jest.fn() };
@@ -171,57 +196,57 @@ function makeHarness(options: HarnessOptions = {}) {
   return { service, prisma };
 }
 
-function placeOf(
-  rows: { id: string; place: number | null }[],
-  key: string,
-): number | null {
+type ProtocolRowLike = {
+  id: string;
+  place: number | null;
+  sectionId: string;
+};
+
+function rowOf(rows: ProtocolRowLike[], key: string): ProtocolRowLike {
   const row = rows.find((candidate) => candidate.id === `registration-${key}`);
   if (!row) {
     throw new Error(`Missing protocol row ${key}`);
   }
-  return row.place;
+  return row;
 }
 
-function sectionOf(
-  rows: { id: string; sectionId: string }[],
-  key: string,
-): string {
-  const row = rows.find((candidate) => candidate.id === `registration-${key}`);
-  if (!row) {
-    throw new Error(`Missing protocol row ${key}`);
-  }
-  return row.sectionId;
+function placeOf(rows: ProtocolRowLike[], key: string): number | null {
+  return rowOf(rows, key).place;
 }
 
-describe('EventsService.findById age splits', () => {
-  it('returns today’s category places for an unsplit event', async () => {
+function sectionOf(rows: ProtocolRowLike[], key: string): string {
+  return rowOf(rows, key).sectionId;
+}
+
+describe('EventsService.findById age categories', () => {
+  it('keeps an unsplit category disabled with CATEGORY on every row', async () => {
     const { service } = makeHarness({
       people: [
         {
           key: 'slow',
           gender: 'M',
-          birthYear: 1990,
+          birthYear: CONTROL_YEAR - 37,
           startNumber: 3,
           timeMs: 1_500_000,
         },
         {
           key: 'fast',
           gender: 'M',
-          birthYear: 2001,
+          birthYear: CONTROL_YEAR - 26,
           startNumber: 1,
           timeMs: 1_400_000,
         },
         {
           key: 'dns',
           gender: 'M',
-          birthYear: 1985,
+          birthYear: CONTROL_YEAR - 42,
           startNumber: 2,
           timeMs: null,
         },
         {
           key: 'woman',
           gender: 'F',
-          birthYear: 1995,
+          birthYear: CONTROL_YEAR - 32,
           startNumber: 4,
           timeMs: 1_600_000,
         },
@@ -237,11 +262,11 @@ describe('EventsService.findById age splits', () => {
       formatId: FORMAT_ID,
       gender: 'F',
       enabled: false,
-      sections: [],
+      categories: [],
     });
     expect(
       event.ageSplits?.every(
-        (split) => split.enabled === false && split.sections.length === 0,
+        (split) => split.enabled === false && split.categories.length === 0,
       ),
     ).toBe(true);
     expect(rows.every((row) => row.sectionId === 'CATEGORY')).toBe(true);
@@ -251,27 +276,159 @@ describe('EventsService.findById age splits', () => {
     expect(placeOf(rows, 'woman')).toBe(1);
   });
 
-  it('numbers places from 1 inside the junior preset and the remainder', async () => {
+  it('renders stored custom categories with their ids, subtitles and places', async () => {
+    const { service } = makeHarness({
+      people: [
+        {
+          key: 'young-slow',
+          gender: 'M',
+          birthYear: CONTROL_YEAR - 16,
+          startNumber: 2,
+          timeMs: 2_000_000,
+        },
+        {
+          key: 'young-fast',
+          gender: 'M',
+          birthYear: CONTROL_YEAR - 18,
+          startNumber: 1,
+          timeMs: 1_000_000,
+        },
+        {
+          key: 'adult-slow',
+          gender: 'M',
+          birthYear: CONTROL_YEAR - 20,
+          startNumber: 4,
+          timeMs: 1_500_000,
+        },
+        {
+          key: 'adult-fast',
+          gender: 'M',
+          birthYear: CONTROL_YEAR - 30,
+          startNumber: 3,
+          timeMs: 1_200_000,
+        },
+      ],
+      categories: [
+        { categoryNumber: 1, groupId: 'AGE_17_18' },
+        { categoryNumber: 1, groupId: 'AGE_15_16' },
+        { categoryNumber: 2, groupId: 'AGE_24_40' },
+        { categoryNumber: 2, groupId: 'AGE_19_20' },
+        { categoryNumber: 2, groupId: 'AGE_21_23' },
+      ],
+    });
+
+    const event = await service.findById(EVENT_ID, { syncStatuses: false });
+    const rows = event.registrations ?? [];
+
+    expect(event.ageSplits).toEqual([
+      {
+        startId: START_ID,
+        formatId: FORMAT_ID,
+        gender: 'M',
+        enabled: true,
+        categories: [
+          {
+            id: 'CATEGORY_1',
+            number: 1,
+            title: 'Возрастная категория 1',
+            subtitle: '15–16, 17–18',
+            groupIds: ['AGE_15_16', 'AGE_17_18'],
+          },
+          {
+            id: 'CATEGORY_2',
+            number: 2,
+            title: 'Возрастная категория 2',
+            subtitle: '19–20, 21–23, 24–40',
+            groupIds: ['AGE_19_20', 'AGE_21_23', 'AGE_24_40'],
+          },
+        ],
+      },
+    ]);
+    expect(sectionOf(rows, 'young-fast')).toBe('CATEGORY_1');
+    expect(sectionOf(rows, 'young-slow')).toBe('CATEGORY_1');
+    expect(sectionOf(rows, 'adult-fast')).toBe('CATEGORY_2');
+    expect(sectionOf(rows, 'adult-slow')).toBe('CATEGORY_2');
+    expect(placeOf(rows, 'young-fast')).toBe(1);
+    expect(placeOf(rows, 'young-slow')).toBe(2);
+    expect(placeOf(rows, 'adult-fast')).toBe(1);
+    expect(placeOf(rows, 'adult-slow')).toBe(2);
+  });
+
+  it('places unassigned groups into the remainder and future birth years last', async () => {
+    const { service } = makeHarness({
+      people: [
+        {
+          key: 'child',
+          gender: 'M',
+          birthYear: CONTROL_YEAR - 10,
+          startNumber: 1,
+          timeMs: 1_000_000,
+        },
+        {
+          key: 'older',
+          gender: 'M',
+          birthYear: CONTROL_YEAR - 47,
+          startNumber: 2,
+          timeMs: 2_000_000,
+        },
+        {
+          key: 'future',
+          gender: 'M',
+          birthYear: CONTROL_YEAR + 3,
+          startNumber: 3,
+          timeMs: 3_000_000,
+        },
+      ],
+      categories: [{ categoryNumber: 1, groupId: 'AGE_LE_14' }],
+    });
+
+    const event = await service.findById(EVENT_ID, { syncStatuses: false });
+    const rows = event.registrations ?? [];
+
+    expect(event.ageSplits?.[0].enabled).toBe(true);
+    expect(event.ageSplits?.[0].categories).toEqual([
+      {
+        id: 'CATEGORY_1',
+        number: 1,
+        title: 'Возрастная категория 1',
+        subtitle: '≤14',
+        groupIds: ['AGE_LE_14'],
+      },
+    ]);
+    expect(sectionOf(rows, 'child')).toBe('CATEGORY_1');
+    expect(sectionOf(rows, 'older')).toBe('REMAINDER');
+    expect(sectionOf(rows, 'future')).toBe('NO_BIRTH_YEAR');
+    expect(rows.map((row) => row.sectionId)).toEqual([
+      'CATEGORY_1',
+      'REMAINDER',
+      'NO_BIRTH_YEAR',
+    ]);
+    expect(placeOf(rows, 'child')).toBe(1);
+    expect(placeOf(rows, 'older')).toBe(1);
+    expect(placeOf(rows, 'future')).toBe(1);
+  });
+
+  it('converts stored legacy sections into categories in stored order', async () => {
     const { service } = makeHarness({
       people: [
         {
           key: 'junior',
           gender: 'M',
-          birthYear: 2005,
+          birthYear: CONTROL_YEAR - 20,
           startNumber: 1,
           timeMs: 5_000_000,
         },
         {
-          key: 'senior-slow',
+          key: 'master-slow',
           gender: 'M',
-          birthYear: 1990,
+          birthYear: CONTROL_YEAR - 47,
           startNumber: 2,
           timeMs: 3_000_000,
         },
         {
-          key: 'senior-fast',
+          key: 'master-fast',
           gender: 'M',
-          birthYear: 1980,
+          birthYear: CONTROL_YEAR - 50,
           startNumber: 3,
           timeMs: 2_000_000,
         },
@@ -282,119 +439,122 @@ describe('EventsService.findById age splits', () => {
           sectionKind: 'PRESET',
           sortOrder: 0,
         },
+        { sectionId: 'AGE_41_50', sectionKind: 'BASE_GROUP', sortOrder: 1 },
       ],
     });
 
     const event = await service.findById(EVENT_ID, { syncStatuses: false });
     const rows = event.registrations ?? [];
 
-    expect(event.ageSplits).toHaveLength(1);
-    expect(event.ageSplits?.[0]).toEqual({
-      startId: START_ID,
-      formatId: FORMAT_ID,
-      gender: 'M',
-      enabled: true,
-      sections: [
-        {
-          id: 'PRESET_JUNIOR_UNDER_24',
-          kind: 'PRESET',
-          title: 'Юниоры и младше (<24)',
-        },
-      ],
-    });
-    expect(sectionOf(rows, 'junior')).toBe('PRESET_JUNIOR_UNDER_24');
-    expect(sectionOf(rows, 'senior-slow')).toBe('REMAINDER');
-    expect(sectionOf(rows, 'senior-fast')).toBe('REMAINDER');
+    expect(event.ageSplits?.[0].enabled).toBe(true);
+    expect(event.ageSplits?.[0].categories).toEqual([
+      {
+        id: 'CATEGORY_1',
+        number: 1,
+        title: 'Возрастная категория 1',
+        subtitle: '≤14, 15–16, 17–18, 19–20, 21–23',
+        groupIds: [
+          'AGE_LE_14',
+          'AGE_15_16',
+          'AGE_17_18',
+          'AGE_19_20',
+          'AGE_21_23',
+        ],
+      },
+      {
+        id: 'CATEGORY_2',
+        number: 2,
+        title: 'Возрастная категория 2',
+        subtitle: '41–50',
+        groupIds: ['AGE_41_50'],
+      },
+    ]);
+    expect(sectionOf(rows, 'junior')).toBe('CATEGORY_1');
+    expect(sectionOf(rows, 'master-fast')).toBe('CATEGORY_2');
+    expect(sectionOf(rows, 'master-slow')).toBe('CATEGORY_2');
     expect(placeOf(rows, 'junior')).toBe(1);
-    expect(placeOf(rows, 'senior-fast')).toBe(1);
-    expect(placeOf(rows, 'senior-slow')).toBe(2);
+    expect(placeOf(rows, 'master-fast')).toBe(1);
+    expect(placeOf(rows, 'master-slow')).toBe(2);
   });
 
-  it('never places a future birth year into a base section', async () => {
+  it('prefers new membership rows over legacy sections of the same category', async () => {
     const { service } = makeHarness({
       people: [
         {
-          key: 'future',
+          key: 'adult',
           gender: 'M',
-          birthYear: CONTROL_YEAR + 3,
+          birthYear: CONTROL_YEAR - 30,
           startNumber: 1,
           timeMs: 1_000_000,
         },
         {
           key: 'child',
           gender: 'M',
-          birthYear: CONTROL_YEAR - 12,
+          birthYear: CONTROL_YEAR - 10,
           startNumber: 2,
-          timeMs: 1_100_000,
+          timeMs: 2_000_000,
         },
       ],
       sections: [
         { sectionId: 'AGE_LE_14', sectionKind: 'BASE_GROUP', sortOrder: 0 },
       ],
+      categories: [{ categoryNumber: 1, groupId: 'AGE_24_40' }],
     });
 
     const event = await service.findById(EVENT_ID, { syncStatuses: false });
     const rows = event.registrations ?? [];
 
-    expect(sectionOf(rows, 'child')).toBe('AGE_LE_14');
-    expect(sectionOf(rows, 'future')).toBe('NO_BIRTH_YEAR');
-    expect(rows.filter((row) => row.sectionId === 'AGE_LE_14')).toHaveLength(1);
-    expect(placeOf(rows, 'child')).toBe(1);
-    expect(placeOf(rows, 'future')).toBe(1);
+    expect(event.ageSplits?.[0].categories).toEqual([
+      {
+        id: 'CATEGORY_1',
+        number: 1,
+        title: 'Возрастная категория 1',
+        subtitle: '24–40',
+        groupIds: ['AGE_24_40'],
+      },
+    ]);
+    expect(sectionOf(rows, 'adult')).toBe('CATEGORY_1');
+    expect(sectionOf(rows, 'child')).toBe('REMAINDER');
+    expect(rows.some((row) => row.sectionId === 'CATEGORY_2')).toBe(false);
   });
 
-  it('orders base sections by their stored order and ranks places per section', async () => {
+  it('ignores legacy rows whose ids are no longer recognized', async () => {
     const { service } = makeHarness({
       people: [
         {
-          key: 'master-3',
+          key: 'rider',
           gender: 'M',
-          birthYear: CONTROL_YEAR - 67,
-          startNumber: 2,
-          timeMs: 2_000_000,
-        },
-        {
-          key: 'master-2',
-          gender: 'M',
-          birthYear: CONTROL_YEAR - 57,
+          birthYear: CONTROL_YEAR - 30,
           startNumber: 1,
           timeMs: 1_000_000,
         },
       ],
       sections: [
-        { sectionId: 'AGE_51_60', sectionKind: 'BASE_GROUP', sortOrder: 0 },
-        { sectionId: 'AGE_61_PLUS', sectionKind: 'BASE_GROUP', sortOrder: 1 },
+        { sectionId: 'PRESET_ALL_GROUPS', sectionKind: 'PRESET', sortOrder: 0 },
       ],
     });
 
     const event = await service.findById(EVENT_ID, { syncStatuses: false });
     const rows = event.registrations ?? [];
-    const sections = event.ageSplits?.[0].sections ?? [];
 
-    expect(sections.map((section) => section.id)).toEqual([
-      'AGE_51_60',
-      'AGE_61_PLUS',
-    ]);
-    expect(sections.map((section) => section.title)).toEqual([
-      'Мастер 2 (51–60)',
-      'Мастер 3 (61+)',
-    ]);
-    expect(rows.map((row) => row.sectionId)).toEqual([
-      'AGE_51_60',
-      'AGE_61_PLUS',
-    ]);
-    expect(placeOf(rows, 'master-2')).toBe(1);
-    expect(placeOf(rows, 'master-3')).toBe(1);
+    expect(event.ageSplits?.[0]).toEqual({
+      startId: START_ID,
+      formatId: FORMAT_ID,
+      gender: 'M',
+      enabled: false,
+      categories: [],
+    });
+    expect(rows.every((row) => row.sectionId === 'CATEGORY')).toBe(true);
   });
 
-  it('keeps a class competition category whole while reporting the stored split', async () => {
+  it('keeps a class competition category whole while reporting the stored categories', async () => {
     const { service } = makeHarness({
       bracketGender: 'M',
       people: [
         {
           key: 'young',
           gender: 'M',
-          birthYear: CONTROL_YEAR - 12,
+          birthYear: CONTROL_YEAR - 10,
           startNumber: 1,
           timeMs: 2_000_000,
         },
@@ -406,9 +566,7 @@ describe('EventsService.findById age splits', () => {
           timeMs: 1_000_000,
         },
       ],
-      sections: [
-        { sectionId: 'AGE_LE_14', sectionKind: 'BASE_GROUP', sortOrder: 0 },
-      ],
+      categories: [{ categoryNumber: 1, groupId: 'AGE_LE_14' }],
     });
 
     const event = await service.findById(EVENT_ID, { syncStatuses: false });
@@ -422,18 +580,23 @@ describe('EventsService.findById age splits', () => {
       formatId: FORMAT_ID,
       gender: 'M',
       enabled: true,
-      sections: [
+      categories: [
         {
-          id: 'AGE_LE_14',
-          kind: 'BASE_GROUP',
-          title: 'Юноши младшего возраста (≤14)',
+          id: 'CATEGORY_1',
+          number: 1,
+          title: 'Возрастная категория 1',
+          subtitle: '≤14',
+          groupIds: ['AGE_LE_14'],
         },
       ],
     });
   });
 
   it('omits ageSplits for an event without starts', async () => {
-    const { service } = makeHarness({ starts: 'none' });
+    const { service } = makeHarness({
+      starts: 'none',
+      categories: [{ categoryNumber: 1, groupId: 'AGE_LE_14' }],
+    });
 
     const event = await service.findById(EVENT_ID, { syncStatuses: false });
 
@@ -447,7 +610,7 @@ describe('EventsService.findById age splits', () => {
         {
           key: 'one',
           gender: 'M',
-          birthYear: 1990,
+          birthYear: CONTROL_YEAR - 37,
           startNumber: 1,
           timeMs: 1_000_000,
         },
