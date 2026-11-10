@@ -137,7 +137,7 @@ export class AgeSplitService {
       throw new BadRequestException(CATEGORY_NOT_FOUND_MESSAGE);
     }
 
-    const sections = normalizeAgeSplitSections(parsed.selections);
+    const sections = normalizeAgeSplitSections(parsed.sections);
     await this.prisma.$transaction((tx) =>
       this.repository.replace(tx, key, sections),
     );

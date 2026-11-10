@@ -8,7 +8,7 @@ const validBody = (overrides: Record<string, unknown> = {}) => ({
   startId: START_ID,
   formatId: 1,
   enabled: true,
-  selections: [{ kind: 'BASE_GROUP', id: 'AGE_41_50' }],
+  sections: [{ kind: 'BASE_GROUP', id: 'AGE_41_50' }],
   ...overrides,
 });
 
@@ -18,7 +18,7 @@ describe('parseSetAgeSplitBody', () => {
       validBody({
         gender: 'F',
         formatId: 3,
-        selections: [
+        sections: [
           { kind: 'BASE_GROUP', id: 'AGE_51_60' },
           { kind: 'PRESET', id: 'PRESET_JUNIOR_UNDER_24' },
         ],
@@ -30,7 +30,7 @@ describe('parseSetAgeSplitBody', () => {
       startId: START_ID,
       formatId: 3,
       enabled: true,
-      selections: [
+      sections: [
         { kind: 'BASE_GROUP', id: 'AGE_51_60' },
         { kind: 'PRESET', id: 'PRESET_JUNIOR_UNDER_24' },
       ],
@@ -39,7 +39,7 @@ describe('parseSetAgeSplitBody', () => {
 
   it('parses a disabled body with no sections', () => {
     const parsed = parseSetAgeSplitBody(
-      validBody({ enabled: false, selections: [] }),
+      validBody({ enabled: false, sections: [] }),
     );
 
     expect(parsed).toEqual({
@@ -47,7 +47,7 @@ describe('parseSetAgeSplitBody', () => {
       startId: START_ID,
       formatId: 1,
       enabled: false,
-      selections: [],
+      sections: [],
     });
   });
 
@@ -65,20 +65,20 @@ describe('parseSetAgeSplitBody', () => {
     ];
     const parsed = parseSetAgeSplitBody(
       validBody({
-        selections: ids.map((id) => ({ kind: 'BASE_GROUP', id })),
+        sections: ids.map((id) => ({ kind: 'BASE_GROUP', id })),
       }),
     );
 
-    expect(parsed.selections).toHaveLength(9);
-    expect(parsed.selections.map((section) => section.id)).toEqual(ids);
+    expect(parsed.sections).toHaveLength(9);
+    expect(parsed.sections.map((section) => section.id)).toEqual(ids);
   });
 
   it('accepts PRESET_ALL_GROUPS in a request', () => {
     const parsed = parseSetAgeSplitBody(
-      validBody({ selections: [{ kind: 'PRESET', id: 'PRESET_ALL_GROUPS' }] }),
+      validBody({ sections: [{ kind: 'PRESET', id: 'PRESET_ALL_GROUPS' }] }),
     );
 
-    expect(parsed.selections).toEqual([
+    expect(parsed.sections).toEqual([
       { kind: 'PRESET', id: 'PRESET_ALL_GROUPS' },
     ]);
   });
@@ -86,14 +86,14 @@ describe('parseSetAgeSplitBody', () => {
   it('accepts a preset together with a base group it absorbs', () => {
     const parsed = parseSetAgeSplitBody(
       validBody({
-        selections: [
+        sections: [
           { kind: 'BASE_GROUP', id: 'AGE_15_16' },
           { kind: 'PRESET', id: 'PRESET_JUNIOR_UNDER_24' },
         ],
       }),
     );
 
-    expect(parsed.selections).toEqual([
+    expect(parsed.sections).toEqual([
       { kind: 'BASE_GROUP', id: 'AGE_15_16' },
       { kind: 'PRESET', id: 'PRESET_JUNIOR_UNDER_24' },
     ]);
@@ -104,7 +104,7 @@ describe('parseSetAgeSplitBody', () => {
       ...validBody(),
       eventId: '22222222-2222-4222-8222-222222222222',
       createdAt: '2026-11-10T00:00:00.000Z',
-      sections: [{ kind: 'BASE_GROUP', id: 'AGE_LE_14' }],
+      ageSections: [{ kind: 'BASE_GROUP', id: 'AGE_LE_14' }],
     });
 
     expect(parsed).toEqual({
@@ -112,14 +112,14 @@ describe('parseSetAgeSplitBody', () => {
       startId: START_ID,
       formatId: 1,
       enabled: true,
-      selections: [{ kind: 'BASE_GROUP', id: 'AGE_41_50' }],
+      sections: [{ kind: 'BASE_GROUP', id: 'AGE_41_50' }],
     });
   });
 
   it.each([
     ['null', null],
     ['an array', []],
-    ['a string', 'selections'],
+    ['a string', 'sections'],
     ['undefined', undefined],
   ])('rejects a body that is %s', (_label, body) => {
     expect(() => parseSetAgeSplitBody(body)).toThrow(BadRequestException);
@@ -139,9 +139,9 @@ describe('parseSetAgeSplitBody', () => {
     ['a non-boolean enabled', { enabled: 'true' }],
     ['a numeric enabled', { enabled: 1 }],
     ['a missing enabled', { enabled: undefined }],
-    ['missing selections', { selections: undefined }],
-    ['null selections', { selections: null }],
-    ['non-array selections', { selections: 'AGE_41_50' }],
+    ['missing sections', { sections: undefined }],
+    ['null sections', { sections: null }],
+    ['non-array sections', { sections: 'AGE_41_50' }],
   ])('rejects %s', (_label, overrides) => {
     expect(() => parseSetAgeSplitBody(validBody(overrides))).toThrow(
       BadRequestException,
@@ -149,37 +149,37 @@ describe('parseSetAgeSplitBody', () => {
   });
 
   it('rejects a non-object selection item', () => {
-    expect(() =>
-      parseSetAgeSplitBody(validBody({ selections: [null] })),
-    ).toThrow(BadRequestException);
-    expect(() => parseSetAgeSplitBody(validBody({ selections: [[]] }))).toThrow(
+    expect(() => parseSetAgeSplitBody(validBody({ sections: [null] }))).toThrow(
+      BadRequestException,
+    );
+    expect(() => parseSetAgeSplitBody(validBody({ sections: [[]] }))).toThrow(
       BadRequestException,
     );
     expect(() =>
-      parseSetAgeSplitBody(validBody({ selections: ['AGE_41_50'] })),
+      parseSetAgeSplitBody(validBody({ sections: ['AGE_41_50'] })),
     ).toThrow(BadRequestException);
   });
 
   it('rejects an unknown selection kind', () => {
     expect(() =>
       parseSetAgeSplitBody(
-        validBody({ selections: [{ kind: 'GROUP', id: 'AGE_41_50' }] }),
+        validBody({ sections: [{ kind: 'GROUP', id: 'AGE_41_50' }] }),
       ),
     ).toThrow(BadRequestException);
     expect(() =>
-      parseSetAgeSplitBody(validBody({ selections: [{ id: 'AGE_41_50' }] })),
+      parseSetAgeSplitBody(validBody({ sections: [{ id: 'AGE_41_50' }] })),
     ).toThrow(BadRequestException);
   });
 
   it('rejects an unknown group id', () => {
     expect(() =>
       parseSetAgeSplitBody(
-        validBody({ selections: [{ kind: 'BASE_GROUP', id: 'AGE_99_100' }] }),
+        validBody({ sections: [{ kind: 'BASE_GROUP', id: 'AGE_99_100' }] }),
       ),
     ).toThrow('неизвестную возрастную группу');
     expect(() =>
       parseSetAgeSplitBody(
-        validBody({ selections: [{ kind: 'BASE_GROUP', id: 'AGE_19_21' }] }),
+        validBody({ sections: [{ kind: 'BASE_GROUP', id: 'AGE_19_21' }] }),
       ),
     ).toThrow(BadRequestException);
   });
@@ -188,7 +188,7 @@ describe('parseSetAgeSplitBody', () => {
     expect(() =>
       parseSetAgeSplitBody(
         validBody({
-          selections: [{ kind: 'BASE_GROUP', id: 'PRESET_MASTERS_41_PLUS' }],
+          sections: [{ kind: 'BASE_GROUP', id: 'PRESET_MASTERS_41_PLUS' }],
         }),
       ),
     ).toThrow(BadRequestException);
@@ -197,7 +197,7 @@ describe('parseSetAgeSplitBody', () => {
   it('rejects an unknown preset id', () => {
     expect(() =>
       parseSetAgeSplitBody(
-        validBody({ selections: [{ kind: 'PRESET', id: 'PRESET_TEENS' }] }),
+        validBody({ sections: [{ kind: 'PRESET', id: 'PRESET_TEENS' }] }),
       ),
     ).toThrow('неизвестный пресет');
   });
@@ -205,14 +205,14 @@ describe('parseSetAgeSplitBody', () => {
   it('rejects a base group id used as a preset', () => {
     expect(() =>
       parseSetAgeSplitBody(
-        validBody({ selections: [{ kind: 'PRESET', id: 'AGE_41_50' }] }),
+        validBody({ sections: [{ kind: 'PRESET', id: 'AGE_41_50' }] }),
       ),
     ).toThrow(BadRequestException);
   });
 
   it('rejects a missing selection id', () => {
     expect(() =>
-      parseSetAgeSplitBody(validBody({ selections: [{ kind: 'BASE_GROUP' }] })),
+      parseSetAgeSplitBody(validBody({ sections: [{ kind: 'BASE_GROUP' }] })),
     ).toThrow(BadRequestException);
   });
 
@@ -220,7 +220,7 @@ describe('parseSetAgeSplitBody', () => {
     expect(() =>
       parseSetAgeSplitBody(
         validBody({
-          selections: [
+          sections: [
             { kind: 'BASE_GROUP', id: 'AGE_41_50' },
             { kind: 'BASE_GROUP', id: 'AGE_41_50' },
           ],
@@ -230,7 +230,7 @@ describe('parseSetAgeSplitBody', () => {
     expect(() =>
       parseSetAgeSplitBody(
         validBody({
-          selections: [
+          sections: [
             { kind: 'PRESET', id: 'PRESET_MASTERS_41_PLUS' },
             { kind: 'PRESET', id: 'PRESET_MASTERS_41_PLUS' },
           ],
@@ -244,15 +244,15 @@ describe('parseSetAgeSplitBody', () => {
       parseSetAgeSplitBody(
         validBody({
           enabled: false,
-          selections: [{ kind: 'BASE_GROUP', id: 'AGE_41_50' }],
+          sections: [{ kind: 'BASE_GROUP', id: 'AGE_41_50' }],
         }),
       ),
-    ).toThrow('selections должен быть пустым');
+    ).toThrow('sections должен быть пустым');
   });
 
   it('rejects an enabled split without sections', () => {
     expect(() =>
-      parseSetAgeSplitBody(validBody({ enabled: true, selections: [] })),
+      parseSetAgeSplitBody(validBody({ enabled: true, sections: [] })),
     ).toThrow('нужна хотя бы одна секция');
   });
 });

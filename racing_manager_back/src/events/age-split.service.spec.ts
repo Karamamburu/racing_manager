@@ -67,7 +67,7 @@ function body(
     startId: START_ID,
     formatId: 1,
     enabled: true,
-    selections: [{ kind: 'BASE_GROUP', id: 'AGE_41_50' }],
+    sections: [{ kind: 'BASE_GROUP', id: 'AGE_41_50' }],
     ...overrides,
   };
 }
@@ -182,7 +182,7 @@ describe('AgeSplitService.setSplit', () => {
     const result = await service.setSplit(
       EVENT_ID,
       body({
-        selections: [
+        sections: [
           { kind: 'BASE_GROUP', id: 'AGE_61_PLUS' },
           { kind: 'BASE_GROUP', id: 'AGE_51_60' },
         ],
@@ -220,7 +220,7 @@ describe('AgeSplitService.setSplit', () => {
     const result = await service.setSplit(
       EVENT_ID,
       body({
-        selections: [
+        sections: [
           { kind: 'BASE_GROUP', id: 'AGE_17_18' },
           { kind: 'PRESET', id: 'PRESET_JUNIOR_UNDER_24' },
         ],
@@ -249,7 +249,7 @@ describe('AgeSplitService.setSplit', () => {
     const result = await service.setSplit(
       EVENT_ID,
       body({
-        selections: [
+        sections: [
           { kind: 'PRESET', id: 'PRESET_MASTERS_41_PLUS' },
           { kind: 'PRESET', id: 'PRESET_JUNIOR_UNDER_24' },
         ],
@@ -265,13 +265,13 @@ describe('AgeSplitService.setSplit', () => {
     ).toEqual([0, 1]);
   });
 
-  it('stores the nine base sections for PRESET_ALL_GROUPS and ignores other selections', async () => {
+  it('stores the nine base sections for PRESET_ALL_GROUPS and ignores other sections', async () => {
     const { service, replaceCalls } = makeHarness();
 
     const result = await service.setSplit(
       EVENT_ID,
       body({
-        selections: [
+        sections: [
           { kind: 'PRESET', id: 'PRESET_MASTERS_41_PLUS' },
           { kind: 'BASE_GROUP', id: 'AGE_LE_14' },
           { kind: 'PRESET', id: 'PRESET_ALL_GROUPS' },
@@ -310,14 +310,14 @@ describe('AgeSplitService.setSplit', () => {
       EVENT_ID,
       body({
         gender: 'M',
-        selections: [{ kind: 'BASE_GROUP', id: 'AGE_24_40' }],
+        sections: [{ kind: 'BASE_GROUP', id: 'AGE_24_40' }],
       }),
     );
     const female = await service.setSplit(
       EVENT_ID,
       body({
         gender: 'F',
-        selections: [{ kind: 'BASE_GROUP', id: 'AGE_24_40' }],
+        sections: [{ kind: 'BASE_GROUP', id: 'AGE_24_40' }],
       }),
     );
 
@@ -332,7 +332,7 @@ describe('AgeSplitService.setSplit', () => {
 
     const result = await service.setSplit(
       EVENT_ID,
-      body({ enabled: false, selections: [] }),
+      body({ enabled: false, sections: [] }),
     );
 
     expect(result).toEqual<AgeSplitRef>({
@@ -369,15 +369,15 @@ describe('AgeSplitService.setSplit', () => {
     ['a non-UUID startId', body({ startId: 'nope' })],
     ['a zero formatId', body({ formatId: 0 })],
     ['a non-boolean enabled', body({ enabled: 'true' })],
-    ['an empty enabled selection set', body({ selections: [] })],
+    ['an empty enabled selection set', body({ sections: [] })],
     [
       'an unknown group id',
-      body({ selections: [{ kind: 'BASE_GROUP', id: 'AGE_99' }] }),
+      body({ sections: [{ kind: 'BASE_GROUP', id: 'AGE_99' }] }),
     ],
     [
       'a duplicated selection',
       body({
-        selections: [
+        sections: [
           { kind: 'BASE_GROUP', id: 'AGE_41_50' },
           { kind: 'BASE_GROUP', id: 'AGE_41_50' },
         ],
@@ -396,7 +396,7 @@ describe('AgeSplitService.setSplit', () => {
   it('writes the same stored set when the same payload is saved twice', async () => {
     const { service, replaceCalls } = makeHarness();
     const payload = body({
-      selections: [
+      sections: [
         { kind: 'BASE_GROUP', id: 'AGE_21_23' },
         { kind: 'PRESET', id: 'PRESET_MASTERS_41_PLUS' },
       ],

@@ -21,14 +21,14 @@ export type ParsedSetAgeSplit = {
   startId: string;
   formatId: number;
   enabled: boolean;
-  selections: ParsedAgeSplitSelection[];
+  sections: ParsedAgeSplitSelection[];
 };
 
 function parseSelection(
   value: unknown,
   index: number,
 ): ParsedAgeSplitSelection {
-  const field = `selections[${index}]`;
+  const field = `sections[${index}]`;
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new BadRequestException(`${field} должен быть объектом.`);
   }
@@ -57,10 +57,10 @@ function parseSelection(
 
 function parseSelections(value: unknown): ParsedAgeSplitSelection[] {
   if (!Array.isArray(value)) {
-    throw new BadRequestException('selections должен быть массивом.');
+    throw new BadRequestException('sections должен быть массивом.');
   }
 
-  const selections: ParsedAgeSplitSelection[] = [];
+  const sections: ParsedAgeSplitSelection[] = [];
   const seen = new Set<string>();
   for (let index = 0; index < value.length; index += 1) {
     const selection = parseSelection(value[index], index);
@@ -69,9 +69,9 @@ function parseSelections(value: unknown): ParsedAgeSplitSelection[] {
       throw new BadRequestException(`Секция ${selection.id} указана дважды.`);
     }
     seen.add(key);
-    selections.push(selection);
+    sections.push(selection);
   }
-  return selections;
+  return sections;
 }
 
 export function parseSetAgeSplitBody(body: unknown): ParsedSetAgeSplit {
@@ -83,7 +83,7 @@ export function parseSetAgeSplitBody(body: unknown): ParsedSetAgeSplit {
     startId?: unknown;
     formatId?: unknown;
     enabled?: unknown;
-    selections?: unknown;
+    sections?: unknown;
   };
 
   if (raw.gender !== 'M' && raw.gender !== 'F') {
@@ -105,13 +105,13 @@ export function parseSetAgeSplitBody(body: unknown): ParsedSetAgeSplit {
     throw new BadRequestException('enabled должен быть булевым значением.');
   }
 
-  const selections = parseSelections(raw.selections);
-  if (!raw.enabled && selections.length > 0) {
+  const sections = parseSelections(raw.sections);
+  if (!raw.enabled && sections.length > 0) {
     throw new BadRequestException(
-      'При выключенном делении selections должен быть пустым.',
+      'При выключенном делении sections должен быть пустым.',
     );
   }
-  if (raw.enabled && selections.length === 0) {
+  if (raw.enabled && sections.length === 0) {
     throw new BadRequestException(
       'При включённом делении нужна хотя бы одна секция.',
     );
@@ -122,6 +122,6 @@ export function parseSetAgeSplitBody(body: unknown): ParsedSetAgeSplit {
     startId: raw.startId,
     formatId: raw.formatId,
     enabled: raw.enabled,
-    selections,
+    sections,
   };
 }
