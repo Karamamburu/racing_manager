@@ -52,9 +52,11 @@ import { AppShell } from '../../shared/layout';
 import type {
   EventFormatRef,
   EventParticipant,
+  SetAgeSplitRequest,
   StartResponse,
 } from '../../shared/types/event';
 import type { FeatureItem } from '../../shared/types/track';
+import { AgeSplitModal, type AgeSplitCategory } from './components/AgeSplitModal';
 import { ClassCompetitionPanel } from './components/ClassCompetitionPanel';
 import { EditEventModal } from './components/EditEventModal';
 import { EventTrackMap } from './components/EventTrackMap';
@@ -390,6 +392,8 @@ export function EventPage() {
   const [savingOutcomeId, setSavingOutcomeId] = useState<string | null>(null);
   const [savingRegistrationStatusId, setSavingRegistrationStatusId] = useState<string | null>(null);
   const [finishingCategory, setFinishingCategory] = useState<string | null>(null);
+  const [ageSplitCategory, setAgeSplitCategory] = useState<AgeSplitCategory | null>(null);
+  const [isSavingAgeSplit, setIsSavingAgeSplit] = useState(false);
   const [fullProtocolKeys, setFullProtocolKeys] = useState<string[]>([]);
   const [expandedProtocolKeys, setExpandedProtocolKeys] = useState<string[]>([]);
   const [protocolFilters, setProtocolFilters] =
@@ -647,6 +651,20 @@ export function EventPage() {
     }
   };
 
+  const saveAgeSplit = async (payload: SetAgeSplitRequest) => {
+    setIsSavingAgeSplit(true);
+    try {
+      await eventsService.setAgeSplit(event.id, payload);
+      await refreshEvent();
+      message.success('Возрастное деление сохранено');
+      setAgeSplitCategory(null);
+    } catch (error) {
+      message.error(eventsService.getErrorMessage(error));
+    } finally {
+      setIsSavingAgeSplit(false);
+    }
+  };
+
   const submitRegistrationStatus = async (
     participant: EventParticipant,
     nextStatus: RegistrationStatusCode,
@@ -711,6 +729,7 @@ export function EventPage() {
     registrations,
     event.formats,
     event.starts,
+    event.ageSplits ?? [],
   );
   const cityOptions = collectProtocolFilterValues(registrations, 'city');
   const teamOptions = collectProtocolFilterValues(registrations, 'team');
@@ -721,12 +740,37 @@ export function EventPage() {
         .map((section) => ({
           ...section,
           visibleRows: filterProtocolParticipants(section.rows, protocolFilters),
+          ageSections: section.ageSections
+            .map((ageSection) => ({
+              ...ageSection,
+              visibleRows: filterProtocolParticipants(
+                ageSection.rows,
+                protocolFilters,
+              ),
+            }))
+            .filter((ageSection) => ageSection.visibleRows.length > 0),
         }))
         .filter((section) => section.visibleRows.length > 0),
     }))
     .filter((group) => group.sections.length > 0);
   const showProtocolToolbar =
     event.registrations !== null && registrations.length > 0;
+  const ageSplitValue =
+    ageSplitCategory === null
+      ? null
+      : event.ageSplits?.find(
+          (item) =>
+            item.startId === ageSplitCategory.startId &&
+            item.formatId === ageSplitCategory.formatId &&
+            item.gender === ageSplitCategory.gender,
+        ) ?? null;
+  const ageSplitNotApplied =
+    ageSplitCategory !== null &&
+    classCompetitions.some(
+      (competition) =>
+        competition.formatId === ageSplitCategory.formatId &&
+        competition.gender === ageSplitCategory.gender,
+    );
 
   const handleStatusChange = (nextStatus: EventStatusCode) => {
     if (nextStatus === 'CANCELLED') {
@@ -1019,6 +1063,48 @@ export function EventPage() {
                         onAssignResult: assignFinishTime,
                       });
                       const columns = competition || categoryFinished ? lockedColumns : participantColumns;
+                      const compactActive =
+                        compactProtocol && !fullProtocolKeys.includes(section.key);
+                      const hasAgeSectionHeaders =
+                        section.ageSections.length > 1 ||
+                        (section.ageSections.length === 1 &&
+                          section.ageSections[0].title !== null);
+                      const ageSplitSelection: AgeSplitCategory | null =
+                        !bracketInProgress &&
+                        canRunBracket &&
+                        event.starts.length > 0 &&
+                        section.rows.length > 0 &&
+                        formatId != null &&
+                        (gender === 'M' || gender === 'F')
+                          ? {
+                              startId,
+                              formatId,
+                              gender,
+                              startLabel:
+                                event.starts.find((item) => item.id === startId)
+                                  ?.resolvedLabel ?? section.title,
+                              formatName: sample?.format?.name ?? '',
+                            }
+                          : null;
+                      const renderProtocolTable = (
+                        rows: EventParticipant[],
+                        tableKey: string,
+                      ) => (
+                        <Table
+                          key={tableKey}
+                          className={
+                            compactActive
+                              ? 'protocol-table protocol-table--compact'
+                              : 'protocol-table'
+                          }
+                          columns={columnsForProtocol(columns, compactActive)}
+                          dataSource={rowsWithClassification(rows, competition)}
+                          rowKey="id"
+                          pagination={false}
+                          tableLayout={compactActive ? 'fixed' : undefined}
+                          scroll={compactActive ? undefined : { x: 'max-content' }}
+                        />
+                      );
                       return {
                         key: section.key,
                         label: (
@@ -1067,6 +1153,11 @@ export function EventPage() {
                                   </Tooltip>
                                 ) : null}
                                 {categoryFinished ? <Tag>Гонка завершена</Tag> : null}
+                                {ageSplitSelection ? (
+                                  <Button onClick={() => setAgeSplitCategory(ageSplitSelection)}>
+                                    Возрастное деление
+                                  </Button>
+                                ) : null}
                                 <Collapse
                                 activeKey={expandedProtocolKeys}
                                 onChange={(keys) => changeProtocolExpansion(section.key, keys)}
@@ -1088,30 +1179,36 @@ export function EventPage() {
                                               : 'Полный протокол'}
                                           </Button>
                                         ) : null}
-                                        <Table
-                                          className={
-                                            compactProtocol && !fullProtocolKeys.includes(section.key)
-                                              ? 'protocol-table protocol-table--compact'
-                                              : 'protocol-table'
-                                          }
-                                          columns={columnsForProtocol(
-                                            columns,
-                                            compactProtocol && !fullProtocolKeys.includes(section.key),
-                                          )}
-                                          dataSource={rowsWithClassification(section.visibleRows, competition)}
-                                          rowKey="id"
-                                          pagination={false}
-                                          tableLayout={
-                                            compactProtocol && !fullProtocolKeys.includes(section.key)
-                                              ? 'fixed'
-                                              : undefined
-                                          }
-                                          scroll={
-                                            compactProtocol && !fullProtocolKeys.includes(section.key)
-                                              ? undefined
-                                              : { x: 'max-content' }
-                                          }
-                                        />
+                                        {hasAgeSectionHeaders
+                                          ? section.ageSections.map((ageSection) => (
+                                              <Space
+                                                key={ageSection.key}
+                                                direction="vertical"
+                                                size={4}
+                                                style={{ width: '100%' }}
+                                              >
+                                                <Space size={8} align="baseline" wrap>
+                                                  <Typography.Text strong>
+                                                    {ageSection.title ?? section.title}
+                                                  </Typography.Text>
+                                                  <Typography.Text type="secondary">
+                                                    {formatParticipantCount(
+                                                      ageSection.visibleRows.length,
+                                                      group.key,
+                                                    )}
+                                                  </Typography.Text>
+                                                </Space>
+                                                {renderProtocolTable(
+                                                  ageSection.visibleRows,
+                                                  `${section.key}-${ageSection.key}`,
+                                                )}
+                                              </Space>
+                                            ))
+                                          : renderProtocolTable(
+                                              section.ageSections[0]?.visibleRows ??
+                                                section.visibleRows,
+                                              `${section.key}-category`,
+                                            )}
                                       </Space>
                                     ),
                                   },
@@ -1177,6 +1274,15 @@ export function EventPage() {
         starts={event.starts}
         onClose={() => setIsRegisterParticipantOpen(false)}
         onRegistered={refreshEvent}
+      />
+      <AgeSplitModal
+        open={ageSplitCategory !== null}
+        category={ageSplitCategory}
+        value={ageSplitValue}
+        notApplied={ageSplitNotApplied}
+        saving={isSavingAgeSplit}
+        onClose={() => setAgeSplitCategory(null)}
+        onSave={saveAgeSplit}
       />
       <Modal
         title="Отозвать заявку?"
