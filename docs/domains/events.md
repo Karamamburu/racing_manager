@@ -15,7 +15,7 @@ Event catalog, admin CRUD, starts configuration, status sync, category finish, c
 - `POST /admin/events` — `CreateEventDto` with required `starts[]` (length ≥ 1); server generates each `startId`
 - `PATCH /admin/events/:id` — omit `starts` → unchanged; `starts: []` → 400; present array → full desired set, applied atomically
 - `POST /admin/events/:id/categories/finish` — body includes required `startId`; uniqueness is `(eventId, startId, formatId, gender)`
-- `PUT /admin/events/:id/categories/age-split` — `ADMINISTRATOR` + `ORGANIZER`; body `SetAgeSplitDto` (`gender`, `startId`, `formatId`, `enabled`, `sections[]` of `{ kind: 'BASE_GROUP' | 'PRESET', id }`); replaces that category's whole section set atomically, honours `Idempotency-Key` and returns `AgeSplitRef`. 400 for an empty enabled set, a duplicate or unknown id, or a category not on the event; 403 for any other role. `enabled: false` removes the stored set.
+- `PUT /admin/events/:id/categories/age-split` — `ADMINISTRATOR` + `ORGANIZER`; body `SetAgeCategoriesDto` (`gender`, `startId`, `formatId`, `enabled`, `categories[]` of `{ groupIds }`, no category ids); replaces that protocol category's whole age-category set atomically, honours `Idempotency-Key` and returns `AgeSplitRef`. 400 for a retired `sections[]`, any `kind` field or preset id, an empty enabled set, a group in two categories or twice in one, an unknown group, or a category not on the event; 403 for any other role. `enabled: false` with an empty `categories` removes the stored set; age categories sent while off are rejected.
 - `GET /participation-formats`
 - Related entities: [Event](../entities/event.md), [Track](../entities/track.md)
 
@@ -47,20 +47,30 @@ Event catalog, admin CRUD, starts configuration, status sync, category finish, c
 
 `registrations[]` carries one row per active enrollment: `enrollmentId`, `startId`, `startLabel`, `sortOrder`, `enrollmentStatus`, `outcome`, `finishTimeMs`, computed `place`, `isCupEligible`. Place is computed on read per gender × start × format; WITHDRAWN enrollments are omitted.
 
-`ageSplits?: AgeSplitRef[]` adds the stored split per category (`enabled` plus the ordered `sections[]` with `id` / `kind` / `title`). Every row carries `sectionId`; `place` is section-scoped when the category is split and keeps today's category-wide value otherwise. Implicit section ids are `CATEGORY` (unsplit category), `REMAINDER` and `NO_BIRTH_YEAR`.
+`ageSplits?: AgeSplitRef[]` adds the stored configuration per protocol category: `enabled` plus the ordered `categories[]`, each with `id` (`CATEGORY_1`…`CATEGORY_9`), `number`, `title` («Возрастная категория N»), `subtitle` (member ranges such as `15–16, 17–18`) and `groupIds[]`. Every row carries `sectionId`: `CATEGORY_n` for a configured age category, `REMAINDER` or `NO_BIRTH_YEAR` for the implicit ones, and `CATEGORY` when the protocol category is unsplit. `place` is age-category-scoped when the category is configured and keeps today's category-wide value otherwise.
 
-## Age split (AGE-SPLIT)
+## Age categories (AGE-CATEGORIES)
 
-A protocol category (`event × gender × start × format`) may carry one age split («Возрастное деление»): a non-empty stored section set that partitions that category's rows for display. It is presentation and classification only — never a registration, enrollment, result or finish mutation.
+A protocol category (`event × gender × start × format`) may carry one **age-category configuration** (UI: «Возрастные категории»): an ordered list of custom age categories that partitions that category's rows for display. It is presentation and classification only — never a registration, enrollment, result or finish mutation.
 
-- Nine base groups with inclusive bands: `AGE_LE_14` (≤14), `AGE_15_16` (15–16), `AGE_17_18` (17–18), `AGE_19_20` (19–20), `AGE_21_23` (21–23), `AGE_24_40` (24–40), `AGE_41_50` (41–50), `AGE_51_60` (51–60), `AGE_61_PLUS` (61+). Labels follow the FLGR vocabulary per gender (`Юниоры` / `Юниорки`, `Мужчины` / `Женщины`, `Мастер 1`–`Мастер 3`).
-- Two stored combined presets: `PRESET_JUNIOR_UNDER_24` («Юниоры и младше (<24)», groups ≤14 through 21–23) and `PRESET_MASTERS_41_PLUS` («Мастера 41+», 41–50 through 61+). The request-only `PRESET_ALL_GROUPS` («Все возрастные группы») is never stored: it normalizes to the nine base sections and clears combined ones. A stored preset absorbs its member groups that were also selected individually.
-- Age rule: the season runs 1 July – 30 June; `controlYear` is the calendar year the season ends in, derived from the event date in `Europe/Moscow`; age = `controlYear − birthYear`. A null birth year, or one later than `controlYear`, is unusable and lands in «Возраст не указан»; a usable participant whose base group is in no section lands in «Остальные участники».
-- Section order is by youngest age bound (base groups 0/15/17/19/21/24/41/51/61; presets 0 and 41), then `REMAINDER`, then `NO_BIRTH_YEAR`. Base titles are `{gender label} ({range})`, presets use the preset title, and the implicit titles are «Остальные участники» and «Возраст не указан». A section with no displayed rows is not rendered.
-- Category finish stays one action per gender × start × format over the full category row set, and the split adds no age dimension to its uniqueness. Changing the split is allowed before results, after results and after the finish: it recomputes displayed section places only and keeps the finish tag, row-editing lock and stored `Result.place` snapshots.
-- A category owned by a class competition keeps the stored split but is rendered unsplit while the bracket exists; it applies on the next read after the bracket is removed.
-- Legacy events without starts keep the gender → format protocol, receive no `ageSplits` and cannot be split.
-- The response is additive and backward compatible: a client that ignores `sectionId` and `ageSplits` renders as before; an unsplit category reports `enabled: false`, empty `sections` and `CATEGORY` on every row.
+- Nine base groups with inclusive bands: `AGE_LE_14` (≤14), `AGE_15_16` (15–16), `AGE_17_18` (17–18), `AGE_19_20` (19–20), `AGE_21_23` (21–23), `AGE_24_40` (24–40), `AGE_41_50` (41–50), `AGE_51_60` (51–60), `AGE_61_PLUS` (61+). Labels follow the FLGR vocabulary per gender (`Юноши` / `Девушки` младшего, среднего and старшего возраста, `Юниоры` / `Юниорки`, `Мужчины` / `Женщины`, `Мастер 1`–`Мастер 3`).
+- 1–9 custom age categories, each holding 1–9 base groups; a group belongs to at most one age category of that protocol category. Membership is explicit — any grouping is valid, including non-adjacent bands. The three fixed presets (`PRESET_JUNIOR_UNDER_24`, `PRESET_MASTERS_41_PLUS`, `PRESET_ALL_GROUPS`) are gone from the dialog and the write contract.
+- Dialog: one tab per configured category in configuration order, or one empty «Возрастная категория 1» when nothing is stored; «Добавить категорию» appends an empty tab on the right, each tab has a remove action, and a group owned by another tab is listed disabled with that tab's heading. Adding is blocked while all nine groups are assigned and is available again as soon as one is released; the last tab may be removed (no tabs, add still available). Selecting a group turns the configuration on; closing without saving changes nothing. A saved tab with no groups is dropped and does not consume a number.
+- Numbering is configuration order, resequenced on tab removal and on dropped empty tabs; membership edits, order-preserving saves and the age-based protocol order never renumber. The read-model id is `CATEGORY_{number}`, derived from stored position on every read, used as the row `sectionId`, and never sent by a client. Titles are the automatic «Возрастная категория N» plus a range subtitle in ascending age order.
+- Protocol order is by the youngest member group (bounds 0/15/17/19/21/24/41/51/61), then «Остальные участники» (`REMAINDER`), then «Возраст не указан» (`NO_BIRTH_YEAR`); remainder and no-birth-year stay implicit and always exist. A category with no displayed rows (empty, or fully filtered out) is not rendered. Numbers and protocol order are independent.
+- Age rule: the season runs 1 July – 30 June; `controlYear` is the calendar year the season ends in, derived from the event date in `Europe/Moscow`; age = `controlYear − birthYear`. A null birth year, or one later than `controlYear`, is unusable and lands in «Возраст не указан»; a usable participant whose base group is in no age category lands in «Остальные участники».
+- Places restart inside every age category (and inside `REMAINDER` / `NO_BIRTH_YEAR`) with today's rules; see [results.md](results.md).
+- «Завершить гонку» stays one action per gender × start × format over the full category row set, and the configuration adds no age dimension to its uniqueness. Changes are allowed before results, after results and after the finish: only displayed places are recomputed, while the finish tag, row-editing lock and stored `Result.place` snapshots stay as they are. One «Итоговый протокол» collapse and one compact/full toggle stay per protocol category.
+- A category owned by a class competition keeps the stored configuration but is rendered unsplit while the bracket exists; it applies on the next read after the bracket is removed. The dialog states that the stored configuration is not applied meanwhile.
+- Only administrators and organizers get the control; other viewers receive the configuration read-only. The control is offered only for a protocol category with at least one row: a configuration retained on a temporarily empty category is not applied and comes back with the rows.
+- Legacy events without starts keep the gender → format protocol, receive no `ageSplits` and cannot be configured.
+- The response is additive and backward compatible: a client that ignores `sectionId` and `ageSplits` renders as before; an unsplit category reports `enabled: false`, an empty `categories` array and `CATEGORY` on every row.
+
+## Age-category conversion
+
+- Stored legacy `age_split_sections` rows are still read as input: each row (`BASE_GROUP` or `PRESET`), taken in `sort_order`, becomes one age category holding that group or preset's member groups, numbered in that same order. The row partition, section order and places the old setting produced are preserved; headings follow the new numbering.
+- Nothing is rewritten on read. The legacy rows are cleared only by the next successful save for that protocol category, which writes the new `age_split_categories` rows. A category that has new-model rows reads those and ignores legacy rows.
+- Unknown legacy ids are ignored; a set that converts to no age category reads as disabled (one list, category-wide places).
 
 ## Protocol search and filters
 
@@ -73,10 +83,10 @@ A protocol category (`event × gender × start × format`) may carry one age spl
 ## Code
 
 - API: `racing_manager_back/src/events/`, `src/results/`, `src/idempotency/`, `src/migrations/`
-  - Age split: `age-groups.ts` (catalog, age rule, section order/titles), `age-split.service.ts` (normalization, atomic replacement), `age-split.repository.ts`, `parse-set-age-split.ts` (body validation, `PRESET_ALL_GROUPS`), `age-split.controller.ts`
+  - Age categories: `age-groups.ts` (group catalog, age rule, normalization, `CATEGORY_{number}` ids, titles/subtitles, protocol order, legacy conversion), `age-split.service.ts` (submission validation, atomic replacement), `age-split.repository.ts` (new rows plus legacy fallback), `parse-set-age-split.ts` (`SetAgeCategoriesDto`; the legacy `sections[]` parser is retained for stored rows), `age-split.controller.ts`
 - Front: `features/events`, `pages/EventPage`, `pages/CalendarPage`
-  - Age split: `features/events/protocolGroups.ts` (section partition), `pages/EventPage/components/AgeSplitModal.tsx` (control)
-- SQL: `racing_manager_db/db/migrate_age_split_2026_11_10.sql` — `age_split_sections` table plus `age_split_section_kind` enum, keyed `(eventId, startId, formatId, gender, sectionId)` with a unique `sortOrder` per category
+  - Age categories: `features/events/ageCategories.ts` (group catalog, titles, subtitles, age ordering), `features/events/protocolGroups.ts` (partition into age categories and implicit sections), `pages/EventPage/components/AgeSplitModal.tsx` (tabbed configuration dialog)
+- SQL: `racing_manager_db/db/migrate_age_categories_2026_11_10.sql` — `age_split_categories` keyed `(eventId, startId, formatId, gender, categoryNumber, groupId)` with a unique group per protocol category; `racing_manager_db/db/migrate_age_split_2026_11_10.sql` — the legacy `age_split_sections` table, now read-only conversion input
 
 ## Breakage signals
 
@@ -86,9 +96,13 @@ A protocol category (`event × gender × start × format`) may carry one age spl
 - Applied Prisma/SQL migration edited in place.
 - Dual writable SoT: event-level `laps`/`formatIds` written alongside `starts[]`.
 - Category finish without `startId` or place treated as stored SoT.
-- An age section id or preset id renamed or removed (they are API identity; titles are display text only).
-- `place` becoming a stored snapshot for split categories.
-- A split mutation touching registrations, enrollments, results or category finishes.
+- `CATEGORY_{number}` numbering drifting from configuration order (it is the identity of a read-model slot; titles are display text only).
+- Preset ids or `sections[]` accepted again on the configuration route.
+- A base group stored in two age categories of one protocol category.
+- Legacy `age_split_sections` rows rewritten during read instead of by the next save.
+- `place` becoming a stored snapshot for configured categories.
+- An age-category mutation touching registrations, enrollments, results or category finishes.
 - Finish uniqueness gaining an age dimension.
-- The age split applied while a class competition exists for the category.
+- The configuration applied while a class competition exists for the category.
+- A base group silently dropped from the protocol (a row rendered twice or not at all).
 - A new required response field breaking clients that ignore `sectionId` / `ageSplits`.
