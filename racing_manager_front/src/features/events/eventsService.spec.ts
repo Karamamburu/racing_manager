@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from '../../shared/api/ApiClient';
 import type {
+  AgeSplitRef,
   CreateEventRequest,
   EventDetails,
+  SetAgeSplitRequest,
   StartInputRequest,
 } from '../../shared/types/event';
 import { eventsService } from './eventsService';
@@ -42,6 +44,7 @@ describe('EventsService payloads', () => {
     vi.mocked(apiClient.postResult).mockReset();
     vi.mocked(apiClient.patchResult).mockReset();
     vi.mocked(apiClient.post).mockReset();
+    vi.mocked(apiClient.putResult).mockReset();
   });
 
   it('sends the full starts array on create', async () => {
@@ -95,5 +98,45 @@ describe('EventsService payloads', () => {
       '/admin/events/event-1/categories/finish',
       { startId: 'start-1', formatId: 2, gender: 'F' },
     );
+  });
+
+  it('saves the age split with the unchanged payload and unwraps the ref', async () => {
+    const ref: AgeSplitRef = {
+      startId: 'start-1',
+      formatId: 2,
+      gender: 'M',
+      enabled: true,
+      sections: [
+        {
+          id: 'PRESET_JUNIOR_UNDER_24',
+          kind: 'PRESET',
+          title: 'Юниоры и младше (<24)',
+        },
+      ],
+    };
+    vi.mocked(apiClient.putResult).mockResolvedValue({ status: 200, data: ref } as never);
+    const payload: SetAgeSplitRequest = {
+      gender: 'M',
+      startId: 'start-1',
+      formatId: 2,
+      enabled: true,
+      sections: [{ kind: 'PRESET', id: 'PRESET_JUNIOR_UNDER_24' }],
+    };
+
+    const result = await eventsService.setAgeSplit('event-1', payload);
+
+    expect(apiClient.putResult).toHaveBeenCalledTimes(1);
+    expect(apiClient.putResult).toHaveBeenCalledWith(
+      '/admin/events/event-1/categories/age-split',
+      {
+        gender: 'M',
+        startId: 'start-1',
+        formatId: 2,
+        enabled: true,
+        sections: [{ kind: 'PRESET', id: 'PRESET_JUNIOR_UNDER_24' }],
+      },
+    );
+    expect(result).toEqual(ref);
+    expect(result).toBe(ref);
   });
 });

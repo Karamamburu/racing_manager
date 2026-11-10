@@ -141,6 +141,7 @@ export type EventParticipant = {
   isCupEligible: boolean;
   note: string | null;
   registeredAt: string;
+  sectionId: string;
 };
 
 export type EnrollmentInputRequest = {
@@ -160,6 +161,51 @@ export type EnrollmentResponse = {
 export type ResultOutcome = 'FINISHED' | 'DNS' | 'DNF' | 'DSQ';
 
 export type GenderCode = 'M' | 'F';
+
+export type AgeGroupId =
+  | 'AGE_LE_14'
+  | 'AGE_15_16'
+  | 'AGE_17_18'
+  | 'AGE_19_20'
+  | 'AGE_21_23'
+  | 'AGE_24_40'
+  | 'AGE_41_50'
+  | 'AGE_51_60'
+  | 'AGE_61_PLUS';
+
+export type AgeSectionKind = 'BASE_GROUP' | 'PRESET';
+
+export type AgeSplitPresetId =
+  | 'PRESET_JUNIOR_UNDER_24'
+  | 'PRESET_MASTERS_41_PLUS'
+  | 'PRESET_ALL_GROUPS';
+
+export type AgeSectionRef = {
+  id: string;
+  kind: AgeSectionKind;
+  title: string;
+};
+
+export type AgeSplitRef = {
+  startId: string;
+  formatId: number;
+  gender: string;
+  enabled: boolean;
+  sections: AgeSectionRef[];
+};
+
+export type SetAgeSplitSectionRequest = {
+  kind: AgeSectionKind;
+  id: string;
+};
+
+export type SetAgeSplitRequest = {
+  gender: GenderCode;
+  startId: string;
+  formatId: number;
+  enabled: boolean;
+  sections: SetAgeSplitSectionRequest[];
+};
 
 export type CreateRegistrationRequest = {
   firstName?: string;
@@ -247,6 +293,7 @@ export type EventDetails = {
   registrations: EventParticipant[] | null;
   registeredCount: number;
   finishedCategories: CategoryFinishRef[];
+  ageSplits?: AgeSplitRef[];
 };
 
 export type CategoryFinishRef = {

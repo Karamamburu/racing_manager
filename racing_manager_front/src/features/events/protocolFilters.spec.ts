@@ -35,6 +35,7 @@ function participant(
     isCupEligible: false,
     note: null,
     registeredAt: '2026-11-01T10:00:00.000Z',
+    sectionId: 'CATEGORY',
     ...overrides,
   };
 }
