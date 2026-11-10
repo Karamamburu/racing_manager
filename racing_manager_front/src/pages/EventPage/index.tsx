@@ -361,6 +361,53 @@ function columnsForProtocol(
   return compactColumns;
 }
 
+/**
+ * U-32/S-04: no event status hides the control; the event lock covers dates,
+ * starts, formats and results only, so a finished or cancelled event keeps it.
+ * A test flips a status into this list to prove the gate stays empty.
+ */
+export const AGE_SPLIT_BLOCKING_EVENT_STATUSES: readonly string[] = [];
+
+export type AgeSplitSelectionInput = {
+  roles: string[] | undefined;
+  eventStatus: string;
+  bracketInProgress: boolean;
+  hasStarts: boolean;
+  rowCount: number;
+  startId: string;
+  formatId: number | null;
+  gender: string;
+  startLabel: string;
+  formatName: string;
+};
+
+/**
+ * U-41/O-01/S-09: the «Возрастные категории» control exists only for an
+ * administrator or organizer on a protocol category with at least one row.
+ */
+export function resolveAgeSplitSelection(
+  input: AgeSplitSelectionInput,
+): AgeSplitCategory | null {
+  if (
+    AGE_SPLIT_BLOCKING_EVENT_STATUSES.includes(input.eventStatus) ||
+    input.bracketInProgress ||
+    !canCreateEvents(input.roles) ||
+    !input.hasStarts ||
+    input.rowCount < 1 ||
+    input.formatId === null ||
+    (input.gender !== 'M' && input.gender !== 'F')
+  ) {
+    return null;
+  }
+  return {
+    startId: input.startId,
+    formatId: input.formatId,
+    gender: input.gender,
+    startLabel: input.startLabel,
+    formatName: input.formatName,
+  };
+}
+
 export function EventPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -710,10 +757,6 @@ export function EventPage() {
 
   const canRunBracket =
     canCreateEvents(session?.roles) && event.status !== 'CANCELLED' && !pastCompleted;
-  // The age-category configuration stays changeable before results, after results,
-  // after «Завершить гонку» and while the event is finished or cancelled (U-32,
-  // S-04): the event lock covers dates, starts, formats and results, not it.
-  const canConfigureAgeCategories = canCreateEvents(session?.roles);
   const registrationClosed = isRegistrationWindowClosed(event);
   const classCompetitions = classCompetitionsQuery.data ?? [];
   const participantColumns = getParticipantColumns({
@@ -1074,22 +1117,20 @@ export function EventPage() {
                         (section.ageSections.length === 1 &&
                           section.ageSections[0].title !== null);
                       const ageSplitSelection: AgeSplitCategory | null =
-                        !bracketInProgress &&
-                        canConfigureAgeCategories &&
-                        event.starts.length > 0 &&
-                        section.rows.length > 0 &&
-                        formatId != null &&
-                        (gender === 'M' || gender === 'F')
-                          ? {
-                              startId,
-                              formatId,
-                              gender,
-                              startLabel:
-                                event.starts.find((item) => item.id === startId)
-                                  ?.resolvedLabel ?? section.title,
-                              formatName: sample?.format?.name ?? '',
-                            }
-                          : null;
+                        resolveAgeSplitSelection({
+                          roles: session?.roles,
+                          eventStatus: event.status,
+                          bracketInProgress,
+                          hasStarts: event.starts.length > 0,
+                          rowCount: section.rows.length,
+                          startId,
+                          formatId,
+                          gender,
+                          startLabel:
+                            event.starts.find((item) => item.id === startId)
+                              ?.resolvedLabel ?? section.title,
+                          formatName: sample?.format?.name ?? '',
+                        });
                       const renderProtocolTable = (
                         rows: EventParticipant[],
                         tableKey: string,

@@ -2,6 +2,25 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma';
 import { PrismaService } from '../prisma/prisma.service';
 import { AgeCategory, StoredAgeSection } from './age-groups';
+import {
+  AgeSplitCategoryNotFoundError,
+  CATEGORY_NOT_FOUND_MESSAGE,
+} from './age-split.errors';
+
+/** Constraint and value failures a concurrent protocol-category change can cause. */
+const CONSTRAINT_FAILURE_CODES: ReadonlySet<string> = new Set([
+  'P2000',
+  'P2002',
+  'P2003',
+  'P2004',
+]);
+
+function isConstraintFailure(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    CONSTRAINT_FAILURE_CODES.has(error.code)
+  );
+}
 
 export type AgeSplitDb = Prisma.TransactionClient | PrismaService;
 
@@ -62,11 +81,12 @@ export class AgeSplitRepository {
   }
 
   async categoryExists(
+    db: AgeSplitDb,
     eventId: string,
     startId: string,
     formatId: number,
   ): Promise<boolean> {
-    const start = await this.prisma.start.findFirst({
+    const start = await db.start.findFirst({
       where: { id: startId, eventId, formats: { some: { formatId } } },
       select: { id: true },
     });
@@ -135,16 +155,25 @@ export class AgeSplitRepository {
     key: AgeSplitKey,
     categories: readonly AgeCategory[],
   ): Promise<void> {
-    await db.ageSplitCategory.deleteMany({ where: key });
-    await db.ageSplitSection.deleteMany({ where: key });
-    const rows = categories.flatMap((category) =>
-      category.groupIds.map((groupId) => ({
-        ...key,
-        categoryNumber: category.number,
-        groupId,
-      })),
-    );
-    if (rows.length === 0) return;
-    await db.ageSplitCategory.createMany({ data: rows });
+    try {
+      await db.ageSplitCategory.deleteMany({ where: key });
+      await db.ageSplitSection.deleteMany({ where: key });
+      const rows = categories.flatMap((category) =>
+        category.groupIds.map((groupId) => ({
+          ...key,
+          categoryNumber: category.number,
+          groupId,
+        })),
+      );
+      if (rows.length === 0) return;
+      await db.ageSplitCategory.createMany({ data: rows });
+    } catch (error) {
+      // A start/format detached or deleted between the read and this write makes
+      // the insert violate its foreign key; that is the same rejection as W-04.
+      if (isConstraintFailure(error)) {
+        throw new AgeSplitCategoryNotFoundError(CATEGORY_NOT_FOUND_MESSAGE);
+      }
+      throw error;
+    }
   }
 }

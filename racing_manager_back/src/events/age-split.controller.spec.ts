@@ -9,6 +9,12 @@ import request from 'supertest';
 import { RolesGuard } from '../auth/roles.guard';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
 import { AgeSplitController } from './age-split.controller';
+import {
+  AgeSplitCategoryNotFoundError,
+  CATEGORY_NOT_FOUND_MESSAGE,
+  EMPTY_AGE_CATEGORIES_MESSAGE,
+  EmptyAgeCategoriesError,
+} from './age-split.errors';
 import { AgeSplitService, type AgeCategoriesRef } from './age-split.service';
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
@@ -115,6 +121,33 @@ describe('AgeSplitController HTTP contract', () => {
     expect(response.status).toBe(400);
     expect(setSplit).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    [
+      'an unknown protocol category',
+      new AgeSplitCategoryNotFoundError(CATEGORY_NOT_FOUND_MESSAGE),
+      CATEGORY_NOT_FOUND_MESSAGE,
+    ],
+    [
+      'an enabled save without a group',
+      new EmptyAgeCategoriesError(EMPTY_AGE_CATEGORIES_MESSAGE),
+      EMPTY_AGE_CATEGORIES_MESSAGE,
+    ],
+  ])(
+    'maps the domain rejection for %s to 400 with its message',
+    async (_label, domainError, message) => {
+      const setSplit = makeSetSplit(() => Promise.reject(domainError));
+      const server = await createApp(makeServiceStub(setSplit));
+
+      const response = await request(server)
+        .put(AGE_SPLIT_PATH)
+        .send(AGE_CATEGORIES_BODY);
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ statusCode: 400, message });
+      expect(setSplit).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('returns 400 for a non-UUID id without calling the service', async () => {
     const setSplit = makeSetSplit();

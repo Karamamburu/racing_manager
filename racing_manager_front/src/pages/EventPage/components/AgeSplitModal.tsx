@@ -110,8 +110,9 @@ export function AgeSplitModal({
   }
 
   const allGroupsAssigned = assigned.size >= AGE_CATEGORY_GROUPS.length;
-  const addDisabled =
-    saving || draft.length >= AGE_CATEGORY_GROUPS.length || allGroupsAssigned;
+  // U-17: only the all-groups-assigned state disables the add action, so a
+  // released group re-enables it even when nine tabs already exist.
+  const addDisabled = saving || allGroupsAssigned;
 
   const keptCategories = draft
     .map((item) => ({ groupIds: orderedGroupIds(item.groupIds) }))

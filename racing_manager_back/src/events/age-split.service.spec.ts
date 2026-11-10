@@ -1,5 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 import type { AgeCategory } from './age-groups';
+import {
+  AgeSplitCategoryNotFoundError,
+  CATEGORY_NOT_FOUND_MESSAGE,
+  EMPTY_AGE_CATEGORIES_MESSAGE,
+  EmptyAgeCategoriesError,
+} from './age-split.errors';
 import type { AgeSplitKey, AgeSplitRepository } from './age-split.repository';
 import { AgeSplitService, type AgeCategoriesRef } from './age-split.service';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -22,11 +28,16 @@ type HarnessOptions = {
 function makeHarness(options: HarnessOptions = {}) {
   const replaceCalls: ReplaceCategoriesCall[] = [];
   const repository = {
-    categoryExists: jest.fn(() =>
-      Promise.resolve(options.categoryExists ?? true),
+    categoryExists: jest.fn(
+      (_db: unknown, _eventId: string, _startId: string, _formatId: number) =>
+        Promise.resolve(options.categoryExists ?? true),
     ),
     replaceCategories: jest.fn(
-      (db: unknown, key: AgeSplitKey, categories: readonly AgeCategory[]) => {
+      (
+        db: unknown,
+        key: AgeSplitKey,
+        categories: readonly AgeCategory[],
+      ) => {
         replaceCalls.push({ db, key, categories: [...categories] });
         return Promise.resolve();
       },
@@ -168,18 +179,14 @@ describe('AgeSplitService.setSplit', () => {
         EVENT_ID,
         body({ categories: [{ groupIds: [] }, { groupIds: [] }] }),
       ),
-    ).rejects.toThrow(
-      new BadRequestException(
-        'Нужна хотя бы одна возрастная категория с группой.',
-      ),
-    );
+    ).rejects.toThrow(new EmptyAgeCategoriesError(EMPTY_AGE_CATEGORIES_MESSAGE));
     expect(transaction).not.toHaveBeenCalled();
     expect(replaceCalls).toEqual([]);
   });
 
   it('clears stored rows and returns a disabled empty configuration', async () => {
     const { service, replaceCalls, repository, transaction } = makeHarness({
-      categoryExists: false,
+      categoryExists: true,
     });
 
     const result = await service.setSplit(
@@ -195,10 +202,34 @@ describe('AgeSplitService.setSplit', () => {
       categories: [],
     });
     expect(transaction).toHaveBeenCalledTimes(1);
+    expect(repository.categoryExists).toHaveBeenCalledTimes(1);
+    expect(repository.categoryExists).toHaveBeenCalledWith(
+      SENTINEL_TX,
+      EVENT_ID,
+      START_ID,
+      1,
+    );
     expect(replaceCalls).toHaveLength(1);
     expect(replaceCalls[0].db).toBe(SENTINEL_TX);
     expect(replaceCalls[0].categories).toEqual([]);
-    expect(repository.categoryExists).not.toHaveBeenCalled();
+  });
+
+  it('rejects a disabled save on an unknown protocol category and touches no rows', async () => {
+    const { service, replaceCalls, repository, transaction } = makeHarness({
+      categoryExists: false,
+    });
+
+    await expect(
+      service.setSplit(EVENT_ID, body({ enabled: false, categories: [] })),
+    ).rejects.toThrow(new AgeSplitCategoryNotFoundError(CATEGORY_NOT_FOUND_MESSAGE));
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(repository.categoryExists).toHaveBeenCalledWith(
+      SENTINEL_TX,
+      EVENT_ID,
+      START_ID,
+      1,
+    );
+    expect(replaceCalls).toEqual([]);
   });
 
   it('rejects a disabled save that still carries categories', async () => {
@@ -223,15 +254,31 @@ describe('AgeSplitService.setSplit', () => {
     });
 
     await expect(service.setSplit(EVENT_ID, body())).rejects.toThrow(
-      new BadRequestException('Категория не найдена на этом мероприятии.'),
+      new AgeSplitCategoryNotFoundError(CATEGORY_NOT_FOUND_MESSAGE),
     );
+    expect(transaction).toHaveBeenCalledTimes(1);
     expect(repository.categoryExists).toHaveBeenCalledWith(
+      SENTINEL_TX,
       EVENT_ID,
       START_ID,
       1,
     );
-    expect(transaction).not.toHaveBeenCalled();
     expect(replaceCalls).toEqual([]);
+  });
+
+  it('lets a constraint failure of the write reject as the same not-found error', async () => {
+    const { service, repository, transaction } = makeHarness();
+    repository.replaceCategories.mockImplementationOnce(() =>
+      Promise.reject(
+        new AgeSplitCategoryNotFoundError(CATEGORY_NOT_FOUND_MESSAGE),
+      ),
+    );
+
+    await expect(service.setSplit(EVENT_ID, body())).rejects.toBeInstanceOf(
+      AgeSplitCategoryNotFoundError,
+    );
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(repository.replaceCategories).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a group that appears in two categories without writing', async () => {

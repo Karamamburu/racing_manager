@@ -11,7 +11,11 @@ import {
   AGE_CATEGORY_GROUPS,
   categoryTitle,
 } from '../../../features/events/ageCategories';
-import type { AgeGroupId, AgeSplitRef } from '../../../shared/types/event';
+import type {
+  AgeGroupId,
+  AgeSplitRef,
+  SetAgeCategoriesRequest,
+} from '../../../shared/types/event';
 import { AgeSplitModal, type AgeSplitCategory } from './AgeSplitModal';
 
 const category: AgeSplitCategory = {
@@ -59,8 +63,11 @@ function renderModal(options?: {
   value?: AgeSplitRef | null;
   notApplied?: boolean;
   saving?: boolean;
+  onSave?: (payload: SetAgeCategoriesRequest) => void | Promise<void>;
 }) {
-  const onSave = vi.fn();
+  const onSave = vi.fn<
+    (payload: SetAgeCategoriesRequest) => void | Promise<void>
+  >(options?.onSave);
   const onClose = vi.fn();
   render(
     <AgeSplitModal
@@ -134,6 +141,7 @@ describe('AgeSplitModal', () => {
 
     expect(screen.getByText('Возрастные категории')).not.toBeNull();
     expect(screen.getByText('Кубковая гонка — 10 км · 10 км')).not.toBeNull();
+    expect(screen.queryByText('Возрастное деление')).toBeNull();
     expect(switchControl().getAttribute('aria-checked')).toBe('false');
     expect(tabs()).toHaveLength(1);
     expect(tab(1)).not.toBeNull();
@@ -254,6 +262,55 @@ describe('AgeSplitModal', () => {
     expect(addButton().disabled).toBe(false);
   });
 
+  it('keeps «Добавить категорию» enabled with nine tabs while a group is free', () => {
+    renderModal({
+      value: splitRef([
+        { groupIds: ['AGE_LE_14'] },
+        { groupIds: ['AGE_15_16'] },
+        { groupIds: ['AGE_17_18'] },
+        { groupIds: ['AGE_19_20'] },
+        { groupIds: ['AGE_21_23'] },
+        { groupIds: ['AGE_24_40'] },
+        { groupIds: ['AGE_41_50'] },
+        { groupIds: ['AGE_51_60'] },
+        { groupIds: [] },
+      ]),
+    });
+
+    expect(tabs()).toHaveLength(9);
+    expect(addButton().disabled).toBe(false);
+
+    fireEvent.click(tab(9));
+    expect(groupCheckbox('AGE_61_PLUS').checked).toBe(false);
+    fireEvent.click(groupCheckbox('AGE_61_PLUS'));
+
+    expect(addButton().disabled).toBe(true);
+  });
+
+  it('keeps «Добавить категорию» disabled with nine tabs once all groups are assigned', () => {
+    renderModal({
+      value: splitRef([
+        { groupIds: ['AGE_LE_14'] },
+        { groupIds: ['AGE_15_16'] },
+        { groupIds: ['AGE_17_18'] },
+        { groupIds: ['AGE_19_20'] },
+        { groupIds: ['AGE_21_23', 'AGE_24_40'] },
+        { groupIds: ['AGE_41_50'] },
+        { groupIds: ['AGE_51_60'] },
+        { groupIds: ['AGE_61_PLUS'] },
+        { groupIds: [] },
+      ]),
+    });
+
+    expect(tabs()).toHaveLength(9);
+    expect(addButton().disabled).toBe(true);
+
+    fireEvent.click(tab(1));
+    fireEvent.click(groupCheckbox('AGE_LE_14'));
+
+    expect(addButton().disabled).toBe(false);
+  });
+
   it('saves two categories in order and drops the empty tab', async () => {
     const { onSave } = renderModal();
 
@@ -276,6 +333,56 @@ describe('AgeSplitModal', () => {
         { groupIds: ['AGE_15_16'] },
       ],
     });
+    expect(screen.getByText('Возрастные категории')).not.toBeNull();
+    expect(screen.queryByText('Возрастное деление')).toBeNull();
+  });
+
+  it('keeps the draft and the dialog open when the save is rejected', async () => {
+    const onSave = vi.fn<
+      (payload: SetAgeCategoriesRequest) => Promise<void>
+    >(() =>
+      Promise.reject(new Error('Категория не найдена на этом мероприятии.')),
+    );
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    renderModal({
+      value: splitRef([
+        { groupIds: ['AGE_15_16'] },
+        { groupIds: ['AGE_24_40'] },
+      ]),
+      onSave,
+    });
+
+    fireEvent.click(tab(2));
+    fireEvent.click(groupCheckbox('AGE_41_50'));
+    fireEvent.click(addButton());
+    fireEvent.click(groupCheckbox('AGE_51_60'));
+    clickSave();
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(consoleError).toHaveBeenCalled());
+    expect(onSave.mock.calls[0][0]).toEqual({
+      gender: 'M',
+      startId: 'start-a',
+      formatId: 1,
+      enabled: true,
+      categories: [
+        { groupIds: ['AGE_15_16'] },
+        { groupIds: ['AGE_24_40', 'AGE_41_50'] },
+        { groupIds: ['AGE_51_60'] },
+      ],
+    });
+
+    expect(screen.getByText('Возрастные категории')).not.toBeNull();
+    expect(tabs()).toHaveLength(3);
+    expect(tab(3).getAttribute('aria-selected')).toBe('true');
+    expect(groupCheckbox('AGE_51_60').checked).toBe(true);
+    expect(groupCheckbox('AGE_41_50').checked).toBe(true);
+    expect(groupCheckbox('AGE_41_50').disabled).toBe(true);
+    expect(
+      screen.getAllByText('входит в Возрастная категория 2').length,
+    ).toBeGreaterThan(0);
   });
 
   it('keeps OK disabled with the hint on an enabled save without groups', () => {

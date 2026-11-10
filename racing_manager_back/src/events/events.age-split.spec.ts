@@ -21,6 +21,8 @@ type PersonSeed = {
   startNumber: number;
   timeMs: number | null;
   outcome?: 'FINISHED' | 'DNS' | 'DNF' | 'DSQ';
+  /** Stored `Result.place` snapshot, pinned so a read must never rewrite it. */
+  storedPlace?: number | null;
 };
 
 type StoredSectionSeed = {
@@ -51,12 +53,19 @@ type BracketSeed = {
   gender: string;
 };
 
+type FinishedCategorySeed = {
+  startId: string;
+  formatId: number;
+  gender: string;
+};
+
 type HarnessOptions = {
   people?: PersonSeed[];
   starts?: 'one' | 'none';
   sections?: StoredSectionSeed[];
   categories?: CategorySeed[];
   bracketGender?: Gender;
+  finishedCategories?: FinishedCategorySeed[];
 };
 
 const format = { id: FORMAT_ID, code: '10K', name: '10 км', sortOrder: 1 };
@@ -96,7 +105,7 @@ function person(seed: PersonSeed) {
     registeredAt: new Date('2026-11-01T00:00:00.000Z'),
     result: {
       timeMilliseconds: seed.timeMs,
-      place: null,
+      place: seed.storedPlace ?? null,
       laps: [],
     },
     enrollments: [
@@ -109,7 +118,7 @@ function person(seed: PersonSeed) {
         result: {
           outcome,
           timeMilliseconds: seed.timeMs,
-          place: null,
+          place: seed.storedPlace ?? null,
         },
       },
     ],
@@ -142,6 +151,8 @@ function makeHarness(options: HarnessOptions = {}) {
   const brackets: BracketSeed[] = options.bracketGender
     ? [{ formatId: FORMAT_ID, gender: options.bracketGender }]
     : [];
+  const finishedCategories: FinishedCategorySeed[] =
+    options.finishedCategories ?? [];
 
   const event = {
     id: EVENT_ID,
@@ -175,7 +186,9 @@ function makeHarness(options: HarnessOptions = {}) {
 
   const prisma = {
     event: { findUnique: jest.fn(() => Promise.resolve(event)) },
-    categoryFinish: { findMany: jest.fn(() => Promise.resolve([])) },
+    categoryFinish: {
+      findMany: jest.fn(() => Promise.resolve(finishedCategories)),
+    },
     classCompetition: { findMany: jest.fn(() => Promise.resolve(brackets)) },
     ageSplitSection: { findMany: jest.fn(() => Promise.resolve(sectionRows)) },
     ageSplitCategory: {
@@ -193,13 +206,15 @@ function makeHarness(options: HarnessOptions = {}) {
     sync as unknown as EventStatusSyncService,
   );
 
-  return { service, prisma };
+  return { service, prisma, event };
 }
 
 type ProtocolRowLike = {
   id: string;
   place: number | null;
   sectionId: string;
+  finishTimeMs?: number | null;
+  outcome?: string | null;
 };
 
 function rowOf(rows: ProtocolRowLike[], key: string): ProtocolRowLike {
@@ -352,6 +367,67 @@ describe('EventsService.findById age categories', () => {
     expect(placeOf(rows, 'young-slow')).toBe(2);
     expect(placeOf(rows, 'adult-fast')).toBe(1);
     expect(placeOf(rows, 'adult-slow')).toBe(2);
+  });
+
+  it('recomputes places after a finished category change and keeps the finish, times and stored places', async () => {
+    const { service, event } = makeHarness({
+      people: [
+        {
+          key: 'young',
+          gender: 'M',
+          birthYear: CONTROL_YEAR - 21,
+          startNumber: 1,
+          timeMs: 1_000_000,
+          storedPlace: 5,
+        },
+        {
+          key: 'adult',
+          gender: 'M',
+          birthYear: CONTROL_YEAR - 42,
+          startNumber: 2,
+          timeMs: 2_000_000,
+          storedPlace: 4,
+        },
+      ],
+      categories: [
+        { categoryNumber: 1, groupId: 'AGE_21_23' },
+        { categoryNumber: 2, groupId: 'AGE_41_50' },
+      ],
+      finishedCategories: [
+        { startId: START_ID, formatId: FORMAT_ID, gender: 'M' },
+      ],
+    });
+
+    const result = await service.findById(EVENT_ID, { syncStatuses: false });
+    const rows = result.registrations ?? [];
+
+    // The saved change splits the category, so both rows earn place 1 inside
+    // their own section while the stored `Result.place` snapshots stay 5 and 4.
+    expect(sectionOf(rows, 'young')).toBe('CATEGORY_1');
+    expect(sectionOf(rows, 'adult')).toBe('CATEGORY_2');
+    expect(placeOf(rows, 'young')).toBe(1);
+    expect(placeOf(rows, 'adult')).toBe(1);
+    expect(rowOf(rows, 'young').finishTimeMs).toBe(1_000_000);
+    expect(rowOf(rows, 'adult').finishTimeMs).toBe(2_000_000);
+    expect(rowOf(rows, 'young').outcome).toBe('FINISHED');
+
+    // The finish record survives, so the category keeps its «Гонка завершена»
+    // tag and the row-editing lock on the next read (S-03/U-31).
+    expect(result.finishedCategories).toEqual([
+      { startId: START_ID, formatId: FORMAT_ID, gender: 'M' },
+    ]);
+
+    const stored = event.registrations as {
+      result: { place: number | null; timeMilliseconds: number | null };
+      enrollments: {
+        result: { place: number | null; timeMilliseconds: number | null };
+      }[];
+    }[];
+    expect(stored.map((row) => row.result.place)).toEqual([5, 4]);
+    expect(stored.map((row) => row.enrollments[0].result.place)).toEqual([5, 4]);
+    expect(stored.map((row) => row.enrollments[0].result.timeMilliseconds)).toEqual([
+      1_000_000, 2_000_000,
+    ]);
   });
 
   it('places unassigned groups into the remainder and future birth years last', async () => {
