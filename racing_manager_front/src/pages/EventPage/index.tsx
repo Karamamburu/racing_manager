@@ -710,6 +710,10 @@ export function EventPage() {
 
   const canRunBracket =
     canCreateEvents(session?.roles) && event.status !== 'CANCELLED' && !pastCompleted;
+  // The age-category configuration stays changeable before results, after results,
+  // after «Завершить гонку» and while the event is finished or cancelled (U-32,
+  // S-04): the event lock covers dates, starts, formats and results, not it.
+  const canConfigureAgeCategories = canCreateEvents(session?.roles);
   const registrationClosed = isRegistrationWindowClosed(event);
   const classCompetitions = classCompetitionsQuery.data ?? [];
   const participantColumns = getParticipantColumns({
@@ -1071,7 +1075,7 @@ export function EventPage() {
                           section.ageSections[0].title !== null);
                       const ageSplitSelection: AgeSplitCategory | null =
                         !bracketInProgress &&
-                        canRunBracket &&
+                        canConfigureAgeCategories &&
                         event.starts.length > 0 &&
                         section.rows.length > 0 &&
                         formatId != null &&
