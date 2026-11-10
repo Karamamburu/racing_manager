@@ -221,6 +221,7 @@ export function AgeSplitModal({
   };
 
   const toggleGroup = (groupId: AgeGroupId, checked: boolean) => {
+    if (checked) setEnabled(true);
     setGroupIds((previous) =>
       checked
         ? [...previous.filter((id) => id !== groupId), groupId]
@@ -229,6 +230,7 @@ export function AgeSplitModal({
   };
 
   const togglePreset = (preset: AgeSplitPresetOption, checked: boolean) => {
+    if (checked) setEnabled(true);
     setPresetIds((previous) =>
       checked
         ? [...previous.filter((id) => id !== preset.id), preset.id]
@@ -242,6 +244,7 @@ export function AgeSplitModal({
   };
 
   const selectAllGroups = () => {
+    setEnabled(true);
     setGroupIds(AGE_SPLIT_GROUPS.map((group) => group.id));
     setPresetIds([]);
   };

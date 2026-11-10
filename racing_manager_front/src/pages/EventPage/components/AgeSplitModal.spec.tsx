@@ -176,6 +176,66 @@ describe('AgeSplitModal', () => {
     });
   });
 
+  it('enables the split when a base group is checked from the off state', async () => {
+    const { onSave } = renderModal();
+
+    expect(switchControl().getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(groupCheckbox('AGE_24_40'));
+    expect(switchControl().getAttribute('aria-checked')).toBe('true');
+
+    clickSave();
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith({
+      gender: 'M',
+      startId: 'start-a',
+      formatId: 1,
+      enabled: true,
+      sections: [{ kind: 'BASE_GROUP', id: 'AGE_24_40' }],
+    });
+  });
+
+  it('enables the split when a combined preset is applied from the off state', async () => {
+    const { onSave } = renderModal();
+
+    expect(switchControl().getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(presetCheckbox('PRESET_JUNIOR_UNDER_24'));
+    expect(switchControl().getAttribute('aria-checked')).toBe('true');
+
+    clickSave();
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith({
+      gender: 'M',
+      startId: 'start-a',
+      formatId: 1,
+      enabled: true,
+      sections: [{ kind: 'PRESET', id: 'PRESET_JUNIOR_UNDER_24' }],
+    });
+  });
+
+  it('enables the split when all groups are selected from the off state', async () => {
+    const { onSave } = renderModal();
+
+    expect(switchControl().getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(screen.getByRole('button', { name: ALL_GROUPS_ACTION_TITLE }));
+    expect(switchControl().getAttribute('aria-checked')).toBe('true');
+
+    clickSave();
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith({
+      gender: 'M',
+      startId: 'start-a',
+      formatId: 1,
+      enabled: true,
+      sections: AGE_SPLIT_GROUPS.map((group) => ({
+        kind: 'BASE_GROUP',
+        id: group.id,
+      })),
+    });
+  });
+
   it('selects all nine groups and clears a combined preset', async () => {
     const { onSave } = renderModal();
 
