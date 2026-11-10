@@ -106,7 +106,6 @@ function split(overrides: Partial<AgeSplitRef> = {}): AgeSplitRef {
     gender: 'M',
     enabled: true,
     categories: [],
-    sections: [],
     ...overrides,
   };
 }

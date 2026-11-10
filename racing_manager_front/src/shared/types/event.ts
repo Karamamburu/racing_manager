@@ -173,19 +173,6 @@ export type AgeGroupId =
   | 'AGE_51_60'
   | 'AGE_61_PLUS';
 
-export type AgeSectionKind = 'BASE_GROUP' | 'PRESET';
-
-export type AgeSplitPresetId =
-  | 'PRESET_JUNIOR_UNDER_24'
-  | 'PRESET_MASTERS_41_PLUS'
-  | 'PRESET_ALL_GROUPS';
-
-export type AgeSectionRef = {
-  id: string;
-  kind: AgeSectionKind;
-  title: string;
-};
-
 export type AgeCategoryRef = {
   id: string;
   number: number;
@@ -199,29 +186,8 @@ export type AgeSplitRef = {
   formatId: number;
   gender: string;
   enabled: boolean;
-  /**
-   * Ordered age categories of the configuration; empty when the configuration
-   * is disabled. Optional here only until the retired `sections` fixture is
-   * removed from the service spec.
-   */
-  categories?: AgeCategoryRef[];
-  /**
-   * @deprecated predecessor read shape, no longer returned by the API.
-   */
-  sections?: AgeSectionRef[];
-};
-
-export type SetAgeSplitSectionRequest = {
-  kind: AgeSectionKind;
-  id: string;
-};
-
-export type SetAgeSplitRequest = {
-  gender: GenderCode;
-  startId: string;
-  formatId: number;
-  enabled: boolean;
-  sections: SetAgeSplitSectionRequest[];
+  /** Ordered age categories of the configuration; empty when disabled. */
+  categories: AgeCategoryRef[];
 };
 
 export type SetAgeCategoryRequest = {

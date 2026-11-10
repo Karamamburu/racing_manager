@@ -5,7 +5,6 @@ import type {
   CreateEventRequest,
   EventDetails,
   SetAgeCategoriesRequest,
-  SetAgeSplitRequest,
   StartInputRequest,
 } from '../../shared/types/event';
 import { eventsService } from './eventsService';
@@ -101,54 +100,12 @@ describe('EventsService payloads', () => {
     );
   });
 
-  it('saves the age split with the unchanged payload and unwraps the ref', async () => {
-    const ref: AgeSplitRef = {
-      startId: 'start-1',
-      formatId: 2,
-      gender: 'M',
-      enabled: true,
-      sections: [
-        {
-          id: 'PRESET_JUNIOR_UNDER_24',
-          kind: 'PRESET',
-          title: 'Юниоры и младше (<24)',
-        },
-      ],
-    };
-    vi.mocked(apiClient.putResult).mockResolvedValue({ status: 200, data: ref } as never);
-    const payload: SetAgeSplitRequest = {
-      gender: 'M',
-      startId: 'start-1',
-      formatId: 2,
-      enabled: true,
-      sections: [{ kind: 'PRESET', id: 'PRESET_JUNIOR_UNDER_24' }],
-    };
-
-    const result = await eventsService.setAgeSplit('event-1', payload);
-
-    expect(apiClient.putResult).toHaveBeenCalledTimes(1);
-    expect(apiClient.putResult).toHaveBeenCalledWith(
-      '/admin/events/event-1/categories/age-split',
-      {
-        gender: 'M',
-        startId: 'start-1',
-        formatId: 2,
-        enabled: true,
-        sections: [{ kind: 'PRESET', id: 'PRESET_JUNIOR_UNDER_24' }],
-      },
-    );
-    expect(result).toEqual(ref);
-    expect(result).toBe(ref);
-  });
-
   it('saves custom age categories with the unchanged payload and unwraps the ref', async () => {
     const ref: AgeSplitRef = {
       startId: 'event-1',
       formatId: 1,
       gender: 'M',
       enabled: true,
-      // The retired read shape stays empty for a category response.
-      sections: [],
       categories: [
         {
           id: 'CATEGORY_1',
