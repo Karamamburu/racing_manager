@@ -151,6 +151,17 @@ describe('AgeSplitModal', () => {
     for (const group of AGE_CATEGORY_GROUPS) {
       expect(groupCheckbox(group.id).checked).toBe(false);
     }
+    for (const retiredPreset of [
+      'Юниоры и младше (<24)',
+      'Мастера 41+',
+      'Все возрастные группы',
+    ]) {
+      expect(screen.queryByText(retiredPreset)).toBeNull();
+    }
+    // U-36: the nine base groups are the only checkboxes; no preset control.
+    expect(screen.getAllByRole('checkbox')).toHaveLength(
+      AGE_CATEGORY_GROUPS.length,
+    );
     expect(saveButton().disabled).toBe(false);
     expect(screen.queryByText('Выберите хотя бы одну группу')).toBeNull();
   });

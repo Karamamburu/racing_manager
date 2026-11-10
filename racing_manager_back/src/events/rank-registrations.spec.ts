@@ -162,6 +162,89 @@ describe('rankEnrollments', () => {
     expect(placeById.get('c')).toBe(1);
   });
 
+  it('shares a place for equal times and skips the next one', () => {
+    const ranked = rankEnrollments([
+      enrollment({
+        enrollmentId: 'slow',
+        startNumber: 3,
+        timeMilliseconds: 4_000_000,
+      }),
+      enrollment({
+        enrollmentId: 'first',
+        startNumber: 1,
+        timeMilliseconds: 3_600_000,
+      }),
+      enrollment({
+        enrollmentId: 'second',
+        startNumber: 2,
+        timeMilliseconds: 3_600_000,
+      }),
+    ]);
+
+    expect(ranked.map((row) => row.enrollment.enrollmentId)).toEqual([
+      'first',
+      'second',
+      'slow',
+    ]);
+    expect(ranked.map((row) => row.place)).toEqual([1, 1, 3]);
+  });
+
+  it('keeps placed rows first and appends unplaced rows by start number', () => {
+    const ranked = rankEnrollments([
+      enrollment({
+        enrollmentId: 'dns',
+        outcome: 'DNS',
+        timeMilliseconds: null,
+        startNumber: 2,
+      }),
+      enrollment({
+        enrollmentId: 'second-finish',
+        startNumber: 4,
+        timeMilliseconds: 3_700_000,
+      }),
+      enrollment({
+        enrollmentId: 'first-finish',
+        startNumber: 1,
+        timeMilliseconds: 3_600_000,
+      }),
+      enrollment({
+        enrollmentId: 'dnf',
+        outcome: 'DNF',
+        timeMilliseconds: null,
+        startNumber: 5,
+      }),
+      enrollment({
+        enrollmentId: 'dsq',
+        outcome: 'DSQ',
+        timeMilliseconds: null,
+        startNumber: 3,
+      }),
+      enrollment({
+        enrollmentId: 'waiting',
+        outcome: null,
+        timeMilliseconds: null,
+        startNumber: 6,
+      }),
+    ]);
+
+    expect(ranked.map((row) => row.enrollment.enrollmentId)).toEqual([
+      'first-finish',
+      'second-finish',
+      'dns',
+      'dsq',
+      'dnf',
+      'waiting',
+    ]);
+    expect(ranked.map((row) => row.place)).toEqual([
+      1,
+      2,
+      null,
+      null,
+      null,
+      null,
+    ]);
+  });
+
   it('recomputes places when a faster peer is added', () => {
     const first = enrollment({
       enrollmentId: 'first',

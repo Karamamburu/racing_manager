@@ -10,16 +10,20 @@ const KEY: AgeSplitKey = {
   gender: 'M',
 };
 
-function constraintError(code: string): Prisma.PrismaClientKnownRequestError {
+function prismaError(code: string): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError('constraint failed', {
     code,
     clientVersion: 'test',
   });
 }
 
+type LockingReadRow = { start_id: string };
+
 function makeRepository() {
   const db = {
-    start: { findFirst: jest.fn(() => Promise.resolve({ id: KEY.startId })) },
+    $queryRaw: jest.fn<Promise<LockingReadRow[]>, [Prisma.Sql]>(() =>
+      Promise.resolve([{ start_id: KEY.startId }]),
+    ),
     ageSplitCategory: {
       deleteMany: jest.fn(() => Promise.resolve({ count: 0 })),
       createMany: jest.fn(() => Promise.resolve({ count: 0 })),
@@ -35,26 +39,37 @@ function makeRepository() {
 }
 
 describe('AgeSplitRepository write path', () => {
-  it('reads the protocol-category link through the handed transaction client', async () => {
+  it('locks the protocol-category link through the handed transaction client', async () => {
     const { repository, db } = makeRepository();
 
     await expect(
       repository.categoryExists(db as never, KEY.eventId, KEY.startId, 1),
     ).resolves.toBe(true);
-    expect(db.start.findFirst).toHaveBeenCalledWith({
-      where: {
-        id: KEY.startId,
-        eventId: KEY.eventId,
-        formats: { some: { formatId: 1 } },
-      },
-      select: { id: true },
-    });
+
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+    const query = db.$queryRaw.mock.calls[0][0];
+    const sql = query.sql.replace(/\s+/g, ' ');
+    expect(sql).toContain('FROM start_formats sf');
+    expect(sql).toContain('JOIN starts s ON s.id = sf.start_id');
+    expect(sql).toContain('FOR UPDATE OF sf');
+    expect(query.values).toEqual([KEY.startId, KEY.eventId, 1]);
+  });
+
+  it('answers false when the locked link no longer exists', async () => {
+    const { repository, db } = makeRepository();
+    db.$queryRaw.mockImplementationOnce(() =>
+      Promise.resolve([] as LockingReadRow[]),
+    );
+
+    await expect(
+      repository.categoryExists(db as never, KEY.eventId, KEY.startId, 1),
+    ).resolves.toBe(false);
   });
 
   it('answers the not-found domain error for a foreign-key constraint failure', async () => {
     const { repository, db } = makeRepository();
     db.ageSplitCategory.createMany.mockImplementationOnce(() =>
-      Promise.reject(constraintError('P2003')),
+      Promise.reject(prismaError('P2003')),
     );
 
     await expect(
@@ -62,6 +77,20 @@ describe('AgeSplitRepository write path', () => {
         { number: 1, groupIds: ['AGE_15_16'] },
       ]),
     ).rejects.toBeInstanceOf(AgeSplitCategoryNotFoundError);
+  });
+
+  it('leaves a duplicate-key failure untranslated so the last save wins', async () => {
+    const { repository, db } = makeRepository();
+    const failure = prismaError('P2002');
+    db.ageSplitCategory.createMany.mockImplementationOnce(() =>
+      Promise.reject(failure),
+    );
+
+    await expect(
+      repository.replaceCategories(db as never, KEY, [
+        { number: 1, groupIds: ['AGE_15_16'] },
+      ]),
+    ).rejects.toBe(failure);
   });
 
   it('keeps an unrelated write failure unhandled', async () => {

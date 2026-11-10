@@ -26,7 +26,7 @@ import {
 import {
   collectProtocolFilterValues,
   emptyProtocolFilters,
-  filterProtocolParticipants,
+  filterProtocolGroups,
   type ProtocolFilters as ProtocolFiltersValue,
 } from '../../features/events/protocolFilters';
 import {
@@ -780,26 +780,10 @@ export function EventPage() {
   );
   const cityOptions = collectProtocolFilterValues(registrations, 'city');
   const teamOptions = collectProtocolFilterValues(registrations, 'team');
-  const filteredParticipantGroups = participantGroups
-    .map((group) => ({
-      ...group,
-      sections: group.sections
-        .map((section) => ({
-          ...section,
-          visibleRows: filterProtocolParticipants(section.rows, protocolFilters),
-          ageSections: section.ageSections
-            .map((ageSection) => ({
-              ...ageSection,
-              visibleRows: filterProtocolParticipants(
-                ageSection.rows,
-                protocolFilters,
-              ),
-            }))
-            .filter((ageSection) => ageSection.visibleRows.length > 0),
-        }))
-        .filter((section) => section.visibleRows.length > 0),
-    }))
-    .filter((group) => group.sections.length > 0);
+  const filteredParticipantGroups = filterProtocolGroups(
+    participantGroups,
+    protocolFilters,
+  );
   const showProtocolToolbar =
     event.registrations !== null && registrations.length > 0;
   const ageSplitValue =

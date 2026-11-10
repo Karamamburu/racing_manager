@@ -7,18 +7,17 @@ import {
   CATEGORY_NOT_FOUND_MESSAGE,
 } from './age-split.errors';
 
-/** Constraint and value failures a concurrent protocol-category change can cause. */
-const CONSTRAINT_FAILURE_CODES: ReadonlySet<string> = new Set([
-  'P2000',
-  'P2002',
-  'P2003',
-  'P2004',
-]);
+/**
+ * Only a violated foreign key means the parent protocol category vanished; a
+ * duplicate save tripping a unique index (P2002) must propagate so concurrent
+ * saves resolve as the last complete one (E-05), not as a 400.
+ */
+const FOREIGN_KEY_FAILURE_CODE = 'P2003';
 
-function isConstraintFailure(error: unknown): boolean {
+function isForeignKeyFailure(error: unknown): boolean {
   return (
     error instanceof Prisma.PrismaClientKnownRequestError &&
-    CONSTRAINT_FAILURE_CODES.has(error.code)
+    error.code === FOREIGN_KEY_FAILURE_CODE
   );
 }
 
@@ -86,11 +85,21 @@ export class AgeSplitRepository {
     startId: string,
     formatId: number,
   ): Promise<boolean> {
-    const start = await db.start.findFirst({
-      where: { id: startId, eventId, formats: { some: { formatId } } },
-      select: { id: true },
-    });
-    return start !== null;
+    // The lock binds this read to the replacement that follows in the same
+    // transaction: a concurrent detach of the start or of the format waits
+    // here, and a detach that already committed yields no row. Either way the
+    // save cannot insert a configuration for a vanished protocol category
+    // (W-04), which an unlocked read would allow.
+    const rows = await db.$queryRaw<{ start_id: string }[]>(Prisma.sql`
+      SELECT sf.start_id
+      FROM start_formats sf
+      JOIN starts s ON s.id = sf.start_id
+      WHERE s.id = ${startId}::uuid
+        AND s.event_id = ${eventId}::uuid
+        AND sf.format_id = ${formatId}
+      FOR UPDATE OF sf
+    `);
+    return rows.length > 0;
   }
 
   async hasClassCompetition(
@@ -168,9 +177,10 @@ export class AgeSplitRepository {
       if (rows.length === 0) return;
       await db.ageSplitCategory.createMany({ data: rows });
     } catch (error) {
-      // A start/format detached or deleted between the read and this write makes
-      // the insert violate its foreign key; that is the same rejection as W-04.
-      if (isConstraintFailure(error)) {
+      // A start/format detached or deleted between the locked read and this
+      // write makes the insert violate its foreign key; that is the same
+      // rejection as W-04.
+      if (isForeignKeyFailure(error)) {
         throw new AgeSplitCategoryNotFoundError(CATEGORY_NOT_FOUND_MESSAGE);
       }
       throw error;
