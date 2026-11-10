@@ -30,7 +30,7 @@ const AGE_CATEGORIES_REF: AgeCategoriesRef = {
     {
       id: 'CATEGORY_1',
       number: 1,
-      title: 'Возрастная категория 1',
+      title: 'Категория 1',
       subtitle: '15–16, 17–18',
       groupIds: ['AGE_15_16', 'AGE_17_18'],
     },

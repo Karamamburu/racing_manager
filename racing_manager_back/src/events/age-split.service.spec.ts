@@ -92,14 +92,14 @@ describe('AgeSplitService.setSplit', () => {
         {
           id: 'CATEGORY_1',
           number: 1,
-          title: 'Возрастная категория 1',
+          title: 'Категория 1',
           subtitle: '15–16, 17–18',
           groupIds: ['AGE_15_16', 'AGE_17_18'],
         },
         {
           id: 'CATEGORY_2',
           number: 2,
-          title: 'Возрастная категория 2',
+          title: 'Категория 2',
           subtitle: '24–40',
           groupIds: ['AGE_24_40'],
         },
@@ -153,14 +153,14 @@ describe('AgeSplitService.setSplit', () => {
       {
         id: 'CATEGORY_1',
         number: 1,
-        title: 'Возрастная категория 1',
+        title: 'Категория 1',
         subtitle: '15–16',
         groupIds: ['AGE_15_16'],
       },
       {
         id: 'CATEGORY_2',
         number: 2,
-        title: 'Возрастная категория 2',
+        title: 'Категория 2',
         subtitle: '24–40',
         groupIds: ['AGE_24_40'],
       },

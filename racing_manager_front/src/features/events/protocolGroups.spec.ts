@@ -140,8 +140,8 @@ describe('age category catalog', () => {
   });
 
   it('derives the automatic category title from its number', () => {
-    expect(CATEGORY_TITLE_PREFIX).toBe('Возрастная категория');
-    expect(categoryTitle(3)).toBe('Возрастная категория 3');
+    expect(CATEGORY_TITLE_PREFIX).toBe('Категория');
+    expect(categoryTitle(3)).toBe('Категория 3');
   });
 
   it('labels and ranges a base group per gender', () => {
@@ -274,8 +274,8 @@ describe('age sections', () => {
       'CATEGORY_1',
     ]);
     expect(ageSections.map((item) => item.title)).toEqual([
-      'Возрастная категория 2',
-      'Возрастная категория 1',
+      'Категория 2',
+      'Категория 1',
     ]);
     expect(ageSections[0].rows.map((row) => row.enrollmentId)).toEqual([
       'young',
@@ -306,7 +306,7 @@ describe('age sections', () => {
 
     expect(groups[0].sections[0].ageSections[0]).toMatchObject({
       key: 'CATEGORY_1',
-      title: 'Возрастная категория 1',
+      title: 'Категория 1',
       subtitle: '15–16, 17–18',
     });
   });
@@ -340,7 +340,7 @@ describe('age sections', () => {
     expect(ageSections).toHaveLength(1);
     expect(ageSections[0]).toMatchObject({
       key: 'CATEGORY_1',
-      title: 'Возрастная категория 1',
+      title: 'Категория 1',
       subtitle: '≤14, 15–16, 17–18, 19–20, 21–23',
     });
     expect(ageSections[0].rows.map((row) => row.enrollmentId)).toEqual([
@@ -371,7 +371,7 @@ describe('age sections', () => {
       'NO_BIRTH_YEAR',
     ]);
     expect(ageSections.map((item) => item.title)).toEqual([
-      'Возрастная категория 1',
+      'Категория 1',
       REMAINDER_SECTION_TITLE,
       NO_BIRTH_YEAR_SECTION_TITLE,
     ]);

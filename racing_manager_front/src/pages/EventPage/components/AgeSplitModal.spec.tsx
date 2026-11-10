@@ -136,7 +136,7 @@ beforeAll(() => {
 afterEach(cleanup);
 
 describe('AgeSplitModal', () => {
-  it('opens off with one empty «Возрастная категория 1» tab', () => {
+  it('opens off with one empty «Категория 1» tab', () => {
     renderModal();
 
     expect(screen.getByText('Возрастные категории')).not.toBeNull();
@@ -184,7 +184,6 @@ describe('AgeSplitModal', () => {
     expect(groupCheckbox('AGE_15_16').checked).toBe(true);
     expect(groupCheckbox('AGE_41_50').checked).toBe(true);
     expect(groupCheckbox('AGE_41_50').disabled).toBe(true);
-    expect(screen.getByText('входит в Возрастная категория 2')).not.toBeNull();
 
     fireEvent.click(tab(2));
 
@@ -192,7 +191,6 @@ describe('AgeSplitModal', () => {
     expect(groupCheckbox('AGE_41_50').disabled).toBe(false);
     expect(groupCheckbox('AGE_15_16').checked).toBe(true);
     expect(groupCheckbox('AGE_15_16').disabled).toBe(true);
-    expect(screen.getByText('входит в Возрастная категория 1')).not.toBeNull();
   });
 
   it('turns the switch on when a group is selected from the off state', () => {
@@ -215,7 +213,6 @@ describe('AgeSplitModal', () => {
     expect(tab(2)).not.toBeNull();
     expect(groupCheckbox('AGE_15_16').checked).toBe(true);
     expect(groupCheckbox('AGE_15_16').disabled).toBe(true);
-    expect(screen.getByText('входит в Возрастная категория 1')).not.toBeNull();
 
     const freeGroup = groupCheckbox('AGE_24_40');
     expect(freeGroup.disabled).toBe(false);
@@ -235,7 +232,7 @@ describe('AgeSplitModal', () => {
 
     expect(tabs()).toHaveLength(1);
     expect(tab(1)).not.toBeNull();
-    expect(screen.queryByRole('tab', { name: /Возрастная категория 2/ })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /Категория 2/ })).toBeNull();
     expect(groupCheckbox('AGE_24_40').checked).toBe(true);
     expect(groupCheckbox('AGE_24_40').disabled).toBe(false);
     expect(groupCheckbox('AGE_15_16').checked).toBe(false);
@@ -391,9 +388,7 @@ describe('AgeSplitModal', () => {
     expect(groupCheckbox('AGE_51_60').checked).toBe(true);
     expect(groupCheckbox('AGE_41_50').checked).toBe(true);
     expect(groupCheckbox('AGE_41_50').disabled).toBe(true);
-    expect(
-      screen.getAllByText('входит в Возрастная категория 2').length,
-    ).toBeGreaterThan(0);
+    expect(screen.queryByText(/входит в/)).toBeNull();
   });
 
   it('keeps OK disabled with the hint on an enabled save without groups', () => {

@@ -311,7 +311,7 @@ export type StoredAgeCategoryRow = {
   groupId: string;
 };
 
-export const CATEGORY_TITLE_PREFIX = 'Возрастная категория';
+export const CATEGORY_TITLE_PREFIX = 'Категория';
 
 export function categorySectionId(number: number): AgeCategorySectionId {
   return `CATEGORY_${number}`;

@@ -382,9 +382,9 @@ describe('age-groups', () => {
     });
 
     it('builds the primary heading from the shared prefix', () => {
-      expect(CATEGORY_TITLE_PREFIX).toBe('Возрастная категория');
-      expect(categoryTitle(1)).toBe('Возрастная категория 1');
-      expect(categoryTitle(9)).toBe('Возрастная категория 9');
+      expect(CATEGORY_TITLE_PREFIX).toBe('Категория');
+      expect(categoryTitle(1)).toBe('Категория 1');
+      expect(categoryTitle(9)).toBe('Категория 9');
     });
 
     it('lists the member display ranges in catalog order', () => {

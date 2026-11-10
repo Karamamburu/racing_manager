@@ -210,22 +210,16 @@ export function AgeSplitModal({
             );
             const ownedByOther = ownerIndex >= 0 && ownerIndex !== index;
             return (
-              <Space key={group.id} size="small" wrap>
-                <Checkbox
-                  checked={ownerIndex >= 0}
-                  disabled={saving || ownedByOther}
-                  onChange={(event) =>
-                    toggleGroup(group.id, event.target.checked)
-                  }
-                >
-                  {`${groupLabel(group.id, gender)} (${groupRange(group.id)})`}
-                </Checkbox>
-                {ownedByOther ? (
-                  <Typography.Text type="secondary">
-                    {`входит в ${categoryTitle(ownerIndex + 1)}`}
-                  </Typography.Text>
-                ) : null}
-              </Space>
+              <Checkbox
+                key={group.id}
+                checked={ownerIndex >= 0}
+                disabled={saving || ownedByOther}
+                onChange={(event) =>
+                  toggleGroup(group.id, event.target.checked)
+                }
+              >
+                {`${groupLabel(group.id, gender)} (${groupRange(group.id)})`}
+              </Checkbox>
             );
           })}
         </div>
@@ -272,12 +266,34 @@ export function AgeSplitModal({
       open={open}
       width={640}
       onCancel={handleCancel}
-      onOk={handleSave}
-      okText="Сохранить"
-      cancelText="Отмена"
-      confirmLoading={saving}
-      okButtonProps={{ disabled: saveDisabled }}
-      cancelButtonProps={{ disabled: saving }}
+      footer={
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <Button disabled={addDisabled} onClick={addCategory}>
+            Добавить категорию
+          </Button>
+          <Space>
+            <Button disabled={saving} onClick={handleCancel}>
+              Отмена
+            </Button>
+            <Button
+              type="primary"
+              loading={saving}
+              disabled={saveDisabled}
+              onClick={handleSave}
+            >
+              Сохранить
+            </Button>
+          </Space>
+        </div>
+      }
     >
       {notApplied ? (
         <Alert
@@ -306,15 +322,6 @@ export function AgeSplitModal({
           onChange={setActiveKey}
           items={tabItems}
         />
-
-        <Button
-          type="dashed"
-          size="small"
-          disabled={addDisabled}
-          onClick={addCategory}
-        >
-          Добавить категорию
-        </Button>
 
         {groupsMissing ? (
           <Typography.Text type="danger">

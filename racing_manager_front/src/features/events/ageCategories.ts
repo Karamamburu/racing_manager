@@ -77,7 +77,7 @@ export const AGE_CATEGORY_GROUPS: readonly AgeCategoryGroup[] = [
   },
 ];
 
-export const CATEGORY_TITLE_PREFIX = 'Возрастная категория';
+export const CATEGORY_TITLE_PREFIX = 'Категория';
 
 function findGroup(groupId: AgeGroupId): AgeCategoryGroup | undefined {
   return AGE_CATEGORY_GROUPS.find((group) => group.id === groupId);

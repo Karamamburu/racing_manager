@@ -345,14 +345,14 @@ describe('EventsService.findById age categories', () => {
           {
             id: 'CATEGORY_1',
             number: 1,
-            title: 'Возрастная категория 1',
+            title: 'Категория 1',
             subtitle: '15–16, 17–18',
             groupIds: ['AGE_15_16', 'AGE_17_18'],
           },
           {
             id: 'CATEGORY_2',
             number: 2,
-            title: 'Возрастная категория 2',
+            title: 'Категория 2',
             subtitle: '19–20, 21–23, 24–40',
             groupIds: ['AGE_19_20', 'AGE_21_23', 'AGE_24_40'],
           },
@@ -466,7 +466,7 @@ describe('EventsService.findById age categories', () => {
       {
         id: 'CATEGORY_1',
         number: 1,
-        title: 'Возрастная категория 1',
+        title: 'Категория 1',
         subtitle: '≤14',
         groupIds: ['AGE_LE_14'],
       },
@@ -527,7 +527,7 @@ describe('EventsService.findById age categories', () => {
       {
         id: 'CATEGORY_1',
         number: 1,
-        title: 'Возрастная категория 1',
+        title: 'Категория 1',
         subtitle: '≤14, 15–16, 17–18, 19–20, 21–23',
         groupIds: [
           'AGE_LE_14',
@@ -540,7 +540,7 @@ describe('EventsService.findById age categories', () => {
       {
         id: 'CATEGORY_2',
         number: 2,
-        title: 'Возрастная категория 2',
+        title: 'Категория 2',
         subtitle: '41–50',
         groupIds: ['AGE_41_50'],
       },
@@ -584,7 +584,7 @@ describe('EventsService.findById age categories', () => {
       {
         id: 'CATEGORY_1',
         number: 1,
-        title: 'Возрастная категория 1',
+        title: 'Категория 1',
         subtitle: '24–40',
         groupIds: ['AGE_24_40'],
       },
@@ -660,7 +660,7 @@ describe('EventsService.findById age categories', () => {
         {
           id: 'CATEGORY_1',
           number: 1,
-          title: 'Возрастная категория 1',
+          title: 'Категория 1',
           subtitle: '≤14',
           groupIds: ['AGE_LE_14'],
         },
