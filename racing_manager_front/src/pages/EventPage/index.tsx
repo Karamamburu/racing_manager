@@ -656,7 +656,7 @@ export function EventPage() {
     try {
       await eventsService.setAgeSplit(event.id, payload);
       await refreshEvent();
-      message.success('Возрастное деление сохранено');
+      message.success('Возрастные категории сохранены');
       setAgeSplitCategory(null);
     } catch (error) {
       message.error(eventsService.getErrorMessage(error));
@@ -1169,7 +1169,7 @@ export function EventPage() {
                                   {classPanel}
                                   {ageSplitSelection ? (
                                     <Button onClick={() => setAgeSplitCategory(ageSplitSelection)}>
-                                      Возрастное деление
+                                      Возрастные категории
                                     </Button>
                                   ) : null}
                                 </Space>
@@ -1184,7 +1184,7 @@ export function EventPage() {
                                 {categoryFinished ? <Tag>Гонка завершена</Tag> : null}
                                 {ageSplitSelection ? (
                                   <Button onClick={() => setAgeSplitCategory(ageSplitSelection)}>
-                                    Возрастное деление
+                                    Возрастные категории
                                   </Button>
                                 ) : null}
                               </Space>
@@ -1223,6 +1223,11 @@ export function EventPage() {
                                                   <Typography.Text strong>
                                                     {ageSection.title ?? section.title}
                                                   </Typography.Text>
+                                                  {ageSection.subtitle ? (
+                                                    <Typography.Text type="secondary">
+                                                      {ageSection.subtitle}
+                                                    </Typography.Text>
+                                                  ) : null}
                                                   <Typography.Text type="secondary">
                                                     {formatParticipantCount(
                                                       ageSection.visibleRows.length,
