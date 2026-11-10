@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { UsersModule } from '../users/users.module';
+import { AgeSplitRepository } from './age-split.repository';
+import { AgeSplitService } from './age-split.service';
 import { EventStatusSyncService } from './event-status-sync.service';
 import { EventsCatalogController } from './events-catalog.controller';
 import { EventsController } from './events.controller';
@@ -14,7 +16,12 @@ import { ParticipationFormatsController } from './participation-formats.controll
     EventsCatalogController,
     ParticipationFormatsController,
   ],
-  providers: [EventsService, EventStatusSyncService],
+  providers: [
+    EventsService,
+    EventStatusSyncService,
+    AgeSplitService,
+    AgeSplitRepository,
+  ],
   exports: [EventsService, EventStatusSyncService],
 })
 export class EventsModule {}
