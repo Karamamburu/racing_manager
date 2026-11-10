@@ -9,20 +9,6 @@ import {
 import { AgeSplitKey, AgeSplitRepository } from './age-split.repository';
 import { parseSetAgeCategoriesBody } from './parse-set-age-split';
 
-export type AgeSectionRef = {
-  id: string;
-  kind: 'BASE_GROUP' | 'PRESET';
-  title: string;
-};
-
-export type AgeSplitRef = {
-  startId: string;
-  formatId: number;
-  gender: 'M' | 'F';
-  enabled: boolean;
-  sections: AgeSectionRef[];
-};
-
 export type AgeCategoryRef = {
   id: string;
   number: number;

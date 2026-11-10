@@ -9,33 +9,41 @@ import request from 'supertest';
 import { RolesGuard } from '../auth/roles.guard';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
 import { AgeSplitController } from './age-split.controller';
-import { AgeSplitService, type AgeSplitRef } from './age-split.service';
+import { AgeSplitService, type AgeCategoriesRef } from './age-split.service';
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
 const START_ID = '22222222-2222-4222-8222-222222222222';
 const AGE_SPLIT_PATH = `/admin/events/${EVENT_ID}/categories/age-split`;
 
-const AGE_SPLIT_REF: AgeSplitRef = {
+const AGE_CATEGORIES_REF: AgeCategoriesRef = {
   startId: START_ID,
   formatId: 1,
   gender: 'M',
   enabled: true,
-  sections: [{ id: 'AGE_24_40', kind: 'BASE_GROUP', title: 'Мужчины (24–40)' }],
+  categories: [
+    {
+      id: 'CATEGORY_1',
+      number: 1,
+      title: 'Возрастная категория 1',
+      subtitle: '15–16, 17–18',
+      groupIds: ['AGE_15_16', 'AGE_17_18'],
+    },
+  ],
 };
 
-const AGE_SPLIT_BODY = {
+const AGE_CATEGORIES_BODY = {
   gender: 'M',
   startId: START_ID,
   formatId: 1,
   enabled: true,
-  sections: [{ kind: 'BASE_GROUP', id: 'AGE_24_40' }],
+  categories: [{ groupIds: ['AGE_15_16', 'AGE_17_18'] }],
 };
 
-type SetSplitStub = jest.Mock<Promise<AgeSplitRef>, [string, unknown]>;
+type SetSplitStub = jest.Mock<Promise<AgeCategoriesRef>, [string, unknown]>;
 
 function makeSetSplit(
-  handler: (id: string, body: unknown) => Promise<AgeSplitRef> = () =>
-    Promise.resolve(AGE_SPLIT_REF),
+  handler: (id: string, body: unknown) => Promise<AgeCategoriesRef> = () =>
+    Promise.resolve(AGE_CATEGORIES_REF),
 ): SetSplitStub {
   return jest.fn(handler);
 }
@@ -80,18 +88,18 @@ describe('AgeSplitController HTTP contract', () => {
     await app?.close();
   });
 
-  it('returns 200 with the AgeSplitRef and forwards the path id and body', async () => {
+  it('returns 200 with the AgeCategoriesRef and forwards the path id and body', async () => {
     const setSplit = makeSetSplit();
     const server = await createApp(makeServiceStub(setSplit));
 
     const response = await request(server)
       .put(AGE_SPLIT_PATH)
-      .send(AGE_SPLIT_BODY);
+      .send(AGE_CATEGORIES_BODY);
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual(AGE_SPLIT_REF);
+    expect(response.body).toEqual(AGE_CATEGORIES_REF);
     expect(setSplit).toHaveBeenCalledTimes(1);
-    expect(setSplit).toHaveBeenCalledWith(EVENT_ID, AGE_SPLIT_BODY);
+    expect(setSplit).toHaveBeenCalledWith(EVENT_ID, AGE_CATEGORIES_BODY);
   });
 
   it('maps a BadRequestException from the service to 400', async () => {
@@ -102,7 +110,7 @@ describe('AgeSplitController HTTP contract', () => {
 
     const response = await request(server)
       .put(AGE_SPLIT_PATH)
-      .send(AGE_SPLIT_BODY);
+      .send(AGE_CATEGORIES_BODY);
 
     expect(response.status).toBe(400);
     expect(setSplit).toHaveBeenCalledTimes(1);
@@ -114,7 +122,7 @@ describe('AgeSplitController HTTP contract', () => {
 
     const response = await request(server)
       .put('/admin/events/not-a-uuid/categories/age-split')
-      .send(AGE_SPLIT_BODY);
+      .send(AGE_CATEGORIES_BODY);
 
     expect(response.status).toBe(400);
     expect(setSplit).not.toHaveBeenCalled();
@@ -128,13 +136,13 @@ describe('AgeSplitController HTTP contract', () => {
 
     const response = await request(server)
       .put(AGE_SPLIT_PATH)
-      .send(AGE_SPLIT_BODY);
+      .send(AGE_CATEGORIES_BODY);
 
     expect(response.status).toBe(403);
     expect(setSplit).not.toHaveBeenCalled();
   });
 
-  it('passes an enabled body through unchanged', async () => {
+  it('passes an enabled categories body through unchanged', async () => {
     const setSplit = makeSetSplit();
     const server = await createApp(makeServiceStub(setSplit));
     const body = {
@@ -142,8 +150,25 @@ describe('AgeSplitController HTTP contract', () => {
       startId: START_ID,
       formatId: 2,
       enabled: true,
-      sections: [{ kind: 'PRESET', id: 'PRESET_MASTERS_41_PLUS' }],
+      categories: [{ groupIds: ['AGE_LE_14', 'AGE_15_16'] }],
       ignoredExtra: 'kept-as-is',
+    };
+
+    await request(server).put(AGE_SPLIT_PATH).send(body);
+
+    expect(setSplit).toHaveBeenCalledTimes(1);
+    expect(setSplit.mock.calls[0][1]).toEqual(body);
+  });
+
+  it('passes a retired sections body to the service unchanged', async () => {
+    const setSplit = makeSetSplit();
+    const server = await createApp(makeServiceStub(setSplit));
+    const body = {
+      gender: 'M',
+      startId: START_ID,
+      formatId: 1,
+      enabled: true,
+      sections: [{ kind: 'BASE_GROUP', id: 'AGE_24_40' }],
     };
 
     await request(server).put(AGE_SPLIT_PATH).send(body);
