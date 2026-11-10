@@ -1105,6 +1105,42 @@ export function EventPage() {
                           scroll={compactActive ? undefined : { x: 'max-content' }}
                         />
                       );
+                      const classPanel = classCompetitionsQuery.isSuccess ? (
+                        <ClassCompetitionPanel
+                          eventId={event.id}
+                          competition={competition}
+                          formatId={formatId}
+                          gender={gender}
+                          eventLaps={event.laps ?? []}
+                          canManage={canRunBracket}
+                          registrationClosed={registrationClosed}
+                          categoryHasResults={hasResults || categoryFinished}
+                          onChanged={refreshEvent}
+                        />
+                      ) : null;
+                      const finishControl =
+                        !competition && canRunBracket && !categoryFinished ? (
+                          <Tooltip
+                            title={
+                              readyToFinish
+                                ? undefined
+                                : 'Укажите результат каждому участнику, который занимает место, либо поставьте DNS, DNF, DSQ или NQ.'
+                            }
+                          >
+                            <span>
+                              <Button
+                                {...(readyToFinish
+                                  ? { color: 'green', variant: 'solid' as const }
+                                  : { type: 'primary' as const })}
+                                disabled={!readyToFinish}
+                                loading={finishingCategory === section.key}
+                                onClick={() => finishCategory(startId, formatId, gender, section.key)}
+                              >
+                                Завершить гонку
+                              </Button>
+                            </span>
+                          </Tooltip>
+                        ) : null;
                       return {
                         key: section.key,
                         label: (
@@ -1117,48 +1153,44 @@ export function EventPage() {
                         ),
                         children: (
                           <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                            {classCompetitionsQuery.isSuccess ? (
-                              <ClassCompetitionPanel
-                                eventId={event.id}
-                                competition={competition}
-                                formatId={formatId}
-                                gender={gender}
-                                eventLaps={event.laps ?? []}
-                                canManage={canRunBracket}
-                                registrationClosed={registrationClosed}
-                                categoryHasResults={hasResults || categoryFinished}
-                                onChanged={refreshEvent}
-                              />
-                            ) : null}
-                            {bracketInProgress ? null : (
-                              <>
-                                {!competition && canRunBracket && !categoryFinished ? (
-                                  <Tooltip
-                                    title={
-                                      readyToFinish
-                                        ? undefined
-                                        : 'Укажите результат каждому участнику, который занимает место, либо поставьте DNS, DNF, DSQ или NQ.'
-                                    }
-                                  >
-                                    <span>
-                                      <Button
-                                        type="primary"
-                                        disabled={!readyToFinish}
-                                        loading={finishingCategory === section.key}
-                                        onClick={() => finishCategory(startId, formatId, gender, section.key)}
-                                      >
-                                        Завершить гонку
-                                      </Button>
-                                    </span>
-                                  </Tooltip>
-                                ) : null}
+                            {competition ? (
+                              classPanel
+                            ) : (
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  gap: 12,
+                                  flexWrap: 'wrap',
+                                }}
+                              >
+                                <Space size={8} wrap>
+                                  {classPanel}
+                                  {ageSplitSelection ? (
+                                    <Button onClick={() => setAgeSplitCategory(ageSplitSelection)}>
+                                      Возрастное деление
+                                    </Button>
+                                  ) : null}
+                                </Space>
+                                <Space size={8} wrap>
+                                  {finishControl}
+                                  {categoryFinished ? <Tag>Гонка завершена</Tag> : null}
+                                </Space>
+                              </div>
+                            )}
+                            {competition && !bracketInProgress ? (
+                              <Space size={8} wrap>
                                 {categoryFinished ? <Tag>Гонка завершена</Tag> : null}
                                 {ageSplitSelection ? (
                                   <Button onClick={() => setAgeSplitCategory(ageSplitSelection)}>
                                     Возрастное деление
                                   </Button>
                                 ) : null}
-                                <Collapse
+                              </Space>
+                            ) : null}
+                            {bracketInProgress ? null : (
+                              <Collapse
                                 activeKey={expandedProtocolKeys}
                                 onChange={(keys) => changeProtocolExpansion(section.key, keys)}
                                 items={[
@@ -1214,7 +1246,6 @@ export function EventPage() {
                                   },
                                 ]}
                               />
-                                </>
                             )}
                           </Space>
                         ),
