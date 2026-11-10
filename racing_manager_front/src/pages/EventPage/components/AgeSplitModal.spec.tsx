@@ -5,19 +5,14 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
-import type {
-  AgeGroupId,
-  AgeSectionRef,
-  AgeSplitRef,
-} from '../../../shared/types/event';
 import {
-  AGE_SPLIT_GROUPS,
-  AGE_SPLIT_PRESETS,
-  ALL_GROUPS_ACTION_TITLE,
-  AgeSplitModal,
-  type AgeSplitCategory,
-} from './AgeSplitModal';
+  AGE_CATEGORY_GROUPS,
+  categoryTitle,
+} from '../../../features/events/ageCategories';
+import type { AgeGroupId, AgeSplitRef } from '../../../shared/types/event';
+import { AgeSplitModal, type AgeSplitCategory } from './AgeSplitModal';
 
 const category: AgeSplitCategory = {
   startId: 'start-a',
@@ -27,32 +22,38 @@ const category: AgeSplitCategory = {
   formatName: '10 км',
 };
 
-function baseSection(id: AgeGroupId, title: string): AgeSectionRef {
-  return { id, kind: 'BASE_GROUP', title };
+function categoryRef(index: number, groupIds: AgeGroupId[]) {
+  return {
+    id: `CATEGORY_${index}`,
+    number: index,
+    title: categoryTitle(index),
+    subtitle: '',
+    groupIds,
+  };
 }
 
-function splitRef(sections: AgeSectionRef[], enabled = true): AgeSplitRef {
+function splitRef(
+  categories: { groupIds: AgeGroupId[] }[],
+  enabled = true,
+): AgeSplitRef {
   return {
     startId: category.startId,
     formatId: category.formatId,
     gender: category.gender,
     enabled,
-    sections,
+    categories: categories.map((item, index) =>
+      categoryRef(index + 1, item.groupIds),
+    ),
+    sections: [],
   };
 }
 
 function groupCheckbox(groupId: AgeGroupId): HTMLInputElement {
-  const group = AGE_SPLIT_GROUPS.find((item) => item.id === groupId);
+  const group = AGE_CATEGORY_GROUPS.find((item) => item.id === groupId);
   if (!group) throw new Error(`Unknown age group: ${groupId}`);
   return screen.getByRole('checkbox', {
     name: `${group.labels.M} (${group.range})`,
   }) as HTMLInputElement;
-}
-
-function presetCheckbox(presetId: string): HTMLInputElement {
-  const preset = AGE_SPLIT_PRESETS.find((item) => item.id === presetId);
-  if (!preset) throw new Error(`Unknown preset: ${presetId}`);
-  return screen.getByRole('checkbox', { name: preset.title }) as HTMLInputElement;
 }
 
 function renderModal(options?: {
@@ -84,6 +85,28 @@ function saveButton(): HTMLButtonElement {
   return screen.getByRole('button', { name: 'Сохранить' }) as HTMLButtonElement;
 }
 
+function addButton(): HTMLButtonElement {
+  return screen.getByRole('button', {
+    name: 'Добавить категорию',
+  }) as HTMLButtonElement;
+}
+
+function tab(number: number): HTMLElement {
+  return screen.getByRole('tab', {
+    name: new RegExp(`^${categoryTitle(number)}`),
+  });
+}
+
+function tabs(): HTMLElement[] {
+  return screen.getAllByRole('tab');
+}
+
+function removeTab(number: number): void {
+  fireEvent.click(
+    screen.getByRole('button', { name: `Удалить ${categoryTitle(number)}` }),
+  );
+}
+
 function clickSave(): void {
   fireEvent.click(saveButton());
 }
@@ -107,60 +130,140 @@ beforeAll(() => {
 afterEach(cleanup);
 
 describe('AgeSplitModal', () => {
-  it('opens in the off state with no stored configuration', () => {
+  it('opens off with one empty «Возрастная категория 1» tab', () => {
     renderModal();
 
-    expect(screen.getByText('Возрастное деление')).not.toBeNull();
-    expect(
-      screen.getByText('Кубковая гонка — 10 км · 10 км'),
-    ).not.toBeNull();
+    expect(screen.getByText('Возрастные категории')).not.toBeNull();
+    expect(screen.getByText('Кубковая гонка — 10 км · 10 км')).not.toBeNull();
     expect(switchControl().getAttribute('aria-checked')).toBe('false');
-    for (const group of AGE_SPLIT_GROUPS) {
+    expect(tabs()).toHaveLength(1);
+    expect(tab(1)).not.toBeNull();
+    expect(
+      screen.getByText('Юноши среднего возраста (15–16)'),
+    ).not.toBeNull();
+    for (const group of AGE_CATEGORY_GROUPS) {
       expect(groupCheckbox(group.id).checked).toBe(false);
-    }
-    for (const preset of AGE_SPLIT_PRESETS) {
-      expect(presetCheckbox(preset.id).checked).toBe(false);
     }
     expect(saveButton().disabled).toBe(false);
     expect(screen.queryByText('Выберите хотя бы одну группу')).toBeNull();
   });
 
-  it('pre-checks a stored base group', () => {
+  it('preloads two tabs from a stored configuration with the switch on', () => {
     renderModal({
-      value: splitRef([baseSection('AGE_15_16', 'Юноши среднего возраста (15–16)')]),
+      value: splitRef([
+        { groupIds: ['AGE_15_16'] },
+        { groupIds: ['AGE_41_50'] },
+      ]),
     });
 
     expect(switchControl().getAttribute('aria-checked')).toBe('true');
+    expect(tabs()).toHaveLength(2);
+    expect(tab(1)).not.toBeNull();
+    expect(tab(2)).not.toBeNull();
+    expect(within(tab(1)).getByText('15–16')).not.toBeNull();
+    expect(within(tab(2)).getByText('41–50')).not.toBeNull();
+
     expect(groupCheckbox('AGE_15_16').checked).toBe(true);
-    expect(groupCheckbox('AGE_24_40').checked).toBe(false);
+    expect(groupCheckbox('AGE_41_50').checked).toBe(true);
+    expect(groupCheckbox('AGE_41_50').disabled).toBe(true);
+    expect(screen.getByText('входит в Возрастная категория 2')).not.toBeNull();
+
+    fireEvent.click(tab(2));
+
+    expect(groupCheckbox('AGE_41_50').checked).toBe(true);
+    expect(groupCheckbox('AGE_41_50').disabled).toBe(false);
+    expect(groupCheckbox('AGE_15_16').checked).toBe(true);
+    expect(groupCheckbox('AGE_15_16').disabled).toBe(true);
+    expect(screen.getByText('входит в Возрастная категория 1')).not.toBeNull();
   });
 
-  it('checks an applied combined preset and disables its member groups', () => {
+  it('turns the switch on when a group is selected from the off state', () => {
     renderModal();
 
-    fireEvent.click(presetCheckbox('PRESET_JUNIOR_UNDER_24'));
+    expect(switchControl().getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(groupCheckbox('AGE_24_40'));
 
-    const preset = AGE_SPLIT_PRESETS.find(
-      (item) => item.id === 'PRESET_JUNIOR_UNDER_24',
-    );
-    expect(preset).toBeDefined();
-    expect(presetCheckbox('PRESET_JUNIOR_UNDER_24').checked).toBe(true);
-    for (const groupId of preset?.groupIds ?? []) {
-      expect(groupCheckbox(groupId).checked).toBe(true);
-      expect(groupCheckbox(groupId).disabled).toBe(true);
-    }
-    expect(groupCheckbox('AGE_24_40').disabled).toBe(false);
-    expect(
-      screen.getAllByText('входит в «Юниоры и младше (<24)»').length,
-    ).toBe(preset?.groupIds.length);
+    expect(switchControl().getAttribute('aria-checked')).toBe('true');
+    expect(groupCheckbox('AGE_24_40').checked).toBe(true);
   });
 
-  it('saves two base groups as BASE_GROUP sections in canonical order', async () => {
+  it('appends tab 2, disables a group owned by tab 1 and allows a free group', () => {
+    renderModal();
+
+    fireEvent.click(groupCheckbox('AGE_15_16'));
+    fireEvent.click(addButton());
+
+    expect(tabs()).toHaveLength(2);
+    expect(tab(2)).not.toBeNull();
+    expect(groupCheckbox('AGE_15_16').checked).toBe(true);
+    expect(groupCheckbox('AGE_15_16').disabled).toBe(true);
+    expect(screen.getByText('входит в Возрастная категория 1')).not.toBeNull();
+
+    const freeGroup = groupCheckbox('AGE_24_40');
+    expect(freeGroup.disabled).toBe(false);
+    fireEvent.click(freeGroup);
+
+    expect(groupCheckbox('AGE_24_40').checked).toBe(true);
+    expect(groupCheckbox('AGE_24_40').disabled).toBe(false);
+  });
+
+  it('removes tab 1, releases its groups and renumbers the remaining tab', () => {
+    renderModal();
+
+    fireEvent.click(groupCheckbox('AGE_15_16'));
+    fireEvent.click(addButton());
+    fireEvent.click(groupCheckbox('AGE_24_40'));
+    removeTab(1);
+
+    expect(tabs()).toHaveLength(1);
+    expect(tab(1)).not.toBeNull();
+    expect(screen.queryByRole('tab', { name: /Возрастная категория 2/ })).toBeNull();
+    expect(groupCheckbox('AGE_24_40').checked).toBe(true);
+    expect(groupCheckbox('AGE_24_40').disabled).toBe(false);
+    expect(groupCheckbox('AGE_15_16').checked).toBe(false);
+    expect(groupCheckbox('AGE_15_16').disabled).toBe(false);
+  });
+
+  it('removes the last tab, keeps adding available and blocks an enabled save', () => {
+    renderModal();
+
+    fireEvent.click(groupCheckbox('AGE_24_40'));
+    removeTab(1);
+
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    expect(addButton().disabled).toBe(false);
+    expect(saveButton().disabled).toBe(true);
+    expect(screen.getByText('Выберите хотя бы одну группу')).not.toBeNull();
+
+    fireEvent.click(addButton());
+
+    expect(tabs()).toHaveLength(1);
+    expect(tab(1)).not.toBeNull();
+  });
+
+  it('disables «Добавить категорию» once all nine groups are assigned and enables it after a release', () => {
+    renderModal();
+
+    for (const group of AGE_CATEGORY_GROUPS) {
+      fireEvent.click(groupCheckbox(group.id));
+    }
+
+    expect(addButton().disabled).toBe(true);
+
+    fireEvent.click(groupCheckbox('AGE_61_PLUS'));
+
+    expect(addButton().disabled).toBe(false);
+  });
+
+  it('saves two categories in order and drops the empty tab', async () => {
     const { onSave } = renderModal();
 
-    fireEvent.click(switchControl());
     fireEvent.click(groupCheckbox('AGE_24_40'));
+    fireEvent.click(addButton());
     fireEvent.click(groupCheckbox('AGE_15_16'));
+    fireEvent.click(addButton());
+
+    expect(tabs()).toHaveLength(3);
     clickSave();
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
@@ -169,123 +272,14 @@ describe('AgeSplitModal', () => {
       startId: 'start-a',
       formatId: 1,
       enabled: true,
-      sections: [
-        { kind: 'BASE_GROUP', id: 'AGE_15_16' },
-        { kind: 'BASE_GROUP', id: 'AGE_24_40' },
+      categories: [
+        { groupIds: ['AGE_24_40'] },
+        { groupIds: ['AGE_15_16'] },
       ],
     });
   });
 
-  it('enables the split when a base group is checked from the off state', async () => {
-    const { onSave } = renderModal();
-
-    expect(switchControl().getAttribute('aria-checked')).toBe('false');
-    fireEvent.click(groupCheckbox('AGE_24_40'));
-    expect(switchControl().getAttribute('aria-checked')).toBe('true');
-
-    clickSave();
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-    expect(onSave).toHaveBeenCalledWith({
-      gender: 'M',
-      startId: 'start-a',
-      formatId: 1,
-      enabled: true,
-      sections: [{ kind: 'BASE_GROUP', id: 'AGE_24_40' }],
-    });
-  });
-
-  it('enables the split when a combined preset is applied from the off state', async () => {
-    const { onSave } = renderModal();
-
-    expect(switchControl().getAttribute('aria-checked')).toBe('false');
-    fireEvent.click(presetCheckbox('PRESET_JUNIOR_UNDER_24'));
-    expect(switchControl().getAttribute('aria-checked')).toBe('true');
-
-    clickSave();
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-    expect(onSave).toHaveBeenCalledWith({
-      gender: 'M',
-      startId: 'start-a',
-      formatId: 1,
-      enabled: true,
-      sections: [{ kind: 'PRESET', id: 'PRESET_JUNIOR_UNDER_24' }],
-    });
-  });
-
-  it('enables the split when all groups are selected from the off state', async () => {
-    const { onSave } = renderModal();
-
-    expect(switchControl().getAttribute('aria-checked')).toBe('false');
-    fireEvent.click(screen.getByRole('button', { name: ALL_GROUPS_ACTION_TITLE }));
-    expect(switchControl().getAttribute('aria-checked')).toBe('true');
-
-    clickSave();
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-    expect(onSave).toHaveBeenCalledWith({
-      gender: 'M',
-      startId: 'start-a',
-      formatId: 1,
-      enabled: true,
-      sections: AGE_SPLIT_GROUPS.map((group) => ({
-        kind: 'BASE_GROUP',
-        id: group.id,
-      })),
-    });
-  });
-
-  it('selects all nine groups and clears a combined preset', async () => {
-    const { onSave } = renderModal();
-
-    fireEvent.click(switchControl());
-    fireEvent.click(presetCheckbox('PRESET_JUNIOR_UNDER_24'));
-    fireEvent.click(screen.getByRole('button', { name: ALL_GROUPS_ACTION_TITLE }));
-
-    expect(presetCheckbox('PRESET_JUNIOR_UNDER_24').checked).toBe(false);
-    expect(AGE_SPLIT_GROUPS).toHaveLength(9);
-    for (const group of AGE_SPLIT_GROUPS) {
-      expect(groupCheckbox(group.id).checked).toBe(true);
-      expect(groupCheckbox(group.id).disabled).toBe(false);
-    }
-
-    clickSave();
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-    expect(onSave).toHaveBeenCalledWith({
-      gender: 'M',
-      startId: 'start-a',
-      formatId: 1,
-      enabled: true,
-      sections: AGE_SPLIT_GROUPS.map((group) => ({
-        kind: 'BASE_GROUP',
-        id: group.id,
-      })),
-    });
-  });
-
-  it('switches the split off and emits an empty section set', async () => {
-    const { onSave } = renderModal({
-      value: splitRef([baseSection('AGE_15_16', 'Юноши среднего возраста (15–16)')]),
-    });
-
-    expect(switchControl().getAttribute('aria-checked')).toBe('true');
-    fireEvent.click(switchControl());
-    expect(switchControl().getAttribute('aria-checked')).toBe('false');
-    clickSave();
-
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-    expect(onSave).toHaveBeenCalledWith({
-      gender: 'M',
-      startId: 'start-a',
-      formatId: 1,
-      enabled: false,
-      sections: [],
-    });
-  });
-
-  it('keeps saving disabled and shows the hint when the split is on without a selection', () => {
+  it('keeps OK disabled with the hint on an enabled save without groups', () => {
     renderModal();
 
     fireEvent.click(switchControl());
@@ -295,15 +289,54 @@ describe('AgeSplitModal', () => {
     expect(screen.getByText('Выберите хотя бы одну группу')).not.toBeNull();
   });
 
-  it('warns that the stored split is not applied while a bracket exists', () => {
+  it('keeps the tabs when the switch goes off and saves an empty category list', async () => {
+    const { onSave } = renderModal({
+      value: splitRef([
+        { groupIds: ['AGE_15_16'] },
+        { groupIds: ['AGE_41_50'] },
+      ]),
+    });
+
+    fireEvent.click(switchControl());
+
+    expect(switchControl().getAttribute('aria-checked')).toBe('false');
+    expect(tabs()).toHaveLength(2);
+    expect(tab(2)).not.toBeNull();
+    expect(saveButton().disabled).toBe(false);
+
+    clickSave();
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0][0]).toEqual({
+      gender: 'M',
+      startId: 'start-a',
+      formatId: 1,
+      enabled: false,
+      categories: [],
+    });
+  });
+
+  it('closes without saving and submits nothing', () => {
+    const { onSave, onClose } = renderModal({
+      value: splitRef([{ groupIds: ['AGE_15_16'] }]),
+    });
+
+    fireEvent.click(groupCheckbox('AGE_24_40'));
+    fireEvent.click(screen.getByRole('button', { name: 'Отмена' }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('warns that the stored categories are not applied while a bracket exists', () => {
     renderModal({ notApplied: true });
 
     expect(
-      screen.getByText('Деление сохранено, но не применяется'),
+      screen.getByText('Категории сохранены, но не применяются'),
     ).not.toBeNull();
     expect(
       screen.getByText(
-        'Пока для категории существует многоэтапная гонка, протокол выводится без возрастных секций.',
+        'Пока для категории существует многоэтапная гонка, протокол выводится без возрастных категорий.',
       ),
     ).not.toBeNull();
   });
@@ -312,7 +345,7 @@ describe('AgeSplitModal', () => {
     renderModal();
 
     expect(
-      screen.queryByText('Деление сохранено, но не применяется'),
+      screen.queryByText('Категории сохранены, но не применяются'),
     ).toBeNull();
   });
 });

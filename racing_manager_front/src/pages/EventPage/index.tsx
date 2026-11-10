@@ -52,7 +52,7 @@ import { AppShell } from '../../shared/layout';
 import type {
   EventFormatRef,
   EventParticipant,
-  SetAgeSplitRequest,
+  SetAgeCategoriesRequest,
   StartResponse,
 } from '../../shared/types/event';
 import type { FeatureItem } from '../../shared/types/track';
@@ -651,7 +651,7 @@ export function EventPage() {
     }
   };
 
-  const saveAgeSplit = async (payload: SetAgeSplitRequest) => {
+  const saveAgeSplit = async (payload: SetAgeCategoriesRequest) => {
     setIsSavingAgeSplit(true);
     try {
       await eventsService.setAgeSplit(event.id, payload);

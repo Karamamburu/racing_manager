@@ -1,3 +1,4 @@
+import { CloseOutlined } from '@ant-design/icons';
 import {
   Alert,
   Button,
@@ -5,16 +6,22 @@ import {
   Modal,
   Space,
   Switch,
+  Tabs,
   Typography,
 } from 'antd';
 import { useEffect, useRef, useState } from 'react';
+import {
+  AGE_CATEGORY_GROUPS,
+  categorySubtitle,
+  categoryTitle,
+  groupLabel,
+  groupRange,
+} from '../../../features/events/ageCategories';
 import type {
   AgeGroupId,
-  AgeSplitPresetId,
   AgeSplitRef,
   GenderCode,
-  SetAgeSplitRequest,
-  SetAgeSplitSectionRequest,
+  SetAgeCategoriesRequest,
 } from '../../../shared/types/event';
 
 export type AgeSplitCategory = {
@@ -34,136 +41,19 @@ export type AgeSplitModalProps = {
   notApplied?: boolean;
   saving?: boolean;
   onClose: () => void;
-  onSave: (payload: SetAgeSplitRequest) => void | Promise<void>;
+  onSave: (payload: SetAgeCategoriesRequest) => void | Promise<void>;
 };
 
-export type AgeSplitGroupOption = {
-  id: AgeGroupId;
-  range: string;
-  labels: Record<GenderCode, string>;
+type DraftCategory = {
+  key: string;
+  groupIds: AgeGroupId[];
 };
 
-/** Combined presets that the dialog can store as one section. */
-export type CombinedPresetId = Exclude<AgeSplitPresetId, 'PRESET_ALL_GROUPS'>;
-
-export type AgeSplitPresetOption = {
-  id: CombinedPresetId;
-  title: string;
-  groupIds: readonly AgeGroupId[];
-};
-
-export const AGE_SPLIT_GROUPS: readonly AgeSplitGroupOption[] = [
-  {
-    id: 'AGE_LE_14',
-    range: '≤14',
-    labels: {
-      M: 'Юноши младшего возраста',
-      F: 'Девушки младшего возраста',
-    },
-  },
-  {
-    id: 'AGE_15_16',
-    range: '15–16',
-    labels: {
-      M: 'Юноши среднего возраста',
-      F: 'Девушки среднего возраста',
-    },
-  },
-  {
-    id: 'AGE_17_18',
-    range: '17–18',
-    labels: {
-      M: 'Юноши старшего возраста',
-      F: 'Девушки старшего возраста',
-    },
-  },
-  {
-    id: 'AGE_19_20',
-    range: '19–20',
-    labels: { M: 'Юниоры', F: 'Юниорки' },
-  },
-  {
-    id: 'AGE_21_23',
-    range: '21–23',
-    labels: { M: 'Юниоры', F: 'Юниорки' },
-  },
-  {
-    id: 'AGE_24_40',
-    range: '24–40',
-    labels: { M: 'Мужчины', F: 'Женщины' },
-  },
-  {
-    id: 'AGE_41_50',
-    range: '41–50',
-    labels: { M: 'Мастер 1', F: 'Мастер 1' },
-  },
-  {
-    id: 'AGE_51_60',
-    range: '51–60',
-    labels: { M: 'Мастер 2', F: 'Мастер 2' },
-  },
-  {
-    id: 'AGE_61_PLUS',
-    range: '61+',
-    labels: { M: 'Мастер 3', F: 'Мастер 3' },
-  },
-];
-
-export const AGE_SPLIT_PRESETS: readonly AgeSplitPresetOption[] = [
-  {
-    id: 'PRESET_JUNIOR_UNDER_24',
-    title: 'Юниоры и младше (<24)',
-    groupIds: [
-      'AGE_LE_14',
-      'AGE_15_16',
-      'AGE_17_18',
-      'AGE_19_20',
-      'AGE_21_23',
-    ],
-  },
-  {
-    id: 'PRESET_MASTERS_41_PLUS',
-    title: 'Мастера 41+',
-    groupIds: ['AGE_41_50', 'AGE_51_60', 'AGE_61_PLUS'],
-  },
-];
-
-export const ALL_GROUPS_ACTION_TITLE = 'Все возрастные группы';
-
-function isAgeGroupId(value: string): value is AgeGroupId {
-  return AGE_SPLIT_GROUPS.some((group) => group.id === value);
-}
-
-function isCombinedPresetId(value: string): value is CombinedPresetId {
-  return AGE_SPLIT_PRESETS.some((preset) => preset.id === value);
-}
-
-function presetCovering(
-  groupId: AgeGroupId,
-  presetIds: readonly CombinedPresetId[],
-): AgeSplitPresetOption | undefined {
-  return AGE_SPLIT_PRESETS.find(
-    (preset) =>
-      presetIds.includes(preset.id) && preset.groupIds.includes(groupId),
+/** Catalog order keeps the submitted group list stable. */
+function orderedGroupIds(groupIds: readonly AgeGroupId[]): AgeGroupId[] {
+  return AGE_CATEGORY_GROUPS.filter((group) => groupIds.includes(group.id)).map(
+    (group) => group.id,
   );
-}
-
-function buildSections(
-  groupIds: readonly AgeGroupId[],
-  presetIds: readonly CombinedPresetId[],
-): SetAgeSplitSectionRequest[] {
-  const covered = new Set<AgeGroupId>();
-  const sections: SetAgeSplitSectionRequest[] = [];
-  for (const preset of AGE_SPLIT_PRESETS) {
-    if (!presetIds.includes(preset.id)) continue;
-    sections.push({ kind: 'PRESET', id: preset.id });
-    for (const groupId of preset.groupIds) covered.add(groupId);
-  }
-  for (const group of AGE_SPLIT_GROUPS) {
-    if (!groupIds.includes(group.id) || covered.has(group.id)) continue;
-    sections.push({ kind: 'BASE_GROUP', id: group.id });
-  }
-  return sections;
 }
 
 export function AgeSplitModal({
@@ -176,9 +66,10 @@ export function AgeSplitModal({
   onSave,
 }: AgeSplitModalProps) {
   const [enabled, setEnabled] = useState(false);
-  const [groupIds, setGroupIds] = useState<AgeGroupId[]>([]);
-  const [presetIds, setPresetIds] = useState<CombinedPresetId[]>([]);
+  const [draft, setDraft] = useState<DraftCategory[]>([]);
+  const [activeKey, setActiveKey] = useState('');
   const initializedFor = useRef<string | null>(null);
+  const keySeq = useRef(0);
 
   const categoryKey = category
     ? `${category.startId}:${category.formatId}:${category.gender}`
@@ -192,28 +83,41 @@ export function AgeSplitModal({
     if (initializedFor.current === categoryKey) return;
     initializedFor.current = categoryKey;
 
-    const nextGroupIds: AgeGroupId[] = [];
-    const nextPresetIds: CombinedPresetId[] = [];
-    for (const section of value?.sections ?? []) {
-      if (section.kind === 'PRESET') {
-        if (isCombinedPresetId(section.id) && !nextPresetIds.includes(section.id)) {
-          nextPresetIds.push(section.id);
-        }
-        continue;
-      }
-      if (isAgeGroupId(section.id) && !nextGroupIds.includes(section.id)) {
-        nextGroupIds.push(section.id);
-      }
-    }
+    const stored = value?.categories ?? [];
+    const nextKey = () => {
+      keySeq.current += 1;
+      return `category-${keySeq.current}`;
+    };
+    const next: DraftCategory[] =
+      stored.length > 0
+        ? stored.map((item) => ({
+            key: nextKey(),
+            groupIds: [...item.groupIds],
+          }))
+        : [{ key: nextKey(), groupIds: [] }];
+
     setEnabled(value?.enabled ?? false);
-    setGroupIds(nextGroupIds);
-    setPresetIds(nextPresetIds);
+    setDraft(next);
+    setActiveKey(next[0]?.key ?? '');
   }, [categoryKey, open, value]);
 
   const gender: GenderCode = category?.gender ?? 'M';
-  const hasSelection = groupIds.length > 0 || presetIds.length > 0;
-  const selectionMissing = enabled && !hasSelection;
-  const saveDisabled = saving || !category || selectionMissing;
+  const activeDraft = draft.find((item) => item.key === activeKey) ?? draft[0];
+
+  const assigned = new Set<AgeGroupId>();
+  for (const item of draft) {
+    for (const groupId of item.groupIds) assigned.add(groupId);
+  }
+
+  const allGroupsAssigned = assigned.size >= AGE_CATEGORY_GROUPS.length;
+  const addDisabled =
+    saving || draft.length >= AGE_CATEGORY_GROUPS.length || allGroupsAssigned;
+
+  const keptCategories = draft
+    .map((item) => ({ groupIds: orderedGroupIds(item.groupIds) }))
+    .filter((item) => item.groupIds.length > 0);
+  const groupsMissing = enabled && keptCategories.length === 0;
+  const saveDisabled = saving || !category || groupsMissing;
 
   const handleCancel = () => {
     if (saving) return;
@@ -221,55 +125,134 @@ export function AgeSplitModal({
   };
 
   const toggleGroup = (groupId: AgeGroupId, checked: boolean) => {
-    if (checked) setEnabled(true);
-    setGroupIds((previous) =>
-      checked
-        ? [...previous.filter((id) => id !== groupId), groupId]
-        : previous.filter((id) => id !== groupId),
+    if (!activeDraft) return;
+    const draftKey = activeDraft.key;
+    setDraft((previous) =>
+      previous.map((item) =>
+        item.key === draftKey
+          ? {
+              ...item,
+              groupIds: checked
+                ? [...item.groupIds.filter((id) => id !== groupId), groupId]
+                : item.groupIds.filter((id) => id !== groupId),
+            }
+          : item,
+      ),
     );
+    if (checked) setEnabled(true);
   };
 
-  const togglePreset = (preset: AgeSplitPresetOption, checked: boolean) => {
-    if (checked) setEnabled(true);
-    setPresetIds((previous) =>
-      checked
-        ? [...previous.filter((id) => id !== preset.id), preset.id]
-        : previous.filter((id) => id !== preset.id),
-    );
-    if (checked) {
-      setGroupIds((previous) =>
-        previous.filter((id) => !preset.groupIds.includes(id)),
+  const addCategory = () => {
+    if (addDisabled) return;
+    keySeq.current += 1;
+    const next: DraftCategory = {
+      key: `category-${keySeq.current}`,
+      groupIds: [],
+    };
+    setDraft((previous) => [...previous, next]);
+    setActiveKey(next.key);
+  };
+
+  const removeCategory = (key: string) => {
+    if (saving) return;
+    const index = draft.findIndex((item) => item.key === key);
+    if (index < 0) return;
+    const remaining = draft.filter((item) => item.key !== key);
+    setDraft(remaining);
+    if (key === activeDraft?.key) {
+      setActiveKey(
+        remaining.length === 0
+          ? ''
+          : remaining[Math.min(index, remaining.length - 1)].key,
       );
     }
   };
 
-  const selectAllGroups = () => {
-    setEnabled(true);
-    setGroupIds(AGE_SPLIT_GROUPS.map((group) => group.id));
-    setPresetIds([]);
-  };
+  const tabItems = draft.map((item, index) => {
+    const subtitle = categorySubtitle(item.groupIds);
+    return {
+      key: item.key,
+      label: (
+        <Space size={4}>
+          <Space direction="vertical" size={0}>
+            <span>{categoryTitle(index + 1)}</span>
+            {subtitle ? (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {subtitle}
+              </Typography.Text>
+            ) : null}
+          </Space>
+          <Button
+            type="text"
+            size="small"
+            aria-label={`Удалить ${categoryTitle(index + 1)}`}
+            icon={<CloseOutlined />}
+            disabled={saving}
+            onClick={(event) => {
+              event.stopPropagation();
+              removeCategory(item.key);
+            }}
+          />
+        </Space>
+      ),
+      children: (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+            gap: 8,
+          }}
+        >
+          {AGE_CATEGORY_GROUPS.map((group) => {
+            const ownerIndex = draft.findIndex((candidate) =>
+              candidate.groupIds.includes(group.id),
+            );
+            const ownedByOther = ownerIndex >= 0 && ownerIndex !== index;
+            return (
+              <Space key={group.id} size="small" wrap>
+                <Checkbox
+                  checked={ownerIndex >= 0}
+                  disabled={saving || ownedByOther}
+                  onChange={(event) =>
+                    toggleGroup(group.id, event.target.checked)
+                  }
+                >
+                  {`${groupLabel(group.id, gender)} (${groupRange(group.id)})`}
+                </Checkbox>
+                {ownedByOther ? (
+                  <Typography.Text type="secondary">
+                    {`входит в ${categoryTitle(ownerIndex + 1)}`}
+                  </Typography.Text>
+                ) : null}
+              </Space>
+            );
+          })}
+        </div>
+      ),
+    };
+  });
 
   const handleSave = async () => {
     if (!category || saveDisabled) return;
-    const payload: SetAgeSplitRequest = enabled
+    const payload: SetAgeCategoriesRequest = enabled
       ? {
           gender: category.gender,
           startId: category.startId,
           formatId: category.formatId,
           enabled: true,
-          sections: buildSections(groupIds, presetIds),
+          categories: keptCategories,
         }
       : {
           gender: category.gender,
           startId: category.startId,
           formatId: category.formatId,
           enabled: false,
-          sections: [],
+          categories: [],
         };
     try {
       await onSave(payload);
     } catch (error) {
-      console.error('Не удалось сохранить возрастное деление', error);
+      console.error('Не удалось сохранить возрастные категории', error);
     }
   };
 
@@ -277,7 +260,7 @@ export function AgeSplitModal({
     <Modal
       title={
         <div>
-          <div>Возрастное деление</div>
+          <div>Возрастные категории</div>
           {category ? (
             <Typography.Text type="secondary">
               {`${category.startLabel} · ${category.formatName}`}
@@ -300,8 +283,8 @@ export function AgeSplitModal({
           type="warning"
           showIcon
           style={{ marginBottom: 16 }}
-          message="Деление сохранено, но не применяется"
-          description="Пока для категории существует многоэтапная гонка, протокол выводится без возрастных секций."
+          message="Категории сохранены, но не применяются"
+          description="Пока для категории существует многоэтапная гонка, протокол выводится без возрастных категорий."
         />
       ) : null}
 
@@ -316,58 +299,23 @@ export function AgeSplitModal({
           <Typography.Text>Разбить по возрасту</Typography.Text>
         </Space>
 
-        <Space direction="vertical" size="small" style={{ width: '100%' }}>
-          <Typography.Text strong>Пресеты</Typography.Text>
-          <Space size="middle" wrap>
-            {AGE_SPLIT_PRESETS.map((preset) => (
-              <Checkbox
-                key={preset.id}
-                checked={presetIds.includes(preset.id)}
-                disabled={saving}
-                onChange={(event) =>
-                  togglePreset(preset, event.target.checked)
-                }
-              >
-                {preset.title}
-              </Checkbox>
-            ))}
-            <Button size="small" disabled={saving} onClick={selectAllGroups}>
-              {ALL_GROUPS_ACTION_TITLE}
-            </Button>
-          </Space>
-        </Space>
+        <Tabs
+          size="small"
+          activeKey={activeDraft?.key}
+          onChange={setActiveKey}
+          items={tabItems}
+        />
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-            gap: 8,
-          }}
+        <Button
+          type="dashed"
+          size="small"
+          disabled={addDisabled}
+          onClick={addCategory}
         >
-          {AGE_SPLIT_GROUPS.map((group) => {
-            const covering = presetCovering(group.id, presetIds);
-            return (
-              <Space key={group.id} size="small" wrap>
-                <Checkbox
-                  checked={covering ? true : groupIds.includes(group.id)}
-                  disabled={saving || Boolean(covering)}
-                  onChange={(event) =>
-                    toggleGroup(group.id, event.target.checked)
-                  }
-                >
-                  {`${group.labels[gender]} (${group.range})`}
-                </Checkbox>
-                {covering ? (
-                  <Typography.Text type="secondary">
-                    {`входит в «${covering.title}»`}
-                  </Typography.Text>
-                ) : null}
-              </Space>
-            );
-          })}
-        </div>
+          Добавить категорию
+        </Button>
 
-        {selectionMissing ? (
+        {groupsMissing ? (
           <Typography.Text type="danger">
             Выберите хотя бы одну группу
           </Typography.Text>
