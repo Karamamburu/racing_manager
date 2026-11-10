@@ -200,16 +200,15 @@ export type AgeSplitRef = {
   gender: string;
   enabled: boolean;
   /**
-   * Ordered age categories of the configuration; always present in the read
-   * contract. Optional here only while the retired `sections` dialog shape
-   * still lives in the tree.
+   * Ordered age categories of the configuration; empty when the configuration
+   * is disabled. Optional here only until the retired `sections` fixture is
+   * removed from the service spec.
    */
   categories?: AgeCategoryRef[];
   /**
-   * @deprecated predecessor read shape, dropped once the age-category dialog
-   * and its partition helper read `categories` alone.
+   * @deprecated predecessor read shape, no longer returned by the API.
    */
-  sections: AgeSectionRef[];
+  sections?: AgeSectionRef[];
 };
 
 export type SetAgeSplitSectionRequest = {

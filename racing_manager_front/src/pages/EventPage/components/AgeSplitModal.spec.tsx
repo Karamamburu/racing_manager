@@ -44,7 +44,6 @@ function splitRef(
     categories: categories.map((item, index) =>
       categoryRef(index + 1, item.groupIds),
     ),
-    sections: [],
   };
 }
 
