@@ -1,12 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import type {
-  AgeSectionRef,
+  AgeCategoryRef,
+  AgeGroupId,
   AgeSplitRef,
   CategoryFinishRef,
   EventFormatRef,
   EventParticipant,
   StartResponse,
 } from '../../shared/types/event';
+import {
+  AGE_CATEGORY_GROUPS,
+  CATEGORY_TITLE_PREFIX,
+  categorySubtitle,
+  categoryTitle,
+  categoryYoungestBound,
+  groupLabel,
+  groupRange,
+  orderCategoriesByAge,
+} from './ageCategories';
 import {
   NO_BIRTH_YEAR_SECTION_TITLE,
   REMAINDER_SECTION_TITLE,
@@ -73,12 +84,19 @@ function participant(
   };
 }
 
-function baseSection(id: string, title: string): AgeSectionRef {
-  return { id, kind: 'BASE_GROUP', title };
-}
-
-function presetSection(id: string, title: string): AgeSectionRef {
-  return { id, kind: 'PRESET', title };
+function category(
+  id: string,
+  number: number,
+  groupIds: AgeGroupId[],
+  subtitle: string,
+): AgeCategoryRef {
+  return {
+    id,
+    number,
+    title: categoryTitle(number),
+    subtitle,
+    groupIds,
+  };
 }
 
 function split(overrides: Partial<AgeSplitRef> = {}): AgeSplitRef {
@@ -87,10 +105,77 @@ function split(overrides: Partial<AgeSplitRef> = {}): AgeSplitRef {
     formatId: 1,
     gender: 'M',
     enabled: true,
+    categories: [],
     sections: [],
     ...overrides,
   };
 }
+
+describe('age category catalog', () => {
+  it('lists the nine base groups in ascending age order', () => {
+    expect(AGE_CATEGORY_GROUPS.map((group) => group.id)).toEqual([
+      'AGE_LE_14',
+      'AGE_15_16',
+      'AGE_17_18',
+      'AGE_19_20',
+      'AGE_21_23',
+      'AGE_24_40',
+      'AGE_41_50',
+      'AGE_51_60',
+      'AGE_61_PLUS',
+    ]);
+    expect(AGE_CATEGORY_GROUPS.map((group) => group.range)).toEqual([
+      '≤14',
+      '15–16',
+      '17–18',
+      '19–20',
+      '21–23',
+      '24–40',
+      '41–50',
+      '51–60',
+      '61+',
+    ]);
+    expect(AGE_CATEGORY_GROUPS.map((group) => group.youngestBound)).toEqual([
+      0, 15, 17, 19, 21, 24, 41, 51, 61,
+    ]);
+  });
+
+  it('derives the automatic category title from its number', () => {
+    expect(CATEGORY_TITLE_PREFIX).toBe('Возрастная категория');
+    expect(categoryTitle(3)).toBe('Возрастная категория 3');
+  });
+
+  it('labels and ranges a base group per gender', () => {
+    expect(groupRange('AGE_61_PLUS')).toBe('61+');
+    expect(groupLabel('AGE_24_40', 'M')).toBe('Мужчины');
+    expect(groupLabel('AGE_24_40', 'F')).toBe('Женщины');
+    expect(groupLabel('AGE_41_50', 'F')).toBe('Мастер 1');
+  });
+
+  it('joins member ranges in catalog order regardless of input order', () => {
+    expect(categorySubtitle(['AGE_41_50', 'AGE_24_40'])).toBe('24–40, 41–50');
+    expect(categorySubtitle([])).toBe('');
+  });
+
+  it('takes the youngest member bound and treats an empty list as unbounded', () => {
+    expect(categoryYoungestBound(['AGE_41_50', 'AGE_24_40'])).toBe(24);
+    expect(categoryYoungestBound([])).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('orders categories by youngest bound, stably for ties', () => {
+    const entries: Array<{ name: string; groupIds: readonly AgeGroupId[] }> = [
+      { name: 'masters', groupIds: ['AGE_41_50'] },
+      { name: 'adults', groupIds: ['AGE_24_40'] },
+      { name: 'adults-and-masters', groupIds: ['AGE_24_40', 'AGE_41_50'] },
+    ];
+
+    expect(orderCategoriesByAge(entries).map((entry) => entry.name)).toEqual([
+      'adults',
+      'adults-and-masters',
+      'masters',
+    ]);
+  });
+});
 
 describe('groupParticipants', () => {
   it('partitions by gender, then start order, then format order', () => {
@@ -152,72 +237,100 @@ describe('age sections', () => {
     );
 
     const section = groups[0].sections[0];
-    expect(section.ageSections).toHaveLength(1);
-    expect(section.ageSections[0].key).toBe('CATEGORY');
-    expect(section.ageSections[0].title).toBeNull();
+    expect(section.ageSections).toEqual([
+      {
+        key: 'CATEGORY',
+        title: null,
+        subtitle: null,
+        rows: section.rows,
+      },
+    ]);
     expect(section.ageSections[0].rows.map((row) => row.enrollmentId)).toEqual([
       'a',
       'b',
     ]);
-    expect(section.ageSections[0].rows).toEqual(section.rows);
   });
 
-  it('renders configured base sections in payload order', () => {
+  it('renders configured categories youngest first even when the payload lists masters first', () => {
     const groups = groupParticipants(
       [
-        participant({ enrollmentId: 'young', sectionId: 'AGE_24_40' }),
-        participant({ enrollmentId: 'master', sectionId: 'AGE_41_50' }),
+        participant({ enrollmentId: 'master', sectionId: 'CATEGORY_1' }),
+        participant({ enrollmentId: 'young', sectionId: 'CATEGORY_2' }),
       ],
       formats,
       [start('start-a', 0, 'Старт A')],
       [
         split({
-          sections: [
-            baseSection('AGE_41_50', 'Мастер 1 (41–50)'),
-            baseSection('AGE_24_40', 'Мужчины (24–40)'),
+          categories: [
+            category('CATEGORY_1', 1, ['AGE_41_50'], '41–50'),
+            category('CATEGORY_2', 2, ['AGE_24_40'], '24–40'),
           ],
         }),
       ],
     );
 
-    const section = groups[0].sections[0];
-    expect(section.ageSections.map((item) => item.key)).toEqual([
-      'AGE_41_50',
-      'AGE_24_40',
+    const ageSections = groups[0].sections[0].ageSections;
+    expect(ageSections.map((item) => item.key)).toEqual([
+      'CATEGORY_2',
+      'CATEGORY_1',
     ]);
-    expect(section.ageSections.map((item) => item.title)).toEqual([
-      'Мастер 1 (41–50)',
-      'Мужчины (24–40)',
+    expect(ageSections.map((item) => item.title)).toEqual([
+      'Возрастная категория 2',
+      'Возрастная категория 1',
     ]);
-    expect(section.ageSections[0].rows.map((row) => row.enrollmentId)).toEqual([
-      'master',
-    ]);
-    expect(section.ageSections[1].rows.map((row) => row.enrollmentId)).toEqual([
+    expect(ageSections[0].rows.map((row) => row.enrollmentId)).toEqual([
       'young',
     ]);
-    expect(section.rows.map((row) => row.enrollmentId)).toEqual([
-      'young',
+    expect(ageSections[1].rows.map((row) => row.enrollmentId)).toEqual([
       'master',
     ]);
   });
 
-  it('appends REMAINDER after a combined preset', () => {
+  it('carries the stored subtitle through to the section', () => {
     const groups = groupParticipants(
-      [
-        participant({
-          enrollmentId: 'junior',
-          sectionId: 'PRESET_JUNIOR_UNDER_24',
-        }),
-        participant({ enrollmentId: 'leftover', sectionId: 'REMAINDER' }),
-      ],
+      [participant({ enrollmentId: 'teen', sectionId: 'CATEGORY_1' })],
       formats,
       [start('start-a', 0, 'Старт A')],
       [
         split({
-          sections: [
-            presetSection(
-              'PRESET_JUNIOR_UNDER_24',
-              'Юниоры и младше (<24)',
+          categories: [
+            category(
+              'CATEGORY_1',
+              1,
+              ['AGE_15_16', 'AGE_17_18'],
+              '15–16, 17–18',
+            ),
+          ],
+        }),
+      ],
+    );
+
+    expect(groups[0].sections[0].ageSections[0]).toMatchObject({
+      key: 'CATEGORY_1',
+      title: 'Возрастная категория 1',
+      subtitle: '15–16, 17–18',
+    });
+  });
+
+  it('renders a preset-like multi-group category as one section', () => {
+    const groups = groupParticipants(
+      [participant({ enrollmentId: 'junior', sectionId: 'CATEGORY_1' })],
+      formats,
+      [start('start-a', 0, 'Старт A')],
+      [
+        split({
+          categories: [
+            category(
+              'CATEGORY_1',
+              1,
+              [
+                'AGE_LE_14',
+                'AGE_15_16',
+                'AGE_17_18',
+                'AGE_19_20',
+                'AGE_21_23',
+              ],
+              '≤14, 15–16, 17–18, 19–20, 21–23',
             ),
           ],
         }),
@@ -225,32 +338,49 @@ describe('age sections', () => {
     );
 
     const ageSections = groups[0].sections[0].ageSections;
-    expect(ageSections.map((item) => item.key)).toEqual([
-      'PRESET_JUNIOR_UNDER_24',
-      'REMAINDER',
+    expect(ageSections).toHaveLength(1);
+    expect(ageSections[0]).toMatchObject({
+      key: 'CATEGORY_1',
+      title: 'Возрастная категория 1',
+      subtitle: '≤14, 15–16, 17–18, 19–20, 21–23',
+    });
+    expect(ageSections[0].rows.map((row) => row.enrollmentId)).toEqual([
+      'junior',
     ]);
-    expect(ageSections[1].title).toBe(REMAINDER_SECTION_TITLE);
   });
 
-  it('renders NO_BIRTH_YEAR last and after REMAINDER', () => {
+  it('renders REMAINDER then NO_BIRTH_YEAR after every category', () => {
     const groups = groupParticipants(
       [
         participant({ enrollmentId: 'no-year', sectionId: 'NO_BIRTH_YEAR' }),
         participant({ enrollmentId: 'leftover', sectionId: 'REMAINDER' }),
-        participant({ enrollmentId: 'adult', sectionId: 'AGE_24_40' }),
+        participant({ enrollmentId: 'adult', sectionId: 'CATEGORY_1' }),
       ],
       formats,
       [start('start-a', 0, 'Старт A')],
-      [split({ sections: [baseSection('AGE_24_40', 'Мужчины (24–40)')] })],
+      [
+        split({
+          categories: [category('CATEGORY_1', 1, ['AGE_24_40'], '24–40')],
+        }),
+      ],
     );
 
     const ageSections = groups[0].sections[0].ageSections;
     expect(ageSections.map((item) => item.key)).toEqual([
-      'AGE_24_40',
+      'CATEGORY_1',
       'REMAINDER',
       'NO_BIRTH_YEAR',
     ]);
-    expect(ageSections[2].title).toBe(NO_BIRTH_YEAR_SECTION_TITLE);
+    expect(ageSections.map((item) => item.title)).toEqual([
+      'Возрастная категория 1',
+      REMAINDER_SECTION_TITLE,
+      NO_BIRTH_YEAR_SECTION_TITLE,
+    ]);
+    expect(ageSections.map((item) => item.subtitle)).toEqual([
+      '24–40',
+      null,
+      null,
+    ]);
     expect(ageSections[2].rows.map((row) => row.enrollmentId)).toEqual([
       'no-year',
     ]);
@@ -264,55 +394,66 @@ describe('age sections', () => {
       ],
       formats,
       [start('start-a', 0, 'Старт A')],
-      [split({ sections: [baseSection('AGE_24_40', 'Мужчины (24–40)')] })],
+      [
+        split({
+          categories: [category('CATEGORY_1', 1, ['AGE_24_40'], '24–40')],
+        }),
+      ],
     );
 
     const section = groups[0].sections[0];
-    expect(section.ageSections).toHaveLength(1);
-    expect(section.ageSections[0]).toEqual({
-      key: 'CATEGORY',
-      title: null,
-      rows: section.rows,
-    });
+    expect(section.ageSections).toEqual([
+      {
+        key: 'CATEGORY',
+        title: null,
+        subtitle: null,
+        rows: section.rows,
+      },
+    ]);
     expect(section.ageSections[0].rows).toHaveLength(2);
   });
 
-  it('drops configured sections without rows', () => {
+  it('drops configured categories without rows', () => {
     const groups = groupParticipants(
-      [participant({ enrollmentId: 'adult', sectionId: 'AGE_24_40' })],
+      [participant({ enrollmentId: 'adult', sectionId: 'CATEGORY_1' })],
       formats,
       [start('start-a', 0, 'Старт A')],
       [
         split({
-          sections: [
-            baseSection('AGE_24_40', 'Мужчины (24–40)'),
-            baseSection('AGE_41_50', 'Мастер 1 (41–50)'),
+          categories: [
+            category('CATEGORY_1', 1, ['AGE_24_40'], '24–40'),
+            category('CATEGORY_2', 2, ['AGE_41_50'], '41–50'),
           ],
         }),
       ],
     );
 
     const ageSections = groups[0].sections[0].ageSections;
-    expect(ageSections.map((item) => item.key)).toEqual(['AGE_24_40']);
+    expect(ageSections.map((item) => item.key)).toEqual(['CATEGORY_1']);
   });
 
   it('appends an unknown section id with the id as its title', () => {
     const groups = groupParticipants(
       [
-        participant({ enrollmentId: 'adult', sectionId: 'AGE_24_40' }),
+        participant({ enrollmentId: 'adult', sectionId: 'CATEGORY_1' }),
         participant({ enrollmentId: 'mystery', sectionId: 'AGE_99_PLUS' }),
       ],
       formats,
       [start('start-a', 0, 'Старт A')],
-      [split({ sections: [baseSection('AGE_24_40', 'Мужчины (24–40)')] })],
+      [
+        split({
+          categories: [category('CATEGORY_1', 1, ['AGE_24_40'], '24–40')],
+        }),
+      ],
     );
 
     const ageSections = groups[0].sections[0].ageSections;
     expect(ageSections.map((item) => item.key)).toEqual([
-      'AGE_24_40',
+      'CATEGORY_1',
       'AGE_99_PLUS',
     ]);
     expect(ageSections[1].title).toBe('AGE_99_PLUS');
+    expect(ageSections[1].subtitle).toBeNull();
     expect(ageSections[1].rows.map((row) => row.enrollmentId)).toEqual([
       'mystery',
     ]);
@@ -321,7 +462,7 @@ describe('age sections', () => {
   it('keeps the split of one category away from its siblings', () => {
     const groups = groupParticipants(
       [
-        participant({ enrollmentId: 'male', sectionId: 'AGE_24_40' }),
+        participant({ enrollmentId: 'male', sectionId: 'CATEGORY_1' }),
         participant({
           enrollmentId: 'female',
           gender: 'F',
@@ -330,35 +471,48 @@ describe('age sections', () => {
       ],
       formats,
       [start('start-a', 0, 'Старт A')],
-      [split({ sections: [baseSection('AGE_24_40', 'Мужчины (24–40)')] })],
+      [
+        split({
+          categories: [category('CATEGORY_1', 1, ['AGE_24_40'], '24–40')],
+        }),
+      ],
     );
 
     expect(groups[0].sections[0].ageSections.map((item) => item.key)).toEqual([
-      'AGE_24_40',
+      'CATEGORY_1',
     ]);
     expect(groups[1].sections[0].ageSections.map((item) => item.key)).toEqual([
       'CATEGORY',
     ]);
   });
 
-  it('does not mutate the participant array or its rows', () => {
+  it('does not mutate the participant array, its rows or the categories', () => {
     const rows = [
-      participant({ enrollmentId: 'adult', sectionId: 'AGE_24_40' }),
+      participant({ enrollmentId: 'adult', sectionId: 'CATEGORY_1' }),
       participant({ enrollmentId: 'leftover', sectionId: 'REMAINDER' }),
     ];
-    const snapshot = rows.map((row) => ({ ...row }));
+    const categories = [
+      category('CATEGORY_1', 1, ['AGE_41_50'], '41–50'),
+      category('CATEGORY_2', 2, ['AGE_24_40'], '24–40'),
+    ];
+    const rowSnapshot = rows.map((row) => ({ ...row }));
+    const categorySnapshot = categories.map((item) => ({
+      ...item,
+      groupIds: [...item.groupIds],
+    }));
+    const splitRef = split({ categories });
 
     groupParticipants(rows, formats, [start('start-a', 0, 'Старт A')], [
-      split({ sections: [baseSection('AGE_24_40', 'Мужчины (24–40)')] }),
+      splitRef,
     ]);
 
-    expect(rows).toHaveLength(2);
-    expect(rows[0]).toEqual(snapshot[0]);
-    expect(rows[1]).toEqual(snapshot[1]);
-    expect(rows.map((row) => row.sectionId)).toEqual([
-      'AGE_24_40',
-      'REMAINDER',
+    expect(rows).toEqual(rowSnapshot);
+    expect(categories).toEqual(categorySnapshot);
+    expect(categories.map((item) => item.id)).toEqual([
+      'CATEGORY_1',
+      'CATEGORY_2',
     ]);
+    expect(splitRef.categories).toBe(categories);
   });
 });
 

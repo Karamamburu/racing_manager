@@ -5,6 +5,7 @@ import type {
   EventParticipant,
   StartResponse,
 } from '../../shared/types/event';
+import { orderCategoriesByAge } from './ageCategories';
 
 export const REMAINDER_SECTION_TITLE = 'Остальные участники';
 
@@ -17,6 +18,7 @@ const NO_BIRTH_YEAR_SECTION_ID = 'NO_BIRTH_YEAR';
 export type AgeSectionView = {
   key: string;
   title: string | null;
+  subtitle: string | null;
   rows: EventParticipant[];
 };
 
@@ -74,10 +76,12 @@ function participantFormats(
 }
 
 /**
- * Splits one category's rows into the stored age sections: configured sections
- * in payload order, then `REMAINDER`, then `NO_BIRTH_YEAR`. A category without
- * an effective split (unsplit, disabled or suppressed by a class competition)
- * stays one headerless `CATEGORY` section. Empty sections are dropped.
+ * Splits one category's rows into age sections: configured categories ordered
+ * youngest first, then `REMAINDER`, then `NO_BIRTH_YEAR`. A category without an
+ * effective split (unsplit, disabled or suppressed by a class competition)
+ * stays one headerless `CATEGORY` section. Empty sections are dropped and an
+ * unknown stored `sectionId` is appended defensively with its id as title.
+ * The deprecated `sections` field is ignored; `categories` is the read shape.
  */
 export function buildAgeSections(
   rows: EventParticipant[],
@@ -88,7 +92,9 @@ export function buildAgeSections(
     !split.enabled ||
     rows.every((row) => row.sectionId === CATEGORY_SECTION_ID)
   ) {
-    return [{ key: CATEGORY_SECTION_ID, title: null, rows }];
+    return [
+      { key: CATEGORY_SECTION_ID, title: null, subtitle: null, rows },
+    ];
   }
 
   const grouped = new Map<string, EventParticipant[]>();
@@ -99,21 +105,25 @@ export function buildAgeSections(
   }
 
   const sections: AgeSectionView[] = [];
-  const take = (id: string, title: string | null): void => {
+  const take = (
+    id: string,
+    title: string | null,
+    subtitle: string | null,
+  ): void => {
     const bucket = grouped.get(id);
     grouped.delete(id);
     if (bucket && bucket.length > 0) {
-      sections.push({ key: id, title, rows: bucket });
+      sections.push({ key: id, title, subtitle, rows: bucket });
     }
   };
 
-  for (const configured of split.sections) {
-    take(configured.id, configured.title);
+  for (const category of orderCategoriesByAge(split.categories ?? [])) {
+    take(category.id, category.title, category.subtitle);
   }
-  take(REMAINDER_SECTION_ID, REMAINDER_SECTION_TITLE);
-  take(NO_BIRTH_YEAR_SECTION_ID, NO_BIRTH_YEAR_SECTION_TITLE);
+  take(REMAINDER_SECTION_ID, REMAINDER_SECTION_TITLE, null);
+  take(NO_BIRTH_YEAR_SECTION_ID, NO_BIRTH_YEAR_SECTION_TITLE, null);
   for (const [id, bucket] of grouped) {
-    sections.push({ key: id, title: id, rows: bucket });
+    sections.push({ key: id, title: id, subtitle: null, rows: bucket });
   }
   return sections;
 }
