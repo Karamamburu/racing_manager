@@ -1,6 +1,6 @@
 ---
 type: domain
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # Domain: events
@@ -15,6 +15,7 @@ Event catalog, admin CRUD, starts configuration, status sync, category finish, c
 - `POST /admin/events` — `CreateEventDto` with required `starts[]` (length ≥ 1); server generates each `startId`
 - `PATCH /admin/events/:id` — omit `starts` → unchanged; `starts: []` → 400; present array → full desired set, applied atomically
 - `POST /admin/events/:id/categories/finish` — body includes required `startId`; uniqueness is `(eventId, startId, formatId, gender)`
+- `PUT /admin/events/:id/categories/age-split` — `ADMINISTRATOR` + `ORGANIZER`; body `SetAgeSplitDto` (`gender`, `startId`, `formatId`, `enabled`, `sections[]` of `{ kind: 'BASE_GROUP' | 'PRESET', id }`); replaces that category's whole section set atomically, honours `Idempotency-Key` and returns `AgeSplitRef`. 400 for an empty enabled set, a duplicate or unknown id, or a category not on the event; 403 for any other role. `enabled: false` removes the stored set.
 - `GET /participation-formats`
 - Related entities: [Event](../entities/event.md), [Track](../entities/track.md)
 
@@ -46,6 +47,21 @@ Event catalog, admin CRUD, starts configuration, status sync, category finish, c
 
 `registrations[]` carries one row per active enrollment: `enrollmentId`, `startId`, `startLabel`, `sortOrder`, `enrollmentStatus`, `outcome`, `finishTimeMs`, computed `place`, `isCupEligible`. Place is computed on read per gender × start × format; WITHDRAWN enrollments are omitted.
 
+`ageSplits?: AgeSplitRef[]` adds the stored split per category (`enabled` plus the ordered `sections[]` with `id` / `kind` / `title`). Every row carries `sectionId`; `place` is section-scoped when the category is split and keeps today's category-wide value otherwise. Implicit section ids are `CATEGORY` (unsplit category), `REMAINDER` and `NO_BIRTH_YEAR`.
+
+## Age split (AGE-SPLIT)
+
+A protocol category (`event × gender × start × format`) may carry one age split («Возрастное деление»): a non-empty stored section set that partitions that category's rows for display. It is presentation and classification only — never a registration, enrollment, result or finish mutation.
+
+- Nine base groups with inclusive bands: `AGE_LE_14` (≤14), `AGE_15_16` (15–16), `AGE_17_18` (17–18), `AGE_19_20` (19–20), `AGE_21_23` (21–23), `AGE_24_40` (24–40), `AGE_41_50` (41–50), `AGE_51_60` (51–60), `AGE_61_PLUS` (61+). Labels follow the FLGR vocabulary per gender (`Юниоры` / `Юниорки`, `Мужчины` / `Женщины`, `Мастер 1`–`Мастер 3`).
+- Two stored combined presets: `PRESET_JUNIOR_UNDER_24` («Юниоры и младше (<24)», groups ≤14 through 21–23) and `PRESET_MASTERS_41_PLUS` («Мастера 41+», 41–50 through 61+). The request-only `PRESET_ALL_GROUPS` («Все возрастные группы») is never stored: it normalizes to the nine base sections and clears combined ones. A stored preset absorbs its member groups that were also selected individually.
+- Age rule: the season runs 1 July – 30 June; `controlYear` is the calendar year the season ends in, derived from the event date in `Europe/Moscow`; age = `controlYear − birthYear`. A null birth year, or one later than `controlYear`, is unusable and lands in «Возраст не указан»; a usable participant whose base group is in no section lands in «Остальные участники».
+- Section order is by youngest age bound (base groups 0/15/17/19/21/24/41/51/61; presets 0 and 41), then `REMAINDER`, then `NO_BIRTH_YEAR`. Base titles are `{gender label} ({range})`, presets use the preset title, and the implicit titles are «Остальные участники» and «Возраст не указан». A section with no displayed rows is not rendered.
+- Category finish stays one action per gender × start × format over the full category row set, and the split adds no age dimension to its uniqueness. Changing the split is allowed before results, after results and after the finish: it recomputes displayed section places only and keeps the finish tag, row-editing lock and stored `Result.place` snapshots.
+- A category owned by a class competition keeps the stored split but is rendered unsplit while the bracket exists; it applies on the next read after the bracket is removed.
+- Legacy events without starts keep the gender → format protocol, receive no `ageSplits` and cannot be split.
+- The response is additive and backward compatible: a client that ignores `sectionId` and `ageSplits` renders as before; an unsplit category reports `enabled: false`, empty `sections` and `CATEGORY` on every row.
+
 ## Protocol search and filters
 
 - The “Зарегистрированные участники” card shows a toolbar above the gender groups: a search input on the “Участник” column (`EventParticipant.fullName`, case-insensitive substring, `ё` treated as `е`) and multi-select filters “Город” and “Команда”.
@@ -57,7 +73,10 @@ Event catalog, admin CRUD, starts configuration, status sync, category finish, c
 ## Code
 
 - API: `racing_manager_back/src/events/`, `src/results/`, `src/idempotency/`, `src/migrations/`
+  - Age split: `age-groups.ts` (catalog, age rule, section order/titles), `age-split.service.ts` (normalization, atomic replacement), `age-split.repository.ts`, `parse-set-age-split.ts` (body validation, `PRESET_ALL_GROUPS`), `age-split.controller.ts`
 - Front: `features/events`, `pages/EventPage`, `pages/CalendarPage`
+  - Age split: `features/events/protocolGroups.ts` (section partition), `pages/EventPage/components/AgeSplitModal.tsx` (control)
+- SQL: `racing_manager_db/db/migrate_age_split_2026_11_10.sql` — `age_split_sections` table plus `age_split_section_kind` enum, keyed `(eventId, startId, formatId, gender, sectionId)` with a unique `sortOrder` per category
 
 ## Breakage signals
 
@@ -67,3 +86,9 @@ Event catalog, admin CRUD, starts configuration, status sync, category finish, c
 - Applied Prisma/SQL migration edited in place.
 - Dual writable SoT: event-level `laps`/`formatIds` written alongside `starts[]`.
 - Category finish without `startId` or place treated as stored SoT.
+- An age section id or preset id renamed or removed (they are API identity; titles are display text only).
+- `place` becoming a stored snapshot for split categories.
+- A split mutation touching registrations, enrollments, results or category finishes.
+- Finish uniqueness gaining an age dimension.
+- The age split applied while a class competition exists for the category.
+- A new required response field breaking clients that ignore `sectionId` / `ageSplits`.

@@ -2,6 +2,10 @@
 
 Append-only. Prefix every entry with `## [YYYY-MM-DD] ingest|query|lint | Title`.
 
+## [2026-11-10] ingest | AGE-SPLIT: age-group split inside protocol categories
+
+Shipped the age split («Возрастное деление») inside a protocol category. Write surface: `PUT /admin/events/:id/categories/age-split` for `ADMINISTRATOR` + `ORGANIZER`, whole-set atomic replacement honouring `Idempotency-Key`, 400 for an empty enabled set, a duplicate or unknown id, or a category not on the event, 403 for other roles, and a disable that removes the stored set. Read surface is additive: `EventDetails.ageSplits?` (`enabled` plus ordered `sections[]` with `id` / `kind` / `title`) and `EventParticipant.sectionId`, with `place` recomputed inside the row's section — implicit ids `CATEGORY`, `REMAINDER`, `NO_BIRTH_YEAR`. Nine base groups (`AGE_LE_14` … `AGE_61_PLUS`) and two stored presets (`PRESET_JUNIOR_UNDER_24`, `PRESET_MASTERS_41_PLUS`) plus request-only `PRESET_ALL_GROUPS`; a preset absorbs individually selected member groups. Age comes from a 1 July – 30 June season whose `controlYear` is derived from the event date in `Europe/Moscow`. Section places are computed on read; stored `Result.place` snapshots stay untouched. Category finish keeps one action per gender × start × format. A class competition keeps the stored split suppressed until the bracket is removed; legacy events without starts are excluded. Updated [domains/events.md](domains/events.md), [domains/results.md](domains/results.md). Spec: `specs/age-split-ears.md`; PRD: `Tasks/AGE-SPLIT/PRD.md`.
+
 ## [2026-11-09] ingest | Protocol participant search and city/team filters
 
 Event protocol rows can be searched by participant name and filtered by distinct city/team values present in the loaded `event.registrations`. Filtering stays client-side, combines AND across controls and OR within each multi-select, hides empty groups/tabs, keeps category actions on the full row set, and keeps expanded protocol sections open across filter resets. Spec: `specs/protocol-search-ears.md`. Updated [domains/events.md](domains/events.md).
