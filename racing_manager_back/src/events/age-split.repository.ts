@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma';
 import { PrismaService } from '../prisma/prisma.service';
-import { StoredAgeSection } from './age-groups';
+import { AgeCategory, StoredAgeSection } from './age-groups';
 
 export type AgeSplitDb = Prisma.TransactionClient | PrismaService;
 
@@ -19,6 +19,14 @@ export type AgeSplitKey = {
   startId: string;
   formatId: number;
   gender: 'M' | 'F';
+};
+
+export type StoredAgeCategoryDbRow = {
+  startId: string;
+  formatId: number;
+  gender: string;
+  categoryNumber: number;
+  groupId: string;
 };
 
 @Injectable()
@@ -93,5 +101,50 @@ export class AgeSplitRepository {
         sortOrder: section.sortOrder,
       })),
     });
+  }
+
+  async findCategories(eventId: string): Promise<StoredAgeCategoryDbRow[]> {
+    const rows = await this.prisma.ageSplitCategory.findMany({
+      where: { eventId },
+      select: {
+        startId: true,
+        formatId: true,
+        gender: true,
+        categoryNumber: true,
+        groupId: true,
+      },
+      orderBy: [
+        { startId: 'asc' },
+        { formatId: 'asc' },
+        { gender: 'asc' },
+        { categoryNumber: 'asc' },
+        { groupId: 'asc' },
+      ],
+    });
+    return rows.map((row) => ({
+      startId: row.startId,
+      formatId: row.formatId,
+      gender: row.gender,
+      categoryNumber: row.categoryNumber,
+      groupId: row.groupId,
+    }));
+  }
+
+  async replaceCategories(
+    db: AgeSplitDb,
+    key: AgeSplitKey,
+    categories: readonly AgeCategory[],
+  ): Promise<void> {
+    await db.ageSplitCategory.deleteMany({ where: key });
+    await db.ageSplitSection.deleteMany({ where: key });
+    const rows = categories.flatMap((category) =>
+      category.groupIds.map((groupId) => ({
+        ...key,
+        categoryNumber: category.number,
+        groupId,
+      })),
+    );
+    if (rows.length === 0) return;
+    await db.ageSplitCategory.createMany({ data: rows });
   }
 }
