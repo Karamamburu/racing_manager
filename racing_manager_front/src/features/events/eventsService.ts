@@ -7,6 +7,7 @@ import type {
   EventDetails,
   ParticipationFormat,
   RecentEventRow,
+  SetAgeCategoriesRequest,
   SetAgeSplitRequest,
   SportCode,
 } from '../../shared/types/event';
@@ -70,7 +71,7 @@ export class EventsService {
 
   public async setAgeSplit(
     eventId: string,
-    payload: SetAgeSplitRequest,
+    payload: SetAgeSplitRequest | SetAgeCategoriesRequest,
   ): Promise<AgeSplitRef> {
     const result = await apiClient.putResult<AgeSplitRef>(
       `/admin/events/${eventId}/categories/age-split`,

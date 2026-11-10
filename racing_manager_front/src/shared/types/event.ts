@@ -186,11 +186,29 @@ export type AgeSectionRef = {
   title: string;
 };
 
+export type AgeCategoryRef = {
+  id: string;
+  number: number;
+  title: string;
+  subtitle: string;
+  groupIds: AgeGroupId[];
+};
+
 export type AgeSplitRef = {
   startId: string;
   formatId: number;
   gender: string;
   enabled: boolean;
+  /**
+   * Ordered age categories of the configuration; always present in the read
+   * contract. Optional here only while the retired `sections` dialog shape
+   * still lives in the tree.
+   */
+  categories?: AgeCategoryRef[];
+  /**
+   * @deprecated predecessor read shape, dropped once the age-category dialog
+   * and its partition helper read `categories` alone.
+   */
   sections: AgeSectionRef[];
 };
 
@@ -205,6 +223,18 @@ export type SetAgeSplitRequest = {
   formatId: number;
   enabled: boolean;
   sections: SetAgeSplitSectionRequest[];
+};
+
+export type SetAgeCategoryRequest = {
+  groupIds: AgeGroupId[];
+};
+
+export type SetAgeCategoriesRequest = {
+  gender: GenderCode;
+  startId: string;
+  formatId: number;
+  enabled: boolean;
+  categories: SetAgeCategoryRequest[];
 };
 
 export type CreateRegistrationRequest = {

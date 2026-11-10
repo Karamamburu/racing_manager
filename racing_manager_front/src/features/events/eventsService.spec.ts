@@ -4,6 +4,7 @@ import type {
   AgeSplitRef,
   CreateEventRequest,
   EventDetails,
+  SetAgeCategoriesRequest,
   SetAgeSplitRequest,
   StartInputRequest,
 } from '../../shared/types/event';
@@ -138,5 +139,57 @@ describe('EventsService payloads', () => {
     );
     expect(result).toEqual(ref);
     expect(result).toBe(ref);
+  });
+
+  it('saves custom age categories with the unchanged payload and unwraps the ref', async () => {
+    const ref: AgeSplitRef = {
+      startId: 'event-1',
+      formatId: 1,
+      gender: 'M',
+      enabled: true,
+      // The retired read shape stays empty for a category response.
+      sections: [],
+      categories: [
+        {
+          id: 'CATEGORY_1',
+          number: 1,
+          title: 'Возрастная категория 1',
+          subtitle: '15–16, 17–18',
+          groupIds: ['AGE_15_16', 'AGE_17_18'],
+        },
+      ],
+    };
+    vi.mocked(apiClient.putResult).mockResolvedValue({ status: 200, data: ref } as never);
+    const payload: SetAgeCategoriesRequest = {
+      gender: 'M',
+      startId: 'event-1',
+      formatId: 1,
+      enabled: true,
+      categories: [{ groupIds: ['AGE_15_16', 'AGE_17_18'] }],
+    };
+
+    const result = await eventsService.setAgeSplit('event-1', payload);
+
+    expect(apiClient.putResult).toHaveBeenCalledTimes(1);
+    expect(apiClient.putResult).toHaveBeenCalledWith(
+      '/admin/events/event-1/categories/age-split',
+      {
+        gender: 'M',
+        startId: 'event-1',
+        formatId: 1,
+        enabled: true,
+        categories: [{ groupIds: ['AGE_15_16', 'AGE_17_18'] }],
+      },
+    );
+    expect(result).toBe(ref);
+    expect(result.categories).toEqual([
+      {
+        id: 'CATEGORY_1',
+        number: 1,
+        title: 'Возрастная категория 1',
+        subtitle: '15–16, 17–18',
+        groupIds: ['AGE_15_16', 'AGE_17_18'],
+      },
+    ]);
   });
 });
