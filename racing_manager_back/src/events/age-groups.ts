@@ -289,3 +289,153 @@ export function isAgePresetId(value: string): value is AgePresetId {
 export function isStoredSectionId(value: string): boolean {
   return isAgeGroupId(value) || isAgePresetId(value);
 }
+
+// ---------------------------------------------------------------------------
+// AGE-CATEGORIES: arbitrary age categories built from the base groups.
+// The legacy section model above stays exported for the stored rows that are
+// still read as conversion input.
+// ---------------------------------------------------------------------------
+
+export type AgeCategorySectionId =
+  | `CATEGORY_${number}`
+  | 'REMAINDER'
+  | 'NO_BIRTH_YEAR';
+
+export type AgeCategory = {
+  number: number;
+  groupIds: readonly AgeGroupId[];
+};
+
+export type StoredAgeCategoryRow = {
+  categoryNumber: number;
+  groupId: string;
+};
+
+export const CATEGORY_TITLE_PREFIX = 'Возрастная категория';
+
+export function categorySectionId(number: number): AgeCategorySectionId {
+  return `CATEGORY_${number}`;
+}
+
+export function categoryTitle(number: number): string {
+  return `${CATEGORY_TITLE_PREFIX} ${number}`;
+}
+
+/**
+ * Resolves the known groups of a category once, deduplicated and in catalog
+ * order, so every derived value ignores unknown ids the same way.
+ */
+function knownGroups(
+  groupIds: readonly string[],
+): (typeof AGE_GROUPS)[number][] {
+  const seen = new Set<string>();
+  const groups: (typeof AGE_GROUPS)[number][] = [];
+  for (const groupId of groupIds) {
+    if (seen.has(groupId)) {
+      continue;
+    }
+    const group = findAgeGroup(groupId);
+    if (!group) {
+      continue;
+    }
+    seen.add(groupId);
+    groups.push(group);
+  }
+  return groups.sort((a, b) => a.youngestBound - b.youngestBound);
+}
+
+export function categorySubtitle(groupIds: readonly AgeGroupId[]): string {
+  return knownGroups(groupIds)
+    .map((group) => group.displayRange)
+    .join(', ');
+}
+
+export function categoryYoungestBound(groupIds: readonly AgeGroupId[]): number {
+  const groups = knownGroups(groupIds);
+  if (groups.length === 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return groups[0].youngestBound;
+}
+
+export function normalizeAgeCategories(
+  input: readonly { groupIds: readonly string[] }[],
+): AgeCategory[] {
+  const assigned = new Set<AgeGroupId>();
+  const categories: AgeCategory[] = [];
+  for (const entry of input) {
+    const groupIds = knownGroups(entry.groupIds)
+      .map((group) => group.id)
+      .filter((groupId) => !assigned.has(groupId));
+    if (groupIds.length === 0) {
+      continue;
+    }
+    groupIds.forEach((groupId) => assigned.add(groupId));
+    categories.push({ number: categories.length + 1, groupIds });
+  }
+  return categories;
+}
+
+export function categoriesFromStoredRows(
+  rows: readonly StoredAgeCategoryRow[],
+): AgeCategory[] {
+  const groupsByNumber = new Map<number, string[]>();
+  const ordered = [...rows].sort((a, b) => a.categoryNumber - b.categoryNumber);
+  for (const row of ordered) {
+    const groupIds = groupsByNumber.get(row.categoryNumber) ?? [];
+    groupIds.push(row.groupId);
+    groupsByNumber.set(row.categoryNumber, groupIds);
+  }
+  return normalizeAgeCategories(
+    [...groupsByNumber.values()].map((groupIds) => ({ groupIds })),
+  );
+}
+
+export function convertLegacySections(
+  rows: readonly {
+    sectionId: string;
+    sectionKind: string;
+    sortOrder: number;
+  }[],
+): AgeCategory[] {
+  const ordered = [...rows].sort((a, b) => a.sortOrder - b.sortOrder);
+  const input: { groupIds: readonly string[] }[] = ordered.map((row) => {
+    if (row.sectionKind === 'BASE_GROUP' && isAgeGroupId(row.sectionId)) {
+      return { groupIds: [row.sectionId] };
+    }
+    if (row.sectionKind === 'PRESET') {
+      return { groupIds: findPreset(row.sectionId)?.groupIds ?? [] };
+    }
+    return { groupIds: [] };
+  });
+  return normalizeAgeCategories(input);
+}
+
+export function orderCategoriesByAge(
+  categories: readonly AgeCategory[],
+): AgeCategory[] {
+  return categories
+    .map((category, index) => ({ category, index }))
+    .sort((a, b) => {
+      const boundDifference =
+        categoryYoungestBound(a.category.groupIds) -
+        categoryYoungestBound(b.category.groupIds);
+      return boundDifference !== 0 ? boundDifference : a.index - b.index;
+    })
+    .map((entry) => entry.category);
+}
+
+export function categoryForBirthYear(
+  birthYear: number | null,
+  controlYear: number,
+  categories: readonly AgeCategory[],
+): AgeCategorySectionId {
+  const groupId = ageGroupFor(birthYear, controlYear);
+  if (groupId === null) {
+    return 'NO_BIRTH_YEAR';
+  }
+  const category = categories.find((candidate) =>
+    candidate.groupIds.includes(groupId),
+  );
+  return category ? categorySectionId(category.number) : 'REMAINDER';
+}
