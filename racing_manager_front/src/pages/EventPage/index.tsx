@@ -17,11 +17,14 @@ import {
 import { eventsService } from '../../features/events/eventsService';
 import { recentEventsQueryKey } from '../../features/events/useRecentEventsQuery';
 import { EventStartBlocks } from '../../features/events/EventStartBlocks';
+import { countAgeGroups } from '../../features/events/ageCategories';
 import {
   categoryHasResults,
   categoryIsFinished,
   categoryReadyToFinish,
   groupParticipants,
+  type ClassificationSection,
+  type GenderGroup,
 } from '../../features/events/protocolGroups';
 import {
   collectProtocolFilterValues,
@@ -50,6 +53,7 @@ import {
 } from '../../shared/registrationStatus';
 import { AppShell } from '../../shared/layout';
 import type {
+  AgeGroupId,
   EventFormatRef,
   EventParticipant,
   SetAgeCategoriesRequest,
@@ -406,6 +410,43 @@ export function resolveAgeSplitSelection(
     startLabel: input.startLabel,
     formatName: input.formatName,
   };
+}
+
+/** A protocol section is homogeneous: one start, one format and one gender. */
+function sectionBelongsToCategory(
+  section: ClassificationSection,
+  category: AgeSplitCategory,
+): boolean {
+  return (
+    section.rows.length > 0 &&
+    section.rows.every(
+      (row) =>
+        row.startId === category.startId &&
+        row.format?.id === category.formatId &&
+        row.gender === category.gender,
+    )
+  );
+}
+
+/**
+ * U-08…U-11, U-29, E-02: picker counts come from the full row set of the
+ * selected protocol category — gender × start × participation format — so the
+ * protocol search, the city and team filters and the current draft never
+ * change them. `section.rows` is read; `visibleRows` is not.
+ */
+export function resolveAgeSplitGroupCounts(
+  groups: readonly GenderGroup[],
+  category: AgeSplitCategory | null,
+): Partial<Record<AgeGroupId, number>> {
+  if (!category) return {};
+  for (const group of groups) {
+    for (const section of group.sections) {
+      if (sectionBelongsToCategory(section, category)) {
+        return countAgeGroups(section.rows);
+      }
+    }
+  }
+  return {};
 }
 
 export function EventPage() {
@@ -802,6 +843,10 @@ export function EventPage() {
         competition.formatId === ageSplitCategory.formatId &&
         competition.gender === ageSplitCategory.gender,
     );
+  const ageSplitGroupCounts = resolveAgeSplitGroupCounts(
+    participantGroups,
+    ageSplitCategory,
+  );
 
   const handleStatusChange = (nextStatus: EventStatusCode) => {
     if (nextStatus === 'CANCELLED') {
@@ -1344,6 +1389,7 @@ export function EventPage() {
         open={ageSplitCategory !== null}
         category={ageSplitCategory}
         value={ageSplitValue}
+        groupCounts={ageSplitGroupCounts}
         notApplied={ageSplitNotApplied}
         saving={isSavingAgeSplit}
         onClose={() => setAgeSplitCategory(null)}

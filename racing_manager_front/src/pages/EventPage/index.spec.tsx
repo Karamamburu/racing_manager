@@ -15,9 +15,11 @@ import type {
 } from '../../shared/types/event';
 import {
   AGE_SPLIT_BLOCKING_EVENT_STATUSES,
+  resolveAgeSplitGroupCounts,
   resolveAgeSplitSelection,
   type AgeSplitSelectionInput,
 } from './index';
+import type { AgeSplitCategory } from './components/AgeSplitModal';
 
 const base: AgeSplitSelectionInput = {
   roles: ['ADMINISTRATOR'],
@@ -236,5 +238,119 @@ describe('EventPage age sections under an active protocol filter', () => {
     // forbids for category-level actions.
     expect(categoryReadyToFinish(section.rows)).toBe(false);
     expect(categoryReadyToFinish(section.visibleRows)).toBe(true);
+  });
+});
+
+const countsStarts: StartResponse[] = [
+  starts[0],
+  {
+    ...starts[0],
+    id: 'start-b',
+    resolvedLabel: 'Кубковая гонка — вторая',
+    sortOrder: 2,
+  },
+];
+
+const countsRows: EventParticipant[] = [
+  participant({
+    id: 'a-24-primary',
+    fullName: 'Иван Первый',
+    ageGroupId: 'AGE_24_40',
+  }),
+  participant({
+    id: 'a-24-secondary',
+    fullName: 'Пётр Скрытый',
+    ageGroupId: 'AGE_24_40',
+  }),
+  participant({
+    id: 'a-41-primary',
+    fullName: 'Иван Третий',
+    ageGroupId: 'AGE_41_50',
+  }),
+  participant({
+    id: 'b-24-primary',
+    fullName: 'Иван Четвёртый',
+    startId: 'start-b',
+    ageGroupId: 'AGE_24_40',
+  }),
+];
+
+const countsFilter = { query: 'иван', cities: [], teams: [] };
+
+const categoryA: AgeSplitCategory = {
+  startId: 'start-a',
+  formatId: 1,
+  gender: 'M',
+  startLabel: 'Кубковая гонка',
+  formatName: '10 км',
+};
+
+const categoryB: AgeSplitCategory = {
+  ...categoryA,
+  startId: 'start-b',
+  startLabel: 'Кубковая гонка — вторая',
+};
+
+const zeroCounts: Record<AgeGroupId, number> = {
+  AGE_LE_14: 0,
+  AGE_15_16: 0,
+  AGE_17_18: 0,
+  AGE_19_20: 0,
+  AGE_21_23: 0,
+  AGE_24_40: 0,
+  AGE_41_50: 0,
+  AGE_51_60: 0,
+  AGE_61_PLUS: 0,
+};
+
+describe('resolveAgeSplitGroupCounts', () => {
+  const groups = groupParticipants(countsRows, formats, countsStarts, []);
+  const filteredGroups = filterProtocolGroups(groups, countsFilter);
+
+  it('builds a two-section fixture whose visible rows are a strict subset', () => {
+    expect(filteredGroups[0].sections.map((section) => section.key)).toEqual([
+      'start-a-1-M',
+      'start-b-1-M',
+    ]);
+    expect(filteredGroups[0].sections[0].rows).toHaveLength(3);
+    expect(filteredGroups[0].sections[0].visibleRows).toHaveLength(2);
+    expect(filteredGroups[0].sections[1].rows).toHaveLength(1);
+    expect(filteredGroups[0].sections[1].visibleRows).toHaveLength(1);
+  });
+
+  it('counts every row of the matching start × format × gender, not the filtered subset', () => {
+    expect(resolveAgeSplitGroupCounts(filteredGroups, categoryA)).toEqual({
+      ...zeroCounts,
+      AGE_24_40: 2,
+      AGE_41_50: 1,
+    });
+  });
+
+  it('returns zero-filled keys for the nine base groups', () => {
+    const counts = resolveAgeSplitGroupCounts(filteredGroups, categoryA);
+
+    expect(Object.keys(counts)).toHaveLength(9);
+    expect(counts).toEqual({
+      ...zeroCounts,
+      AGE_24_40: 2,
+      AGE_41_50: 1,
+    });
+  });
+
+  it('ignores the rows of every other protocol category', () => {
+    expect(resolveAgeSplitGroupCounts(filteredGroups, categoryB)).toEqual({
+      ...zeroCounts,
+      AGE_24_40: 1,
+    });
+  });
+
+  it('returns an empty record for a category with no matching section', () => {
+    expect(resolveAgeSplitGroupCounts(filteredGroups, { ...categoryA, gender: 'F' })).toEqual({});
+    expect(resolveAgeSplitGroupCounts(filteredGroups, { ...categoryA, formatId: 2 })).toEqual({});
+    expect(resolveAgeSplitGroupCounts(filteredGroups, { ...categoryA, startId: 'start-z' })).toEqual({});
+  });
+
+  it('returns an empty record when no category is selected', () => {
+    expect(resolveAgeSplitGroupCounts(filteredGroups, null)).toEqual({});
   });
 });
