@@ -17,7 +17,7 @@ type Gender = 'M' | 'F';
 type PersonSeed = {
   key: string;
   gender: Gender;
-  birthYear: number;
+  birthYear: number | null;
   startNumber: number;
   timeMs: number | null;
   outcome?: 'FINISHED' | 'DNS' | 'DNF' | 'DSQ';
@@ -213,6 +213,7 @@ type ProtocolRowLike = {
   id: string;
   place: number | null;
   sectionId: string;
+  ageGroupId: string | null;
   finishTimeMs?: number | null;
   outcome?: string | null;
 };
@@ -231,6 +232,10 @@ function placeOf(rows: ProtocolRowLike[], key: string): number | null {
 
 function sectionOf(rows: ProtocolRowLike[], key: string): string {
   return rowOf(rows, key).sectionId;
+}
+
+function ageGroupOf(rows: ProtocolRowLike[], key: string): string | null {
+  return rowOf(rows, key).ageGroupId;
 }
 
 describe('EventsService.findById age categories', () => {
@@ -285,6 +290,12 @@ describe('EventsService.findById age categories', () => {
       ),
     ).toBe(true);
     expect(rows.every((row) => row.sectionId === 'CATEGORY')).toBe(true);
+    // U-21: every row carries its own base group even without a stored split.
+    expect(ageGroupOf(rows, 'slow')).toBe('AGE_24_40');
+    expect(ageGroupOf(rows, 'fast')).toBe('AGE_24_40');
+    expect(ageGroupOf(rows, 'dns')).toBe('AGE_41_50');
+    expect(ageGroupOf(rows, 'woman')).toBe('AGE_24_40');
+    expect(rows.every((row) => row.ageGroupId !== null)).toBe(true);
     expect(placeOf(rows, 'fast')).toBe(1);
     expect(placeOf(rows, 'slow')).toBe(2);
     expect(placeOf(rows, 'dns')).toBeNull();
@@ -367,6 +378,11 @@ describe('EventsService.findById age categories', () => {
     expect(placeOf(rows, 'young-slow')).toBe(2);
     expect(placeOf(rows, 'adult-fast')).toBe(1);
     expect(placeOf(rows, 'adult-slow')).toBe(2);
+    // U-21: the row group is the participant's own band, not the tab's.
+    expect(ageGroupOf(rows, 'young-fast')).toBe('AGE_17_18');
+    expect(ageGroupOf(rows, 'young-slow')).toBe('AGE_15_16');
+    expect(ageGroupOf(rows, 'adult-fast')).toBe('AGE_24_40');
+    expect(ageGroupOf(rows, 'adult-slow')).toBe('AGE_19_20');
   });
 
   it('recomputes places after a finished category change and keeps the finish, times and stored places', async () => {
@@ -424,10 +440,12 @@ describe('EventsService.findById age categories', () => {
       }[];
     }[];
     expect(stored.map((row) => row.result.place)).toEqual([5, 4]);
-    expect(stored.map((row) => row.enrollments[0].result.place)).toEqual([5, 4]);
-    expect(stored.map((row) => row.enrollments[0].result.timeMilliseconds)).toEqual([
-      1_000_000, 2_000_000,
+    expect(stored.map((row) => row.enrollments[0].result.place)).toEqual([
+      5, 4,
     ]);
+    expect(
+      stored.map((row) => row.enrollments[0].result.timeMilliseconds),
+    ).toEqual([1_000_000, 2_000_000]);
   });
 
   it('places unassigned groups into the remainder and future birth years last', async () => {
@@ -482,6 +500,48 @@ describe('EventsService.findById age categories', () => {
     expect(placeOf(rows, 'child')).toBe(1);
     expect(placeOf(rows, 'older')).toBe(1);
     expect(placeOf(rows, 'future')).toBe(1);
+    // W-07: 2030 is later than the 2027 control year, so the row has no group.
+    expect(ageGroupOf(rows, 'child')).toBe('AGE_LE_14');
+    expect(ageGroupOf(rows, 'older')).toBe('AGE_41_50');
+    expect(ageGroupOf(rows, 'future')).toBeNull();
+  });
+
+  it('assigns no base group when the birth year is missing or later than the control year', async () => {
+    const { service } = makeHarness({
+      people: [
+        {
+          key: 'future',
+          gender: 'M',
+          birthYear: 2030,
+          startNumber: 1,
+          timeMs: 1_000_000,
+        },
+        {
+          key: 'missing',
+          gender: 'M',
+          birthYear: null,
+          startNumber: 2,
+          timeMs: 2_000_000,
+        },
+        {
+          key: 'known',
+          gender: 'M',
+          birthYear: CONTROL_YEAR - 30,
+          startNumber: 3,
+          timeMs: 3_000_000,
+        },
+      ],
+    });
+
+    const event = await service.findById(EVENT_ID, { syncStatuses: false });
+    const rows = event.registrations ?? [];
+
+    expect(ageGroupOf(rows, 'future')).toBeNull();
+    expect(ageGroupOf(rows, 'missing')).toBeNull();
+    expect(ageGroupOf(rows, 'known')).toBe('AGE_24_40');
+    // The unusable rows still take part in the unsplit protocol.
+    expect(sectionOf(rows, 'future')).toBe('CATEGORY');
+    expect(sectionOf(rows, 'missing')).toBe('CATEGORY');
   });
 
   it('converts stored legacy sections into categories in stored order', async () => {
@@ -551,6 +611,10 @@ describe('EventsService.findById age categories', () => {
     expect(placeOf(rows, 'junior')).toBe(1);
     expect(placeOf(rows, 'master-fast')).toBe(1);
     expect(placeOf(rows, 'master-slow')).toBe(2);
+    // U-21: converted legacy sections still carry the per-row group.
+    expect(ageGroupOf(rows, 'junior')).toBe('AGE_19_20');
+    expect(ageGroupOf(rows, 'master-fast')).toBe('AGE_41_50');
+    expect(ageGroupOf(rows, 'master-slow')).toBe('AGE_41_50');
   });
 
   it('prefers new membership rows over legacy sections of the same category', async () => {
@@ -651,6 +715,9 @@ describe('EventsService.findById age categories', () => {
     expect(rows.every((row) => row.sectionId === 'CATEGORY')).toBe(true);
     expect(placeOf(rows, 'adult')).toBe(1);
     expect(placeOf(rows, 'young')).toBe(2);
+    // U-21: class-competition suppression does not hide the row group.
+    expect(ageGroupOf(rows, 'young')).toBe('AGE_LE_14');
+    expect(ageGroupOf(rows, 'adult')).toBe('AGE_24_40');
     expect(event.ageSplits?.[0]).toEqual({
       startId: START_ID,
       formatId: FORMAT_ID,
@@ -678,6 +745,29 @@ describe('EventsService.findById age categories', () => {
 
     expect(event.ageSplits).toBeUndefined();
     expect(event.registrations).toEqual([]);
+  });
+
+  it('keeps the row age group on a protocol of an event without starts', async () => {
+    const { service } = makeHarness({
+      starts: 'none',
+      people: [
+        {
+          key: 'rider',
+          gender: 'M',
+          birthYear: CONTROL_YEAR - 30,
+          startNumber: 1,
+          timeMs: 1_000_000,
+        },
+      ],
+    });
+
+    const event = await service.findById(EVENT_ID, { syncStatuses: false });
+    const rows = event.registrations ?? [];
+
+    expect(event.ageSplits).toBeUndefined();
+    expect(rows).toHaveLength(1);
+    expect(sectionOf(rows, 'rider')).toBe('CATEGORY');
+    expect(ageGroupOf(rows, 'rider')).toBe('AGE_24_40');
   });
 
   it('keeps the existing event payload fields', async () => {

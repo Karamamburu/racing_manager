@@ -46,6 +46,7 @@ import { parseUpdateEventStatusBody } from './parse-update-event-status';
 import { logEvent } from '../logging/log-event';
 import { rankEnrollments, type RankableEnrollment } from './rank-registrations';
 import {
+  ageGroupFor,
   categoriesFromStoredRows,
   categoryForBirthYear,
   categorySectionId,
@@ -57,6 +58,7 @@ import {
   resolveControlYear,
   type AgeCategory,
   type AgeCategorySectionId,
+  type AgeGroupId,
   type AgeSectionId,
   type StoredAgeSection,
 } from './age-groups';
@@ -198,6 +200,7 @@ export type EventParticipant = {
   note: string | null;
   registeredAt: string;
   sectionId: string;
+  ageGroupId: AgeGroupId | null;
 };
 
 type DecimalValue = { toString(): string } | null;
@@ -550,6 +553,7 @@ type ProtocolBaseRow = RankableEnrollment & {
   format: StoredFormat | null;
   sectionId: string;
   sectionRank: number;
+  ageGroupId: AgeGroupId | null;
 };
 
 type ProtocolRow = ProtocolBaseRow & { place: number | null };
@@ -1995,6 +1999,10 @@ export class EventsService {
               )?.format ?? null,
             sectionId: placement.sectionId,
             sectionRank: placement.sectionRank,
+            ageGroupId: ageGroupFor(
+              registration.birthYear,
+              context.controlYear,
+            ),
           };
         }),
     );
@@ -2106,6 +2114,7 @@ export class EventsService {
       note: registration.note,
       registeredAt: registration.registeredAt.toISOString(),
       sectionId: row.sectionId,
+      ageGroupId: row.ageGroupId,
     };
   }
 
