@@ -142,6 +142,8 @@ export type EventParticipant = {
   note: string | null;
   registeredAt: string;
   sectionId: string;
+  /** Derived from the birth year with the unchanged season rule; additive. */
+  ageGroupId?: AgeGroupId | null;
 };
 
 export type EnrollmentInputRequest = {

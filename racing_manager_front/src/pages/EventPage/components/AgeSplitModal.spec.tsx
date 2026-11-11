@@ -55,7 +55,7 @@ function groupCheckbox(groupId: AgeGroupId): HTMLInputElement {
   const group = AGE_CATEGORY_GROUPS.find((item) => item.id === groupId);
   if (!group) throw new Error(`Unknown age group: ${groupId}`);
   return screen.getByRole('checkbox', {
-    name: `${group.labels.M} (${group.range})`,
+    name: `${group.name} (${group.range})`,
   }) as HTMLInputElement;
 }
 
@@ -146,7 +146,7 @@ describe('AgeSplitModal', () => {
     expect(tabs()).toHaveLength(1);
     expect(tab(1)).not.toBeNull();
     expect(
-      screen.getByText('Юноши среднего возраста (15–16)'),
+      screen.getByText('Юноши и девушки среднего возраста (15–16)'),
     ).not.toBeNull();
     for (const group of AGE_CATEGORY_GROUPS) {
       expect(groupCheckbox(group.id).checked).toBe(false);

@@ -144,11 +144,12 @@ describe('age category catalog', () => {
     expect(categoryTitle(3)).toBe('Категория 3');
   });
 
-  it('labels and ranges a base group per gender', () => {
+  it('labels and ranges a base group with the combined name', () => {
     expect(groupRange('AGE_61_PLUS')).toBe('61+');
-    expect(groupLabel('AGE_24_40', 'M')).toBe('Мужчины');
-    expect(groupLabel('AGE_24_40', 'F')).toBe('Женщины');
+    expect(groupLabel('AGE_24_40', 'M')).toBe('Мужчины и женщины');
+    expect(groupLabel('AGE_24_40', 'F')).toBe('Мужчины и женщины');
     expect(groupLabel('AGE_41_50', 'F')).toBe('Мастер 1');
+    expect(groupLabel('AGE_61_PLUS', 'M')).toBe('Мастер 3 (ветераны)');
   });
 
   it('joins member ranges in catalog order regardless of input order', () => {
