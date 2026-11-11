@@ -1,26 +1,17 @@
 import { CloseOutlined } from '@ant-design/icons';
-import {
-  Alert,
-  Button,
-  Checkbox,
-  Modal,
-  Space,
-  Switch,
-  Tabs,
-  Typography,
-} from 'antd';
+import { Alert, Button, Checkbox, Modal, Space, Tabs, Typography } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import {
   AGE_CATEGORY_GROUPS,
   categorySubtitle,
   categoryTitle,
-  groupLabel,
-  groupRange,
+  groupOptionLabel,
+  isAddDisabled,
+  visibleGroupIds,
 } from '../../../features/events/ageCategories';
 import type {
   AgeGroupId,
   AgeSplitRef,
-  GenderCode,
   SetAgeCategoriesRequest,
 } from '../../../shared/types/event';
 
@@ -37,6 +28,8 @@ export type AgeSplitModalProps = {
   category: AgeSplitCategory | null;
   /** Stored configuration for that category. */
   value: AgeSplitRef | null;
+  /** Participant count per base group; a missing group counts as 0. */
+  groupCounts?: Partial<Record<AgeGroupId, number>>;
   /** A class competition suppresses the stored split. */
   notApplied?: boolean;
   saving?: boolean;
@@ -56,16 +49,27 @@ function orderedGroupIds(groupIds: readonly AgeGroupId[]): AgeGroupId[] {
   );
 }
 
+/** A partial count map reads as a zero-filled one. */
+function resolvedCounts(
+  groupCounts: Partial<Record<AgeGroupId, number>>,
+): Record<AgeGroupId, number> {
+  const counts = {} as Record<AgeGroupId, number>;
+  for (const group of AGE_CATEGORY_GROUPS) {
+    counts[group.id] = groupCounts[group.id] ?? 0;
+  }
+  return counts;
+}
+
 export function AgeSplitModal({
   open,
   category,
   value,
+  groupCounts = {},
   notApplied = false,
   saving = false,
   onClose,
   onSave,
 }: AgeSplitModalProps) {
-  const [enabled, setEnabled] = useState(false);
   const [draft, setDraft] = useState<DraftCategory[]>([]);
   const [activeKey, setActiveKey] = useState('');
   const initializedFor = useRef<string | null>(null);
@@ -96,29 +100,28 @@ export function AgeSplitModal({
           }))
         : [{ key: nextKey(), groupIds: [] }];
 
-    setEnabled(value?.enabled ?? false);
     setDraft(next);
     setActiveKey(next[0]?.key ?? '');
   }, [categoryKey, open, value]);
 
-  const gender: GenderCode = category?.gender ?? 'M';
+  const counts = resolvedCounts(groupCounts);
   const activeDraft = draft.find((item) => item.key === activeKey) ?? draft[0];
 
   const assigned = new Set<AgeGroupId>();
   for (const item of draft) {
     for (const groupId of item.groupIds) assigned.add(groupId);
   }
+  const assignedIds = [...assigned];
 
-  const allGroupsAssigned = assigned.size >= AGE_CATEGORY_GROUPS.length;
-  // U-17: only the all-groups-assigned state disables the add action, so a
-  // released group re-enables it even when nine tabs already exist.
-  const addDisabled = saving || allGroupsAssigned;
+  // U-12, U-18: only populated groups are offered, plus the ones already in the
+  // draft; add is unavailable while no populated group is still free.
+  const offeredGroupIds = visibleGroupIds(counts, assignedIds);
+  const addDisabled = saving || isAddDisabled(counts, assignedIds);
 
   const keptCategories = draft
     .map((item) => ({ groupIds: orderedGroupIds(item.groupIds) }))
     .filter((item) => item.groupIds.length > 0);
-  const groupsMissing = enabled && keptCategories.length === 0;
-  const saveDisabled = saving || !category || groupsMissing;
+  const saveDisabled = saving || !category;
 
   const handleCancel = () => {
     if (saving) return;
@@ -140,7 +143,6 @@ export function AgeSplitModal({
           : item,
       ),
     );
-    if (checked) setEnabled(true);
   };
 
   const addCategory = () => {
@@ -151,6 +153,17 @@ export function AgeSplitModal({
       groupIds: [],
     };
     setDraft((previous) => [...previous, next]);
+    setActiveKey(next.key);
+  };
+
+  const resetDraft = () => {
+    if (saving) return;
+    keySeq.current += 1;
+    const next: DraftCategory = {
+      key: `category-${keySeq.current}`,
+      groupIds: [],
+    };
+    setDraft([next]);
     setActiveKey(next.key);
   };
 
@@ -204,21 +217,21 @@ export function AgeSplitModal({
             gap: 8,
           }}
         >
-          {AGE_CATEGORY_GROUPS.map((group) => {
+          {offeredGroupIds.map((groupId) => {
             const ownerIndex = draft.findIndex((candidate) =>
-              candidate.groupIds.includes(group.id),
+              candidate.groupIds.includes(groupId),
             );
             const ownedByOther = ownerIndex >= 0 && ownerIndex !== index;
             return (
               <Checkbox
-                key={group.id}
+                key={groupId}
                 checked={ownerIndex >= 0}
                 disabled={saving || ownedByOther}
                 onChange={(event) =>
-                  toggleGroup(group.id, event.target.checked)
+                  toggleGroup(groupId, event.target.checked)
                 }
               >
-                {`${groupLabel(group.id, gender)} (${groupRange(group.id)})`}
+                {groupOptionLabel(groupId, counts[groupId])}
               </Checkbox>
             );
           })}
@@ -229,21 +242,13 @@ export function AgeSplitModal({
 
   const handleSave = async () => {
     if (!category || saveDisabled) return;
-    const payload: SetAgeCategoriesRequest = enabled
-      ? {
-          gender: category.gender,
-          startId: category.startId,
-          formatId: category.formatId,
-          enabled: true,
-          categories: keptCategories,
-        }
-      : {
-          gender: category.gender,
-          startId: category.startId,
-          formatId: category.formatId,
-          enabled: false,
-          categories: [],
-        };
+    const payload: SetAgeCategoriesRequest = {
+      gender: category.gender,
+      startId: category.startId,
+      formatId: category.formatId,
+      enabled: keptCategories.length > 0,
+      categories: keptCategories.length > 0 ? keptCategories : [],
+    };
     try {
       await onSave(payload);
     } catch (error) {
@@ -276,9 +281,14 @@ export function AgeSplitModal({
             flexWrap: 'wrap',
           }}
         >
-          <Button disabled={addDisabled} onClick={addCategory}>
-            Добавить категорию
-          </Button>
+          <Space>
+            <Button disabled={saving} onClick={resetDraft}>
+              Сброс категорий
+            </Button>
+            <Button disabled={addDisabled} onClick={addCategory}>
+              Добавить категорию
+            </Button>
+          </Space>
           <Space>
             <Button disabled={saving} onClick={handleCancel}>
               Отмена
@@ -305,30 +315,12 @@ export function AgeSplitModal({
         />
       ) : null}
 
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <Space size="small">
-          <Switch
-            aria-label="Разбить по возрасту"
-            checked={enabled}
-            disabled={saving}
-            onChange={setEnabled}
-          />
-          <Typography.Text>Разбить по возрасту</Typography.Text>
-        </Space>
-
-        <Tabs
-          size="small"
-          activeKey={activeDraft?.key}
-          onChange={setActiveKey}
-          items={tabItems}
-        />
-
-        {groupsMissing ? (
-          <Typography.Text type="danger">
-            Выберите хотя бы одну группу
-          </Typography.Text>
-        ) : null}
-      </Space>
+      <Tabs
+        size="small"
+        activeKey={activeDraft?.key}
+        onChange={setActiveKey}
+        items={tabItems}
+      />
     </Modal>
   );
 }
