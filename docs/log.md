@@ -2,6 +2,10 @@
 
 Append-only. Prefix every entry with `## [YYYY-MM-DD] ingest|query|lint | Title`.
 
+## [2026-11-11] ingest | AGE-CATEGORY-UX: populated-group picker and reset
+
+The «Возрастные категории» dialog is now a draft editor of populated groups: the «Разбить по возрасту» switch is gone, «Сброс категорий» clears the draft to one empty «Категория 1» and stores nothing, and «Сохранить» on a draft with no selected group sends `enabled: false` with no categories and removes the stored configuration — the only disable path. The picker offers only groups with at least one participant plus groups selected in the draft (even at 0), labelled `{count} - {official name} ({display range})` with the nine official combined FLGR names, both «Юниоры и юниорки» bands separated by range, and a checked/disabled option with no owner hint for a group held by another tab. «Добавить категорию» is unavailable while every populated group is assigned and when none is populated. Counts cover the full protocol category (gender × start × format), ignore protocol search and city/team filters, exclude withdrawn rows and draft state, and count one per active row; unusable birth years belong to no group. `EventParticipant.ageGroupId` is additive on every protocol row (nine ids or `null`) under the unchanged season/control-year rule, for split, suppressed, unsplit and legacy protocols; protocol rendering, places and finishes are unchanged. Updated [domains/events.md](domains/events.md). Spec: [specs/age-category-ux-ears.md](../specs/age-category-ux-ears.md); PRD: [Tasks/AGE-CATEGORY-UX/PRD.md](../Tasks/AGE-CATEGORY-UX/PRD.md).
+
 ## [2026-11-11] ingest | AGE-CATEGORIES: shorter headings and a footer add action
 
 Category headings read «Категория N» in the dialog tabs and the protocol sections. A group owned by another tab is shown disabled without the «входит в …» hint. «Добавить категорию» moved to the left side of the modal footer and uses the default button style, on one line with «Отмена» and «Сохранить». Updated [domains/events.md](domains/events.md).
