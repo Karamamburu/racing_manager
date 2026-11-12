@@ -234,6 +234,9 @@ export class ClassCompetitionsService {
         ? null
         : ((event.starts ?? []).find((item) => item.id === parsed.startId) ??
           null);
+    if ((event.starts ?? []).length === 0 && parsed.startId != null) {
+      throw new BadRequestException('У этого мероприятия нет стартов.');
+    }
     if ((event.starts ?? []).length > 0 && !start) {
       throw new BadRequestException('Старт не принадлежит этому мероприятию.');
     }

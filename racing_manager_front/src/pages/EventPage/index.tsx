@@ -148,7 +148,7 @@ function simpleSectionBound(
   sectionId: string,
   split: { categories: Array<{ id: string; groupIds: AgeGroupId[] }> } | null,
 ): number {
-  if (sectionId === 'CATEGORY') return 0;
+  if (sectionId === 'CATEGORY') return 1_000_000.5;
   if (sectionId === 'REMAINDER') return 1_000_000;
   if (sectionId === 'NO_BIRTH_YEAR') return 1_000_001;
   const category = split?.categories.find((item) => item.id === sectionId);
