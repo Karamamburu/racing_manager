@@ -184,12 +184,19 @@ export function AgeSplitModal({
 
   const tabItems = draft.map((item, index) => {
     const subtitle = categorySubtitle(item.groupIds);
+    const participantCount = item.groupIds.reduce(
+      (sum, groupId) => sum + (counts[groupId] ?? 0),
+      0,
+    );
     return {
       key: item.key,
       label: (
         <Space size={4}>
           <Space direction="vertical" size={0}>
-            <span>{categoryTitle(index + 1)}</span>
+            <span>
+              {`${index + 1} Категория - `}
+              <Typography.Text strong>{participantCount}</Typography.Text>
+            </span>
             {subtitle ? (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 {subtitle}

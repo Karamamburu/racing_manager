@@ -130,7 +130,7 @@ function cancelButton(): HTMLButtonElement {
 
 function tab(number: number): HTMLElement {
   return screen.getByRole('tab', {
-    name: new RegExp(`^${categoryTitle(number)}`),
+    name: new RegExp(`^${number} Категория`),
   });
 }
 
@@ -167,7 +167,7 @@ beforeAll(() => {
 afterEach(cleanup);
 
 describe('AgeSplitModal', () => {
-  it('has no switch and opens with one empty «Категория 1» tab', () => {
+  it('has no switch and opens with one empty «1 Категория - 0» tab', () => {
     renderModal();
 
     expect(screen.getByText('Возрастные категории')).not.toBeNull();
@@ -267,6 +267,21 @@ describe('AgeSplitModal', () => {
     expect(groupCheckbox('AGE_15_16').disabled).toBe(true);
   });
 
+  it('shows the participant count in bold in each tab heading', () => {
+    renderModal({
+      value: splitRef([
+        { groupIds: ['AGE_15_16'] },
+        { groupIds: ['AGE_41_50'] },
+      ]),
+      counts: { AGE_15_16: 7, AGE_41_50: 2 },
+    });
+
+    expect(tab(1).textContent).toContain('1 Категория - 7');
+    expect(within(tab(1)).getByText('7').tagName).toBe('STRONG');
+    expect(tab(2).textContent).toContain('2 Категория - 2');
+    expect(within(tab(2)).getByText('2').tagName).toBe('STRONG');
+  });
+
   it('renders a group held by another tab checked and disabled without any hint', () => {
     renderModal();
 
@@ -299,7 +314,7 @@ describe('AgeSplitModal', () => {
 
     expect(tabs()).toHaveLength(1);
     expect(tab(1)).not.toBeNull();
-    expect(screen.queryByRole('tab', { name: /Категория 2/ })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /2 Категория/ })).toBeNull();
     expect(groupCheckbox('AGE_24_40').checked).toBe(true);
     expect(groupCheckbox('AGE_24_40').disabled).toBe(false);
     expect(groupCheckbox('AGE_15_16').checked).toBe(false);
@@ -334,7 +349,7 @@ describe('AgeSplitModal', () => {
     });
   });
 
-  it('resets the draft to one empty active «Категория 1» tab and stores nothing', () => {
+  it('resets the draft to one empty active «1 Категория - 0» tab and stores nothing', () => {
     const { onSave, onClose } = renderModal({
       value: splitRef([
         { groupIds: ['AGE_15_16'] },
@@ -353,8 +368,8 @@ describe('AgeSplitModal', () => {
     expect(tabs()).toHaveLength(1);
     expect(tab(1)).not.toBeNull();
     expect(tab(1).getAttribute('aria-selected')).toBe('true');
-    expect(screen.queryByRole('tab', { name: /Категория 2/ })).toBeNull();
-    expect(screen.queryByRole('tab', { name: /Категория 3/ })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /2 Категория/ })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /3 Категория/ })).toBeNull();
     for (const group of AGE_CATEGORY_GROUPS) {
       expect(groupCheckbox(group.id).checked).toBe(false);
       expect(groupCheckbox(group.id).disabled).toBe(false);
