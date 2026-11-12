@@ -140,6 +140,7 @@ type ProtocolSectionView = {
   title: string;
   subtitle: string | null;
   rows: EventParticipant[];
+  allRows: EventParticipant[];
   competition: ClassCompetitionView | null;
   sectionId: string;
   bound: number;
@@ -1150,7 +1151,6 @@ export function EventPage() {
                         formatId,
                         gender,
                       );
-                      const hasResults = categoryHasResults(section.rows);
                       const readyToFinish = categoryReadyToFinish(section.rows);
                       const sectionCompetitions = competitionsForRows(
                         section.rows,
@@ -1181,6 +1181,7 @@ export function EventPage() {
                           title: wholeRace.title || section.title,
                           subtitle: wholeRace.subtitle,
                           rows: section.visibleRows,
+                          allRows: section.rows,
                           competition: wholeRace,
                           sectionId: wholeRace.sectionId,
                           bound: wholeRace.youngestBound ?? 0,
@@ -1192,6 +1193,9 @@ export function EventPage() {
                             title: competition.title || section.title,
                             subtitle: competition.subtitle,
                             rows: section.visibleRows.filter(
+                              (row) => row.raceId === competition.id,
+                            ),
+                            allRows: section.rows.filter(
                               (row) => row.raceId === competition.id,
                             ),
                             competition,
@@ -1209,6 +1213,9 @@ export function EventPage() {
                             title: ageSection.title ?? section.title,
                             subtitle: ageSection.subtitle,
                             rows,
+                            allRows: ageSection.rows.filter(
+                              (row) => row.raceId == null,
+                            ),
                             competition: null,
                             sectionId: ageSection.key,
                             bound: simpleSectionBound(ageSection.key, split),
@@ -1220,6 +1227,7 @@ export function EventPage() {
                             title: section.title,
                             subtitle: null,
                             rows: section.visibleRows,
+                            allRows: section.rows,
                             competition: null,
                             sectionId: 'CATEGORY',
                             bound: 0,
@@ -1452,7 +1460,7 @@ export function EventPage() {
                                       eventLaps={event.laps ?? []}
                                       canManage={canRunBracket}
                                       registrationClosed={registrationClosed}
-                                      categoryHasResults={hasResults || categoryFinished}
+                                      categoryHasResults={categoryHasResults(view.allRows) || categoryFinished}
                                       onChanged={refreshEvent}
                                     />
                                   ) : null}
@@ -1470,7 +1478,7 @@ export function EventPage() {
                                         eventLaps={event.laps ?? []}
                                         canManage={canRunBracket}
                                         registrationClosed={registrationClosed}
-                                        categoryHasResults={hasResults || categoryFinished}
+                                        categoryHasResults={categoryHasResults(view.allRows) || categoryFinished}
                                         onChanged={refreshEvent}
                                       />
                                     ) : null}
