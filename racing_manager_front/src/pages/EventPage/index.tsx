@@ -1,3 +1,4 @@
+import { DownOutlined, RightOutlined } from '@ant-design/icons';
 import { Button, Card, Col, Empty, Grid, Modal, Result, Row, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
@@ -503,6 +504,7 @@ export function EventPage() {
   const [ageSplitCategory, setAgeSplitCategory] = useState<AgeSplitCategory | null>(null);
   const [isSavingAgeSplit, setIsSavingAgeSplit] = useState(false);
   const [fullProtocolKeys, setFullProtocolKeys] = useState<string[]>([]);
+  const [collapsedBlockKeys, setCollapsedBlockKeys] = useState<string[]>([]);
   const [protocolFilters, setProtocolFilters] =
     useState<ProtocolFiltersValue>(emptyProtocolFilters);
   const screens = Grid.useBreakpoint();
@@ -510,6 +512,12 @@ export function EventPage() {
 
   const toggleFullProtocol = (key: string) => {
     setFullProtocolKeys((current) =>
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
+    );
+  };
+
+  const toggleBlockCollapsed = (key: string) => {
+    setCollapsedBlockKeys((current) =>
       current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
     );
   };
@@ -1394,19 +1402,44 @@ export function EventPage() {
                                     flexWrap: 'wrap',
                                   }}
                                 >
-                                  <Space size={8} align="baseline" wrap>
-                                    <Typography.Text strong>{view.title}</Typography.Text>
-                                    {view.subtitle ? (
+                                  <Space size={4} align="baseline" wrap>
+                                    <Button
+                                      type="text"
+                                      size="small"
+                                      aria-expanded={!collapsedBlockKeys.includes(view.key)}
+                                      aria-label={
+                                        collapsedBlockKeys.includes(view.key)
+                                          ? 'Развернуть категорию'
+                                          : 'Свернуть категорию'
+                                      }
+                                      title={
+                                        collapsedBlockKeys.includes(view.key)
+                                          ? 'Развернуть категорию'
+                                          : 'Свернуть категорию'
+                                      }
+                                      icon={
+                                        collapsedBlockKeys.includes(view.key) ? (
+                                          <RightOutlined />
+                                        ) : (
+                                          <DownOutlined />
+                                        )
+                                      }
+                                      onClick={() => toggleBlockCollapsed(view.key)}
+                                    />
+                                    <Space size={8} align="baseline" wrap>
+                                      <Typography.Text strong>{view.title}</Typography.Text>
+                                      {view.subtitle ? (
+                                        <Typography.Text type="secondary">
+                                          {view.subtitle}
+                                        </Typography.Text>
+                                      ) : null}
                                       <Typography.Text type="secondary">
-                                        {view.subtitle}
+                                        {formatParticipantCount(view.rows.length, group.key)}
                                       </Typography.Text>
-                                    ) : null}
-                                    <Typography.Text type="secondary">
-                                      {formatParticipantCount(view.rows.length, group.key)}
-                                    </Typography.Text>
-                                    {view.competition ? (
-                                      <Tag>Многоэтапная гонка</Tag>
-                                    ) : null}
+                                      {view.competition ? (
+                                        <Tag>Многоэтапная гонка</Tag>
+                                      ) : null}
+                                    </Space>
                                   </Space>
                                   {!view.competition && classCompetitionsQuery.isSuccess ? (
                                     <ClassCompetitionPanel
@@ -1424,25 +1457,29 @@ export function EventPage() {
                                     />
                                   ) : null}
                                 </div>
-                                {view.competition && classCompetitionsQuery.isSuccess ? (
-                                  <ClassCompetitionPanel
-                                    eventId={event.id}
-                                    competition={view.competition}
-                                    startId={startId}
-                                    sectionId={view.sectionId}
-                                    formatId={formatId}
-                                    gender={gender}
-                                    eventLaps={event.laps ?? []}
-                                    canManage={canRunBracket}
-                                    registrationClosed={registrationClosed}
-                                    categoryHasResults={hasResults || categoryFinished}
-                                    onChanged={refreshEvent}
-                                  />
+                                {!collapsedBlockKeys.includes(view.key) ? (
+                                  <>
+                                    {view.competition && classCompetitionsQuery.isSuccess ? (
+                                      <ClassCompetitionPanel
+                                        eventId={event.id}
+                                        competition={view.competition}
+                                        startId={startId}
+                                        sectionId={view.sectionId}
+                                        formatId={formatId}
+                                        gender={gender}
+                                        eventLaps={event.laps ?? []}
+                                        canManage={canRunBracket}
+                                        registrationClosed={registrationClosed}
+                                        categoryHasResults={hasResults || categoryFinished}
+                                        onChanged={refreshEvent}
+                                      />
+                                    ) : null}
+                                    {view.competition &&
+                                    view.competition.status !== 'DONE'
+                                      ? null
+                                      : renderTable(view)}
+                                  </>
                                 ) : null}
-                                {view.competition &&
-                                view.competition.status !== 'DONE'
-                                  ? null
-                                  : renderTable(view)}
                               </div>
                             ))}
                           </Space>

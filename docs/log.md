@@ -101,3 +101,7 @@ Shipped multi-stage races scoped to one start and one displayed age section. A r
 ## 2026-11-12 — CATEGORY-SELF-CONTAINED
 
 The event protocol now renders each displayed section as one self-contained block: header (title, range subtitle, count, race marker), creation action in the header of an eligible simple block, race panel under the header, and the section's own final protocol table. The shared «Итоговый протокол» collapse is removed. «Возрастные категории», «Завершить гонку» and the compact/full control stay once above the blocks of each protocol category. No API, schema, stored value, place, result, finish or race behaviour changed. Updated [domains/events.md](domains/events.md). Spec: `specs/category-self-contained-ears.md`; PRD: `Tasks/CATEGORY-SELF-CONTAINED/PRD.md`.
+
+## 2026-11-12 — CATEGORY-COLLAPSE
+
+Each self-contained category block in the event protocol now has a header collapse control. Collapsing hides the block's race panel and protocol table while the header, title, range, count, race marker, creation action and category-wide controls stay visible; expanding restores the block. This makes a finished or idle category easier to fold away. Presentation-only; no API, schema or domain behavior changed. Updated [domains/events.md](domains/events.md).
