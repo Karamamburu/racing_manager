@@ -104,12 +104,13 @@ export class AgeSplitRepository {
 
   async hasClassCompetition(
     eventId: string,
+    startId: string,
     formatId: number,
     gender: string,
   ): Promise<boolean> {
     if (gender !== 'M' && gender !== 'F') return false;
     const bracket = await this.prisma.classCompetition.findFirst({
-      where: { eventId, formatId, gender },
+      where: { eventId, startId, formatId, gender },
       select: { id: true },
     });
     return bracket !== null;

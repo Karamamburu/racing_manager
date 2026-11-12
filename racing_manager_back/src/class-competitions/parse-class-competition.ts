@@ -10,6 +10,8 @@ const HEAT_STATUSES = ['OK', 'DNS', 'DNF', 'DSQ'] as const;
 export type HeatTimeStatus = (typeof HEAT_STATUSES)[number];
 
 export type ParsedCreateClassCompetition = {
+  startId: string | null;
+  sectionId: string;
   formatId: number | null;
   gender: 'M' | 'F';
 };
@@ -42,12 +44,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function parseOptionalLapNumber(value: unknown, index: number): number | null {
   if (value == null) return null;
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
-    throw new BadRequestException(`entries[${index}].lapNumber must be a positive integer.`);
+    throw new BadRequestException(
+      `entries[${index}].lapNumber must be a positive integer.`,
+    );
   }
   return value;
 }
 
-export function parseCreateClassCompetitionBody(body: unknown): ParsedCreateClassCompetition {
+export function parseCreateClassCompetitionBody(
+  body: unknown,
+): ParsedCreateClassCompetition {
   if (!isRecord(body)) {
     throw new BadRequestException('Request body must be a JSON object.');
   }
@@ -55,13 +61,39 @@ export function parseCreateClassCompetitionBody(body: unknown): ParsedCreateClas
   if (gender !== 'M' && gender !== 'F') {
     throw new BadRequestException('gender must be M or F.');
   }
-  if (body.formatId == null) {
-    return { formatId: null, gender };
+  if (typeof body.sectionId !== 'string' || !body.sectionId.trim()) {
+    throw new BadRequestException('sectionId is required.');
   }
-  if (typeof body.formatId !== 'number' || !Number.isInteger(body.formatId) || body.formatId < 1) {
-    throw new BadRequestException('formatId must be a positive integer.');
+  const sectionId = body.sectionId.trim();
+  if (
+    sectionId !== 'CATEGORY' &&
+    sectionId !== 'REMAINDER' &&
+    sectionId !== 'NO_BIRTH_YEAR' &&
+    !/^CATEGORY_\d+$/.test(sectionId)
+  ) {
+    throw new BadRequestException(
+      'sectionId must be CATEGORY, CATEGORY_{number}, REMAINDER, or NO_BIRTH_YEAR.',
+    );
   }
-  return { formatId: body.formatId, gender };
+  let startId: string | null = null;
+  if (body.startId != null) {
+    if (typeof body.startId !== 'string' || !body.startId.trim()) {
+      throw new BadRequestException('startId must be a non-empty string.');
+    }
+    startId = body.startId.trim();
+  }
+  let formatId: number | null = null;
+  if (body.formatId != null) {
+    if (
+      typeof body.formatId !== 'number' ||
+      !Number.isInteger(body.formatId) ||
+      body.formatId < 1
+    ) {
+      throw new BadRequestException('formatId must be a positive integer.');
+    }
+    formatId = body.formatId;
+  }
+  return { startId, sectionId, formatId, gender };
 }
 
 export function parsePlanChangeBody(body: unknown): ParsedPlanChange {
@@ -74,12 +106,19 @@ export function parsePlanChangeBody(body: unknown): ParsedPlanChange {
     throw new BadRequestException('Send either removeStageIds or addStage.');
   }
   if (hasRemove) {
-    if (!Array.isArray(body.removeStageIds) || body.removeStageIds.length === 0) {
-      throw new BadRequestException('removeStageIds must be a non-empty array.');
+    if (
+      !Array.isArray(body.removeStageIds) ||
+      body.removeStageIds.length === 0
+    ) {
+      throw new BadRequestException(
+        'removeStageIds must be a non-empty array.',
+      );
     }
     const removeStageIds = body.removeStageIds.map((item, index) => {
       if (typeof item !== 'string' || !item.trim()) {
-        throw new BadRequestException(`removeStageIds[${index}] must be a non-empty string.`);
+        throw new BadRequestException(
+          `removeStageIds[${index}] must be a non-empty string.`,
+        );
       }
       return item.trim();
     });
@@ -89,24 +128,38 @@ export function parsePlanChangeBody(body: unknown): ParsedPlanChange {
     typeof body.addStage !== 'string' ||
     !(ADDABLE_STAGE_KINDS as readonly string[]).includes(body.addStage)
   ) {
-    throw new BadRequestException('addStage must be PROLOGUE, EIGHTHFINAL, QUARTERFINAL, or SEMIFINAL.');
+    throw new BadRequestException(
+      'addStage must be PROLOGUE, EIGHTHFINAL, QUARTERFINAL, or SEMIFINAL.',
+    );
   }
   return { addStage: body.addStage as AddableStageKind };
 }
 
 export function parseHeatAssignmentBody(body: unknown): ParsedHeatAssignment {
-  if (!isRecord(body) || !Array.isArray(body.heats) || body.heats.length === 0) {
+  if (
+    !isRecord(body) ||
+    !Array.isArray(body.heats) ||
+    body.heats.length === 0
+  ) {
     throw new BadRequestException('heats must be a non-empty array.');
   }
   const heats = body.heats.map((item, index) => {
     if (!isRecord(item)) {
       throw new BadRequestException(`heats[${index}] must be an object.`);
     }
-    if (typeof item.heatNumber !== 'number' || !Number.isInteger(item.heatNumber) || item.heatNumber < 1) {
-      throw new BadRequestException(`heats[${index}].heatNumber must be an integer >= 1.`);
+    if (
+      typeof item.heatNumber !== 'number' ||
+      !Number.isInteger(item.heatNumber) ||
+      item.heatNumber < 1
+    ) {
+      throw new BadRequestException(
+        `heats[${index}].heatNumber must be an integer >= 1.`,
+      );
     }
     if (!Array.isArray(item.registrationIds)) {
-      throw new BadRequestException(`heats[${index}].registrationIds must be an array.`);
+      throw new BadRequestException(
+        `heats[${index}].registrationIds must be an array.`,
+      );
     }
     const registrationIds = item.registrationIds.map((id, idIndex) => {
       if (typeof id !== 'string' || !id.trim()) {
@@ -135,19 +188,38 @@ export function parseHeatTimesBody(body: unknown): ParsedHeatTimes {
     if (!isRecord(item)) {
       throw new BadRequestException(`entries[${index}] must be an object.`);
     }
-    if (typeof item.registrationId !== 'string' || !item.registrationId.trim()) {
-      throw new BadRequestException(`entries[${index}].registrationId is required.`);
+    if (
+      typeof item.registrationId !== 'string' ||
+      !item.registrationId.trim()
+    ) {
+      throw new BadRequestException(
+        `entries[${index}].registrationId is required.`,
+      );
     }
-    if (typeof item.heatNumber !== 'number' || !Number.isInteger(item.heatNumber) || item.heatNumber < 1) {
-      throw new BadRequestException(`entries[${index}].heatNumber must be an integer >= 1.`);
+    if (
+      typeof item.heatNumber !== 'number' ||
+      !Number.isInteger(item.heatNumber) ||
+      item.heatNumber < 1
+    ) {
+      throw new BadRequestException(
+        `entries[${index}].heatNumber must be an integer >= 1.`,
+      );
     }
     const lapNumber = parseOptionalLapNumber(item.lapNumber, index);
     const statusRaw = item.status;
     if (lapNumber != null && statusRaw != null && statusRaw !== 'OK') {
-      throw new BadRequestException(`entries[${index}] cannot combine lapNumber with status ${String(statusRaw)}.`);
+      throw new BadRequestException(
+        `entries[${index}] cannot combine lapNumber with a non-OK status.`,
+      );
     }
-    if (lapNumber == null && (typeof statusRaw !== 'string' || !(HEAT_STATUSES as readonly string[]).includes(statusRaw))) {
-      throw new BadRequestException(`entries[${index}].status must be OK, DNS, DNF, or DSQ.`);
+    if (
+      lapNumber == null &&
+      (typeof statusRaw !== 'string' ||
+        !(HEAT_STATUSES as readonly string[]).includes(statusRaw))
+    ) {
+      throw new BadRequestException(
+        `entries[${index}].status must be OK, DNS, DNF, or DSQ.`,
+      );
     }
     const status = (lapNumber != null ? 'OK' : statusRaw) as HeatTimeStatus;
     let timeMilliseconds: number | null = null;
@@ -164,10 +236,14 @@ export function parseHeatTimesBody(body: unknown): ParsedHeatTimes {
       timeMilliseconds = item.timeMilliseconds;
     }
     if (lapNumber != null && timeMilliseconds == null) {
-      throw new BadRequestException(`entries[${index}] needs timeMilliseconds for the lap.`);
+      throw new BadRequestException(
+        `entries[${index}] needs timeMilliseconds for the lap.`,
+      );
     }
     if (status === 'OK' && lapNumber == null && timeMilliseconds == null) {
-      throw new BadRequestException(`entries[${index}] needs timeMilliseconds when status is OK.`);
+      throw new BadRequestException(
+        `entries[${index}] needs timeMilliseconds when status is OK.`,
+      );
     }
     return {
       registrationId: item.registrationId,

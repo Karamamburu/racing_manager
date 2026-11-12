@@ -63,6 +63,11 @@ import {
   type StoredAgeSection,
 } from './age-groups';
 import type { AgeCategoriesRef } from './age-split.service';
+import {
+  currentPlacement,
+  racePlacementForRow,
+  type RaceScopeRow,
+} from '../class-competitions/race-scope';
 
 export type ParticipationFormatDto = {
   id: number;
@@ -201,6 +206,8 @@ export type EventParticipant = {
   registeredAt: string;
   sectionId: string;
   ageGroupId: AgeGroupId | null;
+  raceId?: string | null;
+  raceRole?: 'CAPTURED' | 'OUTSIDE_RACE' | null;
 };
 
 type DecimalValue = { toString(): string } | null;
@@ -346,8 +353,23 @@ type StoredAgeCategoryRow = {
 };
 
 type StoredClassCompetitionRow = {
+  id: string;
+  startId: string | null;
   formatId: number | null;
   gender: string;
+  status: string;
+  sectionId: string | null;
+  sectionKind: string | null;
+  targetKey: string;
+  targetGroupIds: string[];
+  targetWholeCategory: boolean;
+  frozenTitle: string | null;
+  frozenSubtitle: string | null;
+  frozenYoungestBound: number | null;
+  frozenMemberBounds: number[];
+  frozenSectionNumber: number | null;
+  capturedEnrollmentIds: string[];
+  capturedRegistrationIds: string[];
 };
 
 type EventsStore = {
@@ -543,7 +565,7 @@ const NO_BIRTH_YEAR_SECTION_RANK = 101;
 
 type ProtocolSectionContext = {
   categoriesByCategory: Map<string, AgeCategory[]>;
-  suppressedKeys: Set<string>;
+  racesByCategory: Map<string, RaceScopeRow[]>;
   controlYear: number;
 };
 
@@ -554,6 +576,8 @@ type ProtocolBaseRow = RankableEnrollment & {
   sectionId: string;
   sectionRank: number;
   ageGroupId: AgeGroupId | null;
+  raceId: string | null;
+  raceRole: 'CAPTURED' | 'OUTSIDE_RACE' | null;
 };
 
 type ProtocolRow = ProtocolBaseRow & { place: number | null };
@@ -569,10 +593,6 @@ function categoryKey(
   gender: string,
 ): string {
   return `${startId}:${formatId}:${gender}`;
-}
-
-function bracketKey(formatId: number, gender: string): string {
-  return `${formatId}:${gender}`;
 }
 
 function isStoredAgeSectionId(value: string): value is AgeSectionId {
@@ -647,6 +667,37 @@ function categoriesByCategory(
     }
   }
   return categories;
+}
+
+function groupClassCompetitions(
+  rows: readonly StoredClassCompetitionRow[],
+): Map<string, RaceScopeRow[]> {
+  const grouped = new Map<string, RaceScopeRow[]>();
+  for (const row of rows) {
+    if (row.startId == null || row.formatId == null) continue;
+    const key = categoryKey(row.startId, row.formatId, row.gender);
+    const list = grouped.get(key) ?? [];
+    list.push({
+      id: row.id,
+      startId: row.startId,
+      formatId: row.formatId,
+      gender: row.gender,
+      sectionId: row.sectionId,
+      sectionKind: row.sectionKind,
+      targetKey: row.targetKey,
+      targetGroupIds: row.targetGroupIds,
+      targetWholeCategory: row.targetWholeCategory,
+      frozenTitle: row.frozenTitle,
+      frozenSubtitle: row.frozenSubtitle,
+      frozenYoungestBound: row.frozenYoungestBound,
+      frozenMemberBounds: row.frozenMemberBounds,
+      frozenSectionNumber: row.frozenSectionNumber,
+      capturedEnrollmentIds: row.capturedEnrollmentIds,
+      capturedRegistrationIds: row.capturedRegistrationIds,
+    });
+    grouped.set(key, list);
+  }
+  return grouped;
 }
 
 function sectionRankFor(sectionId: AgeCategorySectionId): number {
@@ -1046,13 +1097,7 @@ export class EventsService {
             storedCategories,
             storedSections,
           ),
-          suppressedKeys: new Set(
-            classCompetitions.flatMap((row) =>
-              row.formatId === null
-                ? []
-                : [bracketKey(row.formatId, row.gender)],
-            ),
-          ),
+          racesByCategory: groupClassCompetitions(classCompetitions),
           controlYear: resolveControlYear(event.eventDate),
         })
       : null;
@@ -1143,7 +1188,25 @@ export class EventsService {
   ): Promise<StoredClassCompetitionRow[]> {
     const rows = await this.store.classCompetition?.findMany({
       where: { eventId },
-      select: { formatId: true, gender: true },
+      select: {
+        id: true,
+        startId: true,
+        formatId: true,
+        gender: true,
+        status: true,
+        sectionId: true,
+        sectionKind: true,
+        targetKey: true,
+        targetGroupIds: true,
+        targetWholeCategory: true,
+        frozenTitle: true,
+        frozenSubtitle: true,
+        frozenYoungestBound: true,
+        frozenMemberBounds: true,
+        frozenSectionNumber: true,
+        capturedEnrollmentIds: true,
+        capturedRegistrationIds: true,
+      },
     });
     return rows ?? [];
   }
@@ -1196,11 +1259,13 @@ export class EventsService {
     }
     const formatId = parsed.formatId;
 
-    const bracket = await this.prisma.classCompetition.findFirst({
-      where: { eventId, gender: parsed.gender, formatId },
-      select: { id: true },
-    });
-    if (bracket) {
+    const bracket = (await this.readClassCompetitions(eventId)).filter(
+      (row) =>
+        row.startId === parsed.startId &&
+        row.formatId === formatId &&
+        row.gender === parsed.gender,
+    );
+    if (bracket.some((row) => row.status !== 'DONE')) {
       throw new BadRequestException(
         'Это многоэтапная гонка. Она завершается на последнем этапе.',
       );
@@ -1216,6 +1281,18 @@ export class EventsService {
     ) {
       throw new ConflictException('Гонка в этой категории уже завершена.');
     }
+
+    const controlYear = resolveControlYear(event.eventDate);
+    const storedCategories = await this.readStoredAgeCategories(eventId);
+    const storedSections = await this.readStoredAgeSections(eventId);
+    const categories =
+      categoriesByCategory(storedCategories, storedSections).get(
+        categoryKey(parsed.startId, formatId, parsed.gender),
+      ) ?? [];
+    const scopedRaces =
+      groupClassCompetitions(bracket).get(
+        categoryKey(parsed.startId, formatId, parsed.gender),
+      ) ?? [];
 
     await this.prisma.$transaction(async (tx) => {
       const enrollments = await tx.enrollment.findMany({
@@ -1238,6 +1315,7 @@ export class EventsService {
             select: {
               id: true,
               gender: true,
+              birthYear: true,
               startNumber: true,
               status: true,
               registeredAt: true,
@@ -1248,12 +1326,26 @@ export class EventsService {
           },
         },
       });
-      if (enrollments.length === 0) {
+      const simpleEnrollments = enrollments.filter((row) => {
+        const placement = currentPlacement(
+          row.registration.birthYear,
+          controlYear,
+          categories,
+        );
+        return (
+          racePlacementForRow(scopedRaces, {
+            enrollmentId: row.id,
+            registrationId: row.registration.id,
+            placement,
+          }) == null
+        );
+      });
+      if (simpleEnrollments.length === 0) {
         throw new BadRequestException(
           'В этой категории нет участников для завершения.',
         );
       }
-      const missing = enrollments.some(
+      const missing = simpleEnrollments.some(
         (row) =>
           isRankedRegistrationStatus(row.registration.status) &&
           row.result === null,
@@ -1264,7 +1356,7 @@ export class EventsService {
         );
       }
       const ranked = rankEnrollments(
-        enrollments.map((row) => ({
+        simpleEnrollments.map((row) => ({
           enrollmentId: row.id,
           registrationId: row.registration.id,
           startId: row.startId,
@@ -1980,6 +2072,30 @@ export class EventsService {
             registration.birthYear,
             context,
           );
+          const races =
+            context.racesByCategory.get(
+              categoryKey(
+                enrollment.startId,
+                enrollment.formatId,
+                registration.gender,
+              ),
+            ) ?? [];
+          const current = currentPlacement(
+            registration.birthYear,
+            context.controlYear,
+            context.categoriesByCategory.get(
+              categoryKey(
+                enrollment.startId,
+                enrollment.formatId,
+                registration.gender,
+              ),
+            ) ?? [],
+          );
+          const racePlacement = racePlacementForRow(races, {
+            enrollmentId: enrollment.id,
+            registrationId: registration.id,
+            placement: current,
+          });
           return {
             enrollmentId: enrollment.id,
             registrationId: registration.id,
@@ -2003,6 +2119,8 @@ export class EventsService {
               registration.birthYear,
               context.controlYear,
             ),
+            raceId: racePlacement?.race.id ?? null,
+            raceRole: racePlacement?.role ?? null,
           };
         }),
     );
@@ -2036,6 +2154,7 @@ export class EventsService {
   ): Map<string, ProtocolBaseRow[]> {
     const buckets = new Map<string, ProtocolBaseRow[]>();
     for (const row of rows) {
+      if (row.raceId != null) continue;
       const key = `${row.startId}:${row.formatId}:${row.gender}:${row.sectionId}`;
       const bucket = buckets.get(key);
       if (bucket) bucket.push(row);
@@ -2054,11 +2173,16 @@ export class EventsService {
     const categories = context.categoriesByCategory.get(
       categoryKey(startId, formatId, gender),
     );
-    if (
-      !categories ||
-      categories.length === 0 ||
-      context.suppressedKeys.has(bracketKey(formatId, gender))
-    ) {
+    const races = context.racesByCategory.get(
+      categoryKey(startId, formatId, gender),
+    );
+    if (races?.some((race) => race.targetWholeCategory)) {
+      return {
+        sectionId: CATEGORY_SECTION_ID,
+        sectionRank: CATEGORY_SECTION_RANK,
+      };
+    }
+    if (!categories || categories.length === 0) {
       return {
         sectionId: CATEGORY_SECTION_ID,
         sectionRank: CATEGORY_SECTION_RANK,
@@ -2115,6 +2239,8 @@ export class EventsService {
       registeredAt: registration.registeredAt.toISOString(),
       sectionId: row.sectionId,
       ageGroupId: row.ageGroupId,
+      raceId: row.raceId,
+      raceRole: row.raceRole,
     };
   }
 

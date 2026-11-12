@@ -169,6 +169,12 @@ export class CompetitionsService {
     return toCompetitionResponse(competition);
   }
 
+  async delete(id: string): Promise<{ deleted: true }> {
+    await this.prisma.competition.delete({ where: { id } });
+    logEvent(this.logger, { event: 'competition.deleted', competitionId: id });
+    return { deleted: true };
+  }
+
   async getPlan(id: string) {
     const competition = await this.load(id);
     const format = toFormat(competition.formatSnapshot);

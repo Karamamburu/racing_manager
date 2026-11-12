@@ -15,6 +15,15 @@ import {
   categoryIsFinished,
   CATEGORY_FINISHED_MESSAGE,
 } from '../events/category-finish';
+import {
+  categoriesFromStoredRows,
+  convertLegacySections,
+  resolveControlYear,
+} from '../events/age-groups';
+import {
+  currentPlacement,
+  racePlacementForRow,
+} from '../class-competitions/race-scope';
 import { isRecordableRegistrationStatus } from '../registrations/registration-status';
 import {
   parseUpsertResultBody,
@@ -72,7 +81,7 @@ export class ResultsService {
   ): Promise<ResultResponse> {
     await this.rolesService.assertHasAnyRole(authentikId, ADMIN_ROLE_CODES);
     const parsed = parseUpsertResultBody(body);
-    await this.requireRecordableEvent(eventId);
+    const event = await this.requireRecordableEvent(eventId);
 
     const enrollment = await this.prisma.enrollment.findFirst({
       where: { id: enrollmentId, eventId },
@@ -87,6 +96,7 @@ export class ResultsService {
             id: true,
             startNumber: true,
             gender: true,
+            birthYear: true,
             status: true,
           },
         },
@@ -101,18 +111,75 @@ export class ResultsService {
       );
     }
 
-    const bracket = await this.prisma.classCompetition.findFirst({
+    const bracket = await this.prisma.classCompetition.findMany({
       where: {
         eventId,
-        gender: enrollment.registration.gender,
+        startId: enrollment.startId,
         formatId: enrollment.formatId,
+        gender: enrollment.registration.gender,
       },
-      select: { id: true },
+      select: {
+        id: true,
+        startId: true,
+        formatId: true,
+        gender: true,
+        sectionId: true,
+        sectionKind: true,
+        targetKey: true,
+        targetGroupIds: true,
+        targetWholeCategory: true,
+        frozenTitle: true,
+        frozenSubtitle: true,
+        frozenYoungestBound: true,
+        frozenMemberBounds: true,
+        frozenSectionNumber: true,
+        capturedEnrollmentIds: true,
+        capturedRegistrationIds: true,
+      },
     });
-    if (bracket) {
-      throw new BadRequestException(
-        'Это многоэтапная гонка. Время записывается в заезд, а не общим результатом.',
+    if (bracket.length > 0) {
+      const categoryRows = await this.prisma.ageSplitCategory.findMany({
+        where: {
+          eventId,
+          startId: enrollment.startId,
+          formatId: enrollment.formatId,
+          gender: enrollment.registration.gender,
+        },
+        select: { categoryNumber: true, groupId: true },
+        orderBy: [{ categoryNumber: 'asc' }, { groupId: 'asc' }],
+      });
+      const legacyRows =
+        categoryRows.length > 0
+          ? []
+          : await this.prisma.ageSplitSection.findMany({
+              where: {
+                eventId,
+                startId: enrollment.startId,
+                formatId: enrollment.formatId,
+                gender: enrollment.registration.gender,
+              },
+              select: { sectionId: true, sectionKind: true, sortOrder: true },
+              orderBy: { sortOrder: 'asc' },
+            });
+      const categories =
+        categoryRows.length > 0
+          ? categoriesFromStoredRows(categoryRows)
+          : convertLegacySections(legacyRows);
+      const placement = currentPlacement(
+        enrollment.registration.birthYear,
+        resolveControlYear(event.eventDate),
+        categories,
       );
+      const displayed = racePlacementForRow(bracket, {
+        enrollmentId: enrollment.id,
+        registrationId: enrollment.registrationId,
+        placement,
+      });
+      if (displayed) {
+        throw new BadRequestException(
+          'Это многоэтапная гонка. Время записывается в заезд, а не общим результатом.',
+        );
+      }
     }
     if (
       await categoryIsFinished(

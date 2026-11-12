@@ -28,6 +28,10 @@ export class CmsClient {
     return this.request('GET', `/v1/competitions/${id}`);
   }
 
+  deleteCompetition(id: string): Promise<void> {
+    return this.request('DELETE', `/v1/competitions/${id}`);
+  }
+
   updatePlan(id: string, body: unknown): Promise<CmsCompetition> {
     return this.request('PUT', `/v1/competitions/${id}/plan`, body);
   }
@@ -71,7 +75,11 @@ export class CmsClient {
     );
   }
 
-  setStageField(id: string, stageId: string, participantIds: string[]): Promise<CmsCompetition> {
+  setStageField(
+    id: string,
+    stageId: string,
+    participantIds: string[],
+  ): Promise<CmsCompetition> {
     return this.request(
       'PUT',
       `/v1/competitions/${id}/stages/${encodeURIComponent(stageId)}/field`,
@@ -88,39 +96,56 @@ export class CmsClient {
   }
 
   private baseUrl(): string {
-    const configured = this.config.get<string>('CMS_BASE_URL') ?? 'http://localhost:4100';
+    const configured =
+      this.config.get<string>('CMS_BASE_URL') ?? 'http://localhost:4100';
     return configured.replace(/\/$/, '');
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
     let response: Response;
     try {
       response = await fetch(`${this.baseUrl()}${path}`, {
         method,
-        headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+        headers:
+          body === undefined
+            ? undefined
+            : { 'content-type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(10_000),
       });
     } catch {
-      logEvent(this.logger, {
-        event: 'cms.request_failed',
-        method,
-        path,
-        reason: 'network',
-      }, 'warn');
+      logEvent(
+        this.logger,
+        {
+          event: 'cms.request_failed',
+          method,
+          path,
+          reason: 'network',
+        },
+        'warn',
+      );
       throw new BadGatewayException('Сервис сеток недоступен.');
     }
 
     const text = await response.text();
     const payload = text ? (JSON.parse(text) as T & CmsErrorBody) : null;
     if (!response.ok) {
-      logEvent(this.logger, {
-        event: 'cms.request_failed',
-        method,
-        path,
-        status: response.status,
-      }, 'warn');
-      const message = payload?.message || `Competition service returned ${response.status}.`;
+      logEvent(
+        this.logger,
+        {
+          event: 'cms.request_failed',
+          method,
+          path,
+          status: response.status,
+        },
+        'warn',
+      );
+      const message =
+        payload?.message || `Competition service returned ${response.status}.`;
       if (response.status === 404) throw new NotFoundException(message);
       throw new BadRequestException(message);
     }
