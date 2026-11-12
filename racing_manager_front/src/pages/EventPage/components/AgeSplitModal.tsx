@@ -195,7 +195,7 @@ export function AgeSplitModal({
           <Space direction="vertical" size={0}>
             <span>
               {`${index + 1} Категория - `}
-              <Typography.Text strong>{participantCount}</Typography.Text>
+              {participantCount}
             </span>
             {subtitle ? (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>

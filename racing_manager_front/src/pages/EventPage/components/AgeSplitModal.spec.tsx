@@ -277,9 +277,9 @@ describe('AgeSplitModal', () => {
     });
 
     expect(tab(1).textContent).toContain('1 Категория - 7');
-    expect(within(tab(1)).getByText('7').tagName).toBe('STRONG');
+    expect(tab(1).querySelector('strong')).toBeNull();
     expect(tab(2).textContent).toContain('2 Категория - 2');
-    expect(within(tab(2)).getByText('2').tagName).toBe('STRONG');
+    expect(tab(2).querySelector('strong')).toBeNull();
   });
 
   it('renders a group held by another tab checked and disabled without any hint', () => {
