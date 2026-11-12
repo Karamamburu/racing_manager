@@ -1,4 +1,4 @@
-import { Button, Card, Col, Collapse, Empty, Grid, Modal, Result, Row, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Col, Empty, Grid, Modal, Result, Row, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -503,7 +503,6 @@ export function EventPage() {
   const [ageSplitCategory, setAgeSplitCategory] = useState<AgeSplitCategory | null>(null);
   const [isSavingAgeSplit, setIsSavingAgeSplit] = useState(false);
   const [fullProtocolKeys, setFullProtocolKeys] = useState<string[]>([]);
-  const [expandedProtocolKeys, setExpandedProtocolKeys] = useState<string[]>([]);
   const [protocolFilters, setProtocolFilters] =
     useState<ProtocolFiltersValue>(emptyProtocolFilters);
   const screens = Grid.useBreakpoint();
@@ -513,17 +512,6 @@ export function EventPage() {
     setFullProtocolKeys((current) =>
       current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
     );
-  };
-
-  const changeProtocolExpansion = (sectionKey: string, keys: string | string[]) => {
-    const protocolKey = `${sectionKey}-protocol`;
-    const nextKeys = Array.isArray(keys) ? keys : [keys];
-    setExpandedProtocolKeys((current) => {
-      const otherSections = current.filter((key) => key !== protocolKey);
-      return nextKeys.includes(protocolKey)
-        ? [...otherSections, protocolKey]
-        : otherSections;
-    });
   };
 
   if (eventQuery.isLoading) {
@@ -1367,6 +1355,18 @@ export function EventPage() {
                                     Возрастные категории
                                   </Button>
                                 ) : null}
+                                {compactProtocol ? (
+                                  <Button
+                                    type="link"
+                                    size="small"
+                                    style={{ paddingInline: 0 }}
+                                    onClick={() => toggleFullProtocol(section.key)}
+                                  >
+                                    {fullProtocolKeys.includes(section.key)
+                                      ? 'Краткий протокол'
+                                      : 'Полный протокол'}
+                                  </Button>
+                                ) : null}
                               </Space>
                               <Space size={8} wrap>
                                 {finishControl}
@@ -1375,33 +1375,56 @@ export function EventPage() {
                             </div>
                             {sectionViews.map((view) => (
                               <div
-                                key={`panel-${view.key}`}
+                                key={view.key}
                                 style={{
                                   display: 'flex',
                                   flexDirection: 'column',
                                   gap: 8,
-                                  padding: '12px 12px 0',
+                                  padding: 12,
                                   border: '1px solid #f0f0f0',
                                   borderRadius: 8,
                                 }}
                               >
-                                <Space size={8} align="baseline" wrap>
-                                  <Typography.Text strong>
-                                    {view.title}
-                                  </Typography.Text>
-                                  {view.subtitle ? (
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'baseline',
+                                    justifyContent: 'space-between',
+                                    gap: 12,
+                                    flexWrap: 'wrap',
+                                  }}
+                                >
+                                  <Space size={8} align="baseline" wrap>
+                                    <Typography.Text strong>{view.title}</Typography.Text>
+                                    {view.subtitle ? (
+                                      <Typography.Text type="secondary">
+                                        {view.subtitle}
+                                      </Typography.Text>
+                                    ) : null}
                                     <Typography.Text type="secondary">
-                                      {view.subtitle}
+                                      {formatParticipantCount(view.rows.length, group.key)}
                                     </Typography.Text>
+                                    {view.competition ? (
+                                      <Tag>Многоэтапная гонка</Tag>
+                                    ) : null}
+                                  </Space>
+                                  {!view.competition && classCompetitionsQuery.isSuccess ? (
+                                    <ClassCompetitionPanel
+                                      eventId={event.id}
+                                      competition={null}
+                                      startId={startId}
+                                      sectionId={view.sectionId}
+                                      formatId={formatId}
+                                      gender={gender}
+                                      eventLaps={event.laps ?? []}
+                                      canManage={canRunBracket}
+                                      registrationClosed={registrationClosed}
+                                      categoryHasResults={hasResults || categoryFinished}
+                                      onChanged={refreshEvent}
+                                    />
                                   ) : null}
-                                  <Typography.Text type="secondary">
-                                    {formatParticipantCount(view.rows.length, group.key)}
-                                  </Typography.Text>
-                                  {view.competition ? (
-                                    <Tag>Многоэтапная гонка</Tag>
-                                  ) : null}
-                                </Space>
-                                {classCompetitionsQuery.isSuccess ? (
+                                </div>
+                                {view.competition && classCompetitionsQuery.isSuccess ? (
                                   <ClassCompetitionPanel
                                     eventId={event.id}
                                     competition={view.competition}
@@ -1416,44 +1439,12 @@ export function EventPage() {
                                     onChanged={refreshEvent}
                                   />
                                 ) : null}
+                                {view.competition &&
+                                view.competition.status !== 'DONE'
+                                  ? null
+                                  : renderTable(view)}
                               </div>
                             ))}
-                            <Collapse
-                              activeKey={expandedProtocolKeys}
-                              onChange={(keys) => changeProtocolExpansion(section.key, keys)}
-                              items={[
-                                {
-                                  key: `${section.key}-protocol`,
-                                  label: 'Итоговый протокол',
-                                  children: (
-                                    <Space
-                                      direction="vertical"
-                                      size={16}
-                                      style={{ width: '100%' }}
-                                    >
-                                      {compactProtocol ? (
-                                        <Button
-                                          type="link"
-                                          size="small"
-                                          style={{ paddingInline: 0 }}
-                                          onClick={() => toggleFullProtocol(section.key)}
-                                        >
-                                          {fullProtocolKeys.includes(section.key)
-                                            ? 'Краткий протокол'
-                                            : 'Полный протокол'}
-                                        </Button>
-                                      ) : null}
-                                      {sectionViews.map((view) =>
-                                        view.competition &&
-                                        view.competition.status !== 'DONE'
-                                          ? null
-                                          : renderTable(view),
-                                      )}
-                                    </Space>
-                                  ),
-                                },
-                              ]}
-                            />
                           </Space>
                         ),
                       };

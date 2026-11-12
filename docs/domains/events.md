@@ -31,6 +31,8 @@ Event catalog, admin CRUD, starts configuration, status sync, category finish, c
 
 ## UI surfaces (UI-POLISH)
 
+- The event page protocol renders each displayed section as one self-contained block: a header with the section title, range subtitle, participant count and race marker, then its creation action or multi-stage race panel, then its own final protocol table. There is no shared «Итоговый протокол» collapse across age categories. «Возрастные категории», «Завершить гонку» and the compact/full control stay once above the blocks of each protocol category. The creation button sits in the header of an eligible simple block; a race panel sits under its block header and its table appears after the race is `DONE`.
+
 - Event page “Старты” renders one block per start (label, purpose, formats, laps, total distance). With a map link the starts and “Карта трассы” cards share the upper row; the map keeps at least its base height and stretches with the starts card. Without a map the starts card is full width. The free-form event description is titled “Положение о мероприятии”, sits in a separate full-width card below, grows with its text (no fixed height or inner scroll), and its admin textarea auto-sizes.
 - Event characteristics use a horizontal key–value layout (labels and values on the same row, wrapping only when needed).
 - Each start may carry an optional `routeColor` from the fixed palette `BLUE` (119,119,255), `ORANGE` (255,153,85), `CYAN` (0,255,255), `RED` (255,119,119), `MAGENTA` (255,119,255), `YELLOW` (238,238,85). The start card header is tinted with that colour at 50% opacity; no colour keeps the default header. Colour is editable with enrollments and is presentation-only.
