@@ -1,6 +1,6 @@
 ---
 type: domain
-updated: 2026-11-08
+updated: 2026-11-10
 ---
 
 # Domain: results
@@ -25,6 +25,8 @@ Authoritative race outcomes and timing for an enrollment; protocol place on read
 
 - `ResultResponseDto`: `id`, `enrollmentId`, `registrationId`, `outcome`, `timeMilliseconds` (nullable), timestamps.
 - Protocol place is **computed on read** per gender × start × format for comparable `FINISHED` results; DNS/DNF/DSQ and REGISTERED without a result are listed with `place === null`; WITHDRAWN is absent.
+- When a protocol category has an age-category configuration, the same rule applies inside each configured age category: comparisons stay inside `start × format × gender × CATEGORY_n`, and `REMAINDER` and `NO_BIRTH_YEAR` form their own standings lists, each with its own places. Ties share a place and skip the next, and unplaced outcomes keep `place === null`. Updated [events.md](events.md#age-categories-age-categories).
+- Stored `Result.place` snapshots remain non-authoritative and are never touched by enabling, changing or disabling a configuration; they are not shown as the protocol place of a configured category.
 - `Enrollment.status` is only `REGISTERED` | `WITHDRAWN`; race outcomes live on `Result.outcome`.
 
 ## Code
@@ -38,3 +40,5 @@ Authoritative race outcomes and timing for an enrollment; protocol place on read
 - Registration-scoped result path reintroduced as writable.
 - Stored place treated as authoritative instead of computed.
 - `laps[]` accepted on the enrollment result route.
+- An age-category configuration changing stored place snapshots instead of only the computed read model.
+- Ranking ignoring the age-category boundary when a protocol category is configured.

@@ -111,7 +111,6 @@ export function ClassCompetitionPanel({
     if (!canManage || !registrationClosed || !classGender || categoryHasResults) return null;
     return (
       <Button
-        style={{ marginBottom: 12 }}
         loading={pending === 'create'}
         onClick={() =>
           run(

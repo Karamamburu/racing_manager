@@ -141,6 +141,9 @@ export type EventParticipant = {
   isCupEligible: boolean;
   note: string | null;
   registeredAt: string;
+  sectionId: string;
+  /** Derived from the birth year with the unchanged season rule; additive. */
+  ageGroupId?: AgeGroupId | null;
 };
 
 export type EnrollmentInputRequest = {
@@ -160,6 +163,46 @@ export type EnrollmentResponse = {
 export type ResultOutcome = 'FINISHED' | 'DNS' | 'DNF' | 'DSQ';
 
 export type GenderCode = 'M' | 'F';
+
+export type AgeGroupId =
+  | 'AGE_LE_14'
+  | 'AGE_15_16'
+  | 'AGE_17_18'
+  | 'AGE_19_20'
+  | 'AGE_21_23'
+  | 'AGE_24_40'
+  | 'AGE_41_50'
+  | 'AGE_51_60'
+  | 'AGE_61_PLUS';
+
+export type AgeCategoryRef = {
+  id: string;
+  number: number;
+  title: string;
+  subtitle: string;
+  groupIds: AgeGroupId[];
+};
+
+export type AgeSplitRef = {
+  startId: string;
+  formatId: number;
+  gender: string;
+  enabled: boolean;
+  /** Ordered age categories of the configuration; empty when disabled. */
+  categories: AgeCategoryRef[];
+};
+
+export type SetAgeCategoryRequest = {
+  groupIds: AgeGroupId[];
+};
+
+export type SetAgeCategoriesRequest = {
+  gender: GenderCode;
+  startId: string;
+  formatId: number;
+  enabled: boolean;
+  categories: SetAgeCategoryRequest[];
+};
 
 export type CreateRegistrationRequest = {
   firstName?: string;
@@ -247,6 +290,7 @@ export type EventDetails = {
   registrations: EventParticipant[] | null;
   registeredCount: number;
   finishedCategories: CategoryFinishRef[];
+  ageSplits?: AgeSplitRef[];
 };
 
 export type CategoryFinishRef = {

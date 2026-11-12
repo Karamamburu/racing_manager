@@ -44,7 +44,25 @@ import { categoryIsFinished } from './category-finish';
 import { parseEventDateRange } from './parse-event-date-range';
 import { parseUpdateEventStatusBody } from './parse-update-event-status';
 import { logEvent } from '../logging/log-event';
-import { rankEnrollments } from './rank-registrations';
+import { rankEnrollments, type RankableEnrollment } from './rank-registrations';
+import {
+  ageGroupFor,
+  categoriesFromStoredRows,
+  categoryForBirthYear,
+  categorySectionId,
+  categorySubtitle,
+  categoryTitle,
+  convertLegacySections,
+  isStoredSectionId,
+  normalizeAgeCategories,
+  resolveControlYear,
+  type AgeCategory,
+  type AgeCategorySectionId,
+  type AgeGroupId,
+  type AgeSectionId,
+  type StoredAgeSection,
+} from './age-groups';
+import type { AgeCategoriesRef } from './age-split.service';
 
 export type ParticipationFormatDto = {
   id: number;
@@ -148,6 +166,7 @@ export type EventDetails = {
   registrations: EventParticipant[] | null;
   registeredCount: number;
   finishedCategories: CategoryFinishRef[];
+  ageSplits?: AgeCategoriesRef[];
 };
 
 export type CategoryFinishRef = {
@@ -180,6 +199,8 @@ export type EventParticipant = {
   isCupEligible: boolean;
   note: string | null;
   registeredAt: string;
+  sectionId: string;
+  ageGroupId: AgeGroupId | null;
 };
 
 type DecimalValue = { toString(): string } | null;
@@ -307,6 +328,28 @@ type EventOwnerRow = {
   status: string;
 };
 
+type StoredAgeSplitRow = {
+  startId: string;
+  formatId: number;
+  gender: string;
+  sectionId: string;
+  sectionKind: 'BASE_GROUP' | 'PRESET';
+  sortOrder: number;
+};
+
+type StoredAgeCategoryRow = {
+  startId: string;
+  formatId: number;
+  gender: string;
+  categoryNumber: number;
+  groupId: string;
+};
+
+type StoredClassCompetitionRow = {
+  formatId: number | null;
+  gender: string;
+};
+
 type EventsStore = {
   track: {
     findUnique: (args: {
@@ -340,6 +383,17 @@ type EventsStore = {
   };
   result: {
     deleteMany: (args: { where: object }) => Promise<unknown>;
+  };
+  // Optional in the store shape so unit doubles that predate the age split keep
+  // working; the real `PrismaService` always exposes both delegates.
+  ageSplitSection?: {
+    findMany: (args: object) => Promise<StoredAgeSplitRow[]>;
+  };
+  ageSplitCategory?: {
+    findMany: (args: object) => Promise<StoredAgeCategoryRow[]>;
+  };
+  classCompetition?: {
+    findMany: (args: object) => Promise<StoredClassCompetitionRow[]>;
   };
 };
 
@@ -480,6 +534,142 @@ function mapCatalogStarts(
       registeredCount: start._count?.enrollments ?? 0,
     }))
     .sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id));
+}
+
+const CATEGORY_SECTION_ID = 'CATEGORY';
+const CATEGORY_SECTION_RANK = 0;
+const REMAINDER_SECTION_RANK = 100;
+const NO_BIRTH_YEAR_SECTION_RANK = 101;
+
+type ProtocolSectionContext = {
+  categoriesByCategory: Map<string, AgeCategory[]>;
+  suppressedKeys: Set<string>;
+  controlYear: number;
+};
+
+type ProtocolBaseRow = RankableEnrollment & {
+  registration: StoredRegistration;
+  start: StoredStart;
+  format: StoredFormat | null;
+  sectionId: string;
+  sectionRank: number;
+  ageGroupId: AgeGroupId | null;
+};
+
+type ProtocolRow = ProtocolBaseRow & { place: number | null };
+
+type ProtocolView = {
+  registrations: EventParticipant[];
+  ageSplits: AgeCategoriesRef[];
+};
+
+function categoryKey(
+  startId: string,
+  formatId: number,
+  gender: string,
+): string {
+  return `${startId}:${formatId}:${gender}`;
+}
+
+function bracketKey(formatId: number, gender: string): string {
+  return `${formatId}:${gender}`;
+}
+
+function isStoredAgeSectionId(value: string): value is AgeSectionId {
+  return isStoredSectionId(value);
+}
+
+function toStoredAgeSection(row: StoredAgeSplitRow): StoredAgeSection | null {
+  if (!isStoredAgeSectionId(row.sectionId)) {
+    return null;
+  }
+  return {
+    sectionId: row.sectionId,
+    sectionKind: row.sectionKind,
+    sortOrder: row.sortOrder,
+  };
+}
+
+function groupStoredSections(
+  rows: readonly StoredAgeSplitRow[],
+): Map<string, StoredAgeSection[]> {
+  const grouped = new Map<string, StoredAgeSection[]>();
+  for (const row of rows) {
+    const section = toStoredAgeSection(row);
+    if (!section) continue;
+    const key = categoryKey(row.startId, row.formatId, row.gender);
+    const sections = grouped.get(key);
+    if (sections) sections.push(section);
+    else grouped.set(key, [section]);
+  }
+  for (const sections of grouped.values()) {
+    sections.sort((left, right) => left.sortOrder - right.sortOrder);
+  }
+  return grouped;
+}
+
+function groupStoredCategories(
+  rows: readonly StoredAgeCategoryRow[],
+): Map<string, StoredAgeCategoryRow[]> {
+  const grouped = new Map<string, StoredAgeCategoryRow[]>();
+  for (const row of rows) {
+    const key = categoryKey(row.startId, row.formatId, row.gender);
+    const categoryRows = grouped.get(key);
+    if (categoryRows) categoryRows.push(row);
+    else grouped.set(key, [row]);
+  }
+  return grouped;
+}
+
+/**
+ * A protocol category reads its saved category rows when it has any, and falls
+ * back to the legacy section rows only for categories without them. A category
+ * whose input converts to nothing is read as unsplit.
+ */
+function categoriesByCategory(
+  newRows: readonly StoredAgeCategoryRow[],
+  legacyRows: readonly StoredAgeSplitRow[],
+): Map<string, AgeCategory[]> {
+  const newByCategory = groupStoredCategories(newRows);
+  const legacyByCategory = groupStoredSections(legacyRows);
+  const categories = new Map<string, AgeCategory[]>();
+  for (const key of new Set([
+    ...newByCategory.keys(),
+    ...legacyByCategory.keys(),
+  ])) {
+    const storedRows = newByCategory.get(key);
+    const resolved =
+      storedRows && storedRows.length > 0
+        ? normalizeAgeCategories(categoriesFromStoredRows(storedRows))
+        : convertLegacySections(legacyByCategory.get(key) ?? []);
+    if (resolved.length > 0) {
+      categories.set(key, resolved);
+    }
+  }
+  return categories;
+}
+
+function sectionRankFor(sectionId: AgeCategorySectionId): number {
+  if (sectionId === 'REMAINDER') return REMAINDER_SECTION_RANK;
+  if (sectionId === 'NO_BIRTH_YEAR') return NO_BIRTH_YEAR_SECTION_RANK;
+  return Number(sectionId.slice('CATEGORY_'.length));
+}
+
+function toProtocolGender(gender: string): 'M' | 'F' {
+  return gender === 'F' ? 'F' : 'M';
+}
+
+function compareProtocolRows(left: ProtocolRow, right: ProtocolRow): number {
+  return (
+    left.gender.localeCompare(right.gender) ||
+    left.start.sortOrder - right.start.sortOrder ||
+    (left.format?.sortOrder ?? 0) - (right.format?.sortOrder ?? 0) ||
+    left.sectionRank - right.sectionRank ||
+    (left.place ?? Number.POSITIVE_INFINITY) -
+      (right.place ?? Number.POSITIVE_INFINITY) ||
+    (left.startNumber ?? Number.POSITIVE_INFINITY) -
+      (right.startNumber ?? Number.POSITIVE_INFINITY)
+  );
 }
 
 @Injectable()
@@ -825,11 +1015,47 @@ export class EventsService {
       throw new NotFoundException('Event not found.');
     }
 
-    const finishedCategories = await this.prisma.categoryFinish.findMany({
-      where: { eventId: id },
-      select: { startId: true, formatId: true, gender: true },
-      orderBy: [{ startId: 'asc' }, { formatId: 'asc' }, { gender: 'asc' }],
-    });
+    const hasStarts = (event.starts ?? []).length > 0;
+    const readsAgeCategories = includeRegistrations && hasStarts;
+
+    const [
+      finishedCategories,
+      storedSections,
+      storedCategories,
+      classCompetitions,
+    ] = await Promise.all([
+      this.prisma.categoryFinish.findMany({
+        where: { eventId: id },
+        select: { startId: true, formatId: true, gender: true },
+        orderBy: [{ startId: 'asc' }, { formatId: 'asc' }, { gender: 'asc' }],
+      }),
+      readsAgeCategories
+        ? this.readStoredAgeSections(id)
+        : Promise.resolve<StoredAgeSplitRow[]>([]),
+      readsAgeCategories
+        ? this.readStoredAgeCategories(id)
+        : Promise.resolve<StoredAgeCategoryRow[]>([]),
+      readsAgeCategories
+        ? this.readClassCompetitions(id)
+        : Promise.resolve<StoredClassCompetitionRow[]>([]),
+    ]);
+
+    const protocol = event.registrations
+      ? this.toProtocolParticipants(event.registrations, {
+          categoriesByCategory: categoriesByCategory(
+            storedCategories,
+            storedSections,
+          ),
+          suppressedKeys: new Set(
+            classCompetitions.flatMap((row) =>
+              row.formatId === null
+                ? []
+                : [bracketKey(row.formatId, row.gender)],
+            ),
+          ),
+          controlYear: resolveControlYear(event.eventDate),
+        })
+      : null;
 
     return {
       id: event.id,
@@ -859,12 +1085,67 @@ export class EventsService {
       formats: mapEventFormats(event.eventFormats),
       laps: mapEventLaps(event.laps),
       starts: mapEventStarts(event.starts),
-      registrations: event.registrations
-        ? this.toProtocolParticipants(event.registrations)
-        : null,
+      registrations: protocol ? protocol.registrations : null,
       registeredCount: event._count.registrations,
       finishedCategories,
+      ageSplits: protocol && hasStarts ? protocol.ageSplits : undefined,
     };
+  }
+
+  private async readStoredAgeSections(
+    eventId: string,
+  ): Promise<StoredAgeSplitRow[]> {
+    const rows = await this.store.ageSplitSection?.findMany({
+      where: { eventId },
+      select: {
+        startId: true,
+        formatId: true,
+        gender: true,
+        sectionId: true,
+        sectionKind: true,
+        sortOrder: true,
+      },
+      orderBy: [
+        { startId: 'asc' },
+        { formatId: 'asc' },
+        { gender: 'asc' },
+        { sortOrder: 'asc' },
+      ],
+    });
+    return rows ?? [];
+  }
+
+  private async readStoredAgeCategories(
+    eventId: string,
+  ): Promise<StoredAgeCategoryRow[]> {
+    const rows = await this.store.ageSplitCategory?.findMany({
+      where: { eventId },
+      select: {
+        startId: true,
+        formatId: true,
+        gender: true,
+        categoryNumber: true,
+        groupId: true,
+      },
+      orderBy: [
+        { startId: 'asc' },
+        { formatId: 'asc' },
+        { gender: 'asc' },
+        { categoryNumber: 'asc' },
+        { groupId: 'asc' },
+      ],
+    });
+    return rows ?? [];
+  }
+
+  private async readClassCompetitions(
+    eventId: string,
+  ): Promise<StoredClassCompetitionRow[]> {
+    const rows = await this.store.classCompetition?.findMany({
+      where: { eventId },
+      select: { formatId: true, gender: true },
+    });
+    return rows ?? [];
   }
 
   async finishCategory(
@@ -1686,84 +1967,183 @@ export class EventsService {
 
   private toProtocolParticipants(
     registrations: StoredRegistration[],
-  ): EventParticipant[] {
-    const rows = registrations.flatMap((registration) =>
+    context: ProtocolSectionContext,
+  ): ProtocolView {
+    const rows: ProtocolBaseRow[] = registrations.flatMap((registration) =>
       (registration.enrollments ?? [])
         .filter((enrollment) => enrollment.status === 'REGISTERED')
-        .map((enrollment) => ({
-          enrollmentId: enrollment.id,
-          registrationId: registration.id,
-          startId: enrollment.startId,
-          formatId: enrollment.formatId,
-          gender: registration.gender,
-          startNumber: registration.startNumber,
-          registeredAt: registration.registeredAt,
-          outcome: enrollment.result?.outcome ?? null,
-          timeMilliseconds: enrollment.result?.timeMilliseconds ?? null,
-          enrollmentStatus: enrollment.status,
-          registration,
-          start: enrollment.start,
-          format:
-            enrollment.start.formats.find(
-              (row) => row.format.id === enrollment.formatId,
-            )?.format ?? null,
-        })),
+        .map((enrollment) => {
+          const placement = this.resolveProtocolSection(
+            enrollment.startId,
+            enrollment.formatId,
+            registration.gender,
+            registration.birthYear,
+            context,
+          );
+          return {
+            enrollmentId: enrollment.id,
+            registrationId: registration.id,
+            startId: enrollment.startId,
+            formatId: enrollment.formatId,
+            gender: registration.gender,
+            startNumber: registration.startNumber,
+            registeredAt: registration.registeredAt,
+            outcome: enrollment.result?.outcome ?? null,
+            timeMilliseconds: enrollment.result?.timeMilliseconds ?? null,
+            enrollmentStatus: enrollment.status,
+            registration,
+            start: enrollment.start,
+            format:
+              enrollment.start.formats.find(
+                (row) => row.format.id === enrollment.formatId,
+              )?.format ?? null,
+            sectionId: placement.sectionId,
+            sectionRank: placement.sectionRank,
+            ageGroupId: ageGroupFor(
+              registration.birthYear,
+              context.controlYear,
+            ),
+          };
+        }),
     );
 
-    const ranked = rankEnrollments(rows);
-    return ranked
-      .map(({ enrollment, place }) => {
-        const registration = enrollment.registration;
-        const start = enrollment.start;
-        return {
-          id: registration.id,
-          enrollmentId: enrollment.enrollmentId,
-          startId: enrollment.startId,
-          startLabel: resolveStartLabel({
-            purposeType: start.purposeType as StartPurposeTypeCode,
-            lapCount: start.lapCount,
-            lapLengthMeters: start.lapLengthMeters,
-            legacyEffectiveDistanceM: start.legacyEffectiveDistanceM,
-            displayName: start.displayName,
-          }),
-          sortOrder: start.sortOrder,
-          enrollmentStatus: enrollment.enrollmentStatus,
-          userId: registration.userId,
-          fullName: this.formatPersonName(
-            registration.firstName,
-            registration.lastName,
-            'Участник',
-          ),
-          birthYear: registration.birthYear,
-          gender: registration.gender,
-          city: registration.city,
-          district: registration.district,
-          team: registration.team,
-          startNumber: registration.startNumber,
-          finishTimeMs:
-            enrollment.outcome === 'FINISHED'
-              ? enrollment.timeMilliseconds
-              : null,
-          outcome: enrollment.outcome,
-          place,
-          format: enrollment.format ? toFormatRef(enrollment.format) : null,
-          laps: [],
-          status: registration.status,
-          isCupEligible: start.purposeType === 'CUP_RACE',
-          note: registration.note,
-          registeredAt: registration.registeredAt.toISOString(),
-        };
-      })
-      .sort(
-        (left, right) =>
-          String(left.gender ?? '').localeCompare(String(right.gender ?? '')) ||
-          left.sortOrder - right.sortOrder ||
-          (left.format?.sortOrder ?? 0) - (right.format?.sortOrder ?? 0) ||
-          (left.place ?? Number.POSITIVE_INFINITY) -
-            (right.place ?? Number.POSITIVE_INFINITY) ||
-          (left.startNumber ?? Number.POSITIVE_INFINITY) -
-            (right.startNumber ?? Number.POSITIVE_INFINITY),
-      );
+    const placeByEnrollmentId = new Map<string, number | null>();
+    for (const bucket of this.bucketBySection(rows).values()) {
+      for (const ranked of rankEnrollments(bucket)) {
+        placeByEnrollmentId.set(ranked.enrollment.enrollmentId, ranked.place);
+      }
+    }
+
+    const ordered = rows
+      .map((row) => ({
+        ...row,
+        place: placeByEnrollmentId.get(row.enrollmentId) ?? null,
+      }))
+      .sort(compareProtocolRows);
+
+    return {
+      registrations: ordered.map((row) => this.toParticipant(row)),
+      ageSplits: this.toAgeSplits(ordered, context),
+    };
+  }
+
+  /**
+   * Places are recomputed per section, so every row is ranked inside its own
+   * `start × format × gender × section` bucket.
+   */
+  private bucketBySection(
+    rows: ProtocolBaseRow[],
+  ): Map<string, ProtocolBaseRow[]> {
+    const buckets = new Map<string, ProtocolBaseRow[]>();
+    for (const row of rows) {
+      const key = `${row.startId}:${row.formatId}:${row.gender}:${row.sectionId}`;
+      const bucket = buckets.get(key);
+      if (bucket) bucket.push(row);
+      else buckets.set(key, [row]);
+    }
+    return buckets;
+  }
+
+  private resolveProtocolSection(
+    startId: string,
+    formatId: number,
+    gender: string,
+    birthYear: number | null,
+    context: ProtocolSectionContext,
+  ): { sectionId: string; sectionRank: number } {
+    const categories = context.categoriesByCategory.get(
+      categoryKey(startId, formatId, gender),
+    );
+    if (
+      !categories ||
+      categories.length === 0 ||
+      context.suppressedKeys.has(bracketKey(formatId, gender))
+    ) {
+      return {
+        sectionId: CATEGORY_SECTION_ID,
+        sectionRank: CATEGORY_SECTION_RANK,
+      };
+    }
+
+    const sectionId = categoryForBirthYear(
+      birthYear,
+      context.controlYear,
+      categories,
+    );
+    return {
+      sectionId,
+      sectionRank: sectionRankFor(sectionId),
+    };
+  }
+
+  private toParticipant(row: ProtocolRow): EventParticipant {
+    const registration = row.registration;
+    const start = row.start;
+    return {
+      id: registration.id,
+      enrollmentId: row.enrollmentId,
+      startId: row.startId,
+      startLabel: resolveStartLabel({
+        purposeType: start.purposeType as StartPurposeTypeCode,
+        lapCount: start.lapCount,
+        lapLengthMeters: start.lapLengthMeters,
+        legacyEffectiveDistanceM: start.legacyEffectiveDistanceM,
+        displayName: start.displayName,
+      }),
+      sortOrder: start.sortOrder,
+      enrollmentStatus: row.enrollmentStatus,
+      userId: registration.userId,
+      fullName: this.formatPersonName(
+        registration.firstName,
+        registration.lastName,
+        'Участник',
+      ),
+      birthYear: registration.birthYear,
+      gender: registration.gender,
+      city: registration.city,
+      district: registration.district,
+      team: registration.team,
+      startNumber: registration.startNumber,
+      finishTimeMs: row.outcome === 'FINISHED' ? row.timeMilliseconds : null,
+      outcome: row.outcome,
+      place: row.place,
+      format: row.format ? toFormatRef(row.format) : null,
+      laps: [],
+      status: registration.status,
+      isCupEligible: start.purposeType === 'CUP_RACE',
+      note: registration.note,
+      registeredAt: registration.registeredAt.toISOString(),
+      sectionId: row.sectionId,
+      ageGroupId: row.ageGroupId,
+    };
+  }
+
+  private toAgeSplits(
+    rows: readonly ProtocolRow[],
+    context: ProtocolSectionContext,
+  ): AgeCategoriesRef[] {
+    const seen = new Set<string>();
+    const splits: AgeCategoriesRef[] = [];
+    for (const row of rows) {
+      const key = categoryKey(row.startId, row.formatId, row.gender);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const categories = context.categoriesByCategory.get(key) ?? [];
+      splits.push({
+        startId: row.startId,
+        formatId: row.formatId,
+        gender: toProtocolGender(row.gender),
+        enabled: categories.length > 0,
+        categories: categories.map((category) => ({
+          id: categorySectionId(category.number),
+          number: category.number,
+          title: categoryTitle(category.number),
+          subtitle: categorySubtitle(category.groupIds),
+          groupIds: [...category.groupIds],
+        })),
+      });
+    }
+    return splits;
   }
 
   private formatPersonName(

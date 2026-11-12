@@ -1,11 +1,13 @@
 import { AxiosError } from 'axios';
 import { apiClient } from '../../shared/api/ApiClient';
 import type {
+  AgeSplitRef,
   CreatedEventResponse,
   CreateEventRequest,
   EventDetails,
   ParticipationFormat,
   RecentEventRow,
+  SetAgeCategoriesRequest,
   SportCode,
 } from '../../shared/types/event';
 
@@ -64,6 +66,17 @@ export class EventsService {
     payload: { startId?: string; formatId: number | null; gender: 'M' | 'F' },
   ): Promise<EventDetails> {
     return apiClient.post<EventDetails>(`/admin/events/${id}/categories/finish`, payload);
+  }
+
+  public async setAgeSplit(
+    eventId: string,
+    payload: SetAgeCategoriesRequest,
+  ): Promise<AgeSplitRef> {
+    const result = await apiClient.putResult<AgeSplitRef>(
+      `/admin/events/${eventId}/categories/age-split`,
+      payload,
+    );
+    return result.data;
   }
 
   public getStatus(error: unknown): number | undefined {
