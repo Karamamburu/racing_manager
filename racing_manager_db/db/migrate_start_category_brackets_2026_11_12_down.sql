@@ -27,7 +27,7 @@ ALTER TABLE class_competitions
   DROP COLUMN IF EXISTS captured_enrollment_ids,
   DROP COLUMN IF EXISTS captured_registration_ids;
 
-CREATE UNIQUE INDEX class_competitions_event_class
-  ON class_competitions (event_id, gender, COALESCE(format_id, -1));
+CREATE UNIQUE INDEX IF NOT EXISTS class_competitions_event_format_gender_key
+  ON class_competitions (event_id, format_id, gender);
 
 COMMIT;

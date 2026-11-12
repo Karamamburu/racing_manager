@@ -20,6 +20,7 @@ ALTER TABLE class_competitions
   ADD COLUMN IF NOT EXISTS captured_registration_ids TEXT[] NOT NULL DEFAULT '{}';
 
 DROP INDEX IF EXISTS class_competitions_event_class;
+DROP INDEX IF EXISTS class_competitions_event_format_gender_key;
 
 -- Backfill every existing race as a whole-category race bound to the event's
 -- single start or, when there are several, the start with the lowest sort order.

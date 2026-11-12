@@ -105,3 +105,7 @@ The event protocol now renders each displayed section as one self-contained bloc
 ## 2026-11-12 — CATEGORY-COLLAPSE
 
 Each self-contained category block in the event protocol now has a header collapse control. Collapsing hides the block's race panel and protocol table while the header, title, range, count, race marker, creation action and category-wide controls stay visible; expanding restores the block. This makes a finished or idle category easier to fold away. Presentation-only; no API, schema or domain behavior changed. Updated [domains/events.md](domains/events.md).
+
+## 2026-11-12 — START-CATEGORY-BRACKETS legacy unique index fix
+
+A second multi-stage race in the same start but a different age section failed with 409 «уже создана». The database still carried Prisma's legacy unique index `class_competitions_event_format_gender_key` on `(event_id, format_id, gender)`, while the scoped identity index allows one race per `(event, start, format, gender, target_key)`. Added `db/migrate_start_category_brackets_2026_11_12_drop_legacy_unique.sql` (and its down file) and included both legacy index names in the original migration's drop step.
