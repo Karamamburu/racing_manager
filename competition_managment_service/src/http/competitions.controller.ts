@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
 import { CompetitionsService } from '../persistence/competitions.service';
 import {
   parseCreateCompetitionBody,
@@ -22,6 +22,11 @@ export class CompetitionsController {
   @Get(':id')
   get(@Param('id') id: string) {
     return this.competitions.getById(id);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.competitions.delete(id);
   }
 
   @Get(':id/plan')

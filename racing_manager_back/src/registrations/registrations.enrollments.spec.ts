@@ -175,6 +175,9 @@ function makeHarness(options: HarnessOptions = {}) {
     registration: tx.registration,
     enrollment: tx.enrollment,
     result: tx.result,
+    classCompetition: {
+      findFirst: jest.fn(() => Promise.resolve(null)),
+    },
     $transaction: jest.fn((work: (client: typeof tx) => Promise<unknown>) =>
       work(tx),
     ),

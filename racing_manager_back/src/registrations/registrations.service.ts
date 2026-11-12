@@ -554,6 +554,41 @@ export class RegistrationsService {
         ? this.resolveEnrollments(event, parsed.enrollments)
         : null;
 
+    if (parsed.startNumber !== undefined) {
+      const enrolled = await this.prisma.enrollment.findMany({
+        where: { registrationId: existing.id },
+        select: { startId: true, formatId: true },
+      });
+      const [captured, wholeRace] = await Promise.all([
+        this.prisma.classCompetition.findFirst({
+          where: {
+            eventId,
+            capturedRegistrationIds: { has: existing.id },
+          },
+          select: { id: true },
+        }),
+        enrolled.length === 0
+          ? Promise.resolve(null)
+          : this.prisma.classCompetition.findFirst({
+              where: {
+                eventId,
+                targetWholeCategory: true,
+                gender: existing.gender as 'M' | 'F',
+                OR: enrolled.map((item) => ({
+                  startId: item.startId,
+                  formatId: item.formatId,
+                })),
+              },
+              select: { id: true },
+            }),
+      ]);
+      if (captured || wholeRace) {
+        throw new BadRequestException(
+          'Стартовый номер нельзя менять, пока участник выступает в многоэтапной гонке.',
+        );
+      }
+    }
+
     try {
       const updated = await this.prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM registrations WHERE id = ${existing.id}::uuid FOR UPDATE`;

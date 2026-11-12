@@ -1,6 +1,6 @@
 ---
 type: domain
-updated: 2026-11-11
+updated: 2026-11-12
 ---
 
 # Domain: events
@@ -31,6 +31,8 @@ Event catalog, admin CRUD, starts configuration, status sync, category finish, c
 
 ## UI surfaces (UI-POLISH)
 
+- The event page protocol renders each displayed section as one self-contained block: a header with the section title, range subtitle, participant count and race marker, then its creation action or multi-stage race panel, then its own final protocol table. There is no shared «Итоговый протокол» collapse across age categories. Each block also has its own collapse control in the header; collapsing a block hides its race panel and protocol table while the header, count and controls stay visible, so a finished or idle category can be folded away. «Возрастные категории», «Завершить гонку» and the compact/full control stay once above the blocks of each protocol category. The creation button sits in the header of an eligible simple block; a race panel sits under its block header and its table appears after the race is `DONE`.
+
 - Event page “Старты” renders one block per start (label, purpose, formats, laps, total distance). With a map link the starts and “Карта трассы” cards share the upper row; the map keeps at least its base height and stretches with the starts card. Without a map the starts card is full width. The free-form event description is titled “Положение о мероприятии”, sits in a separate full-width card below, grows with its text (no fixed height or inner scroll), and its admin textarea auto-sizes.
 - Event characteristics use a horizontal key–value layout (labels and values on the same row, wrapping only when needed).
 - Each start may carry an optional `routeColor` from the fixed palette `BLUE` (119,119,255), `ORANGE` (255,153,85), `CYAN` (0,255,255), `RED` (255,119,119), `MAGENTA` (255,119,255), `YELLOW` (238,238,85). The start card header is tinted with that colour at 50% opacity; no colour keeps the default header. Colour is editable with enrollments and is presentation-only.
@@ -49,6 +51,8 @@ Event catalog, admin CRUD, starts configuration, status sync, category finish, c
 
 Every row also carries additive `ageGroupId`: the participant's base age group (`AGE_LE_14` … `AGE_61_PLUS`) or `null` when the birth year is unusable (see the Age categories section below).
 
+Every row also carries additive `raceId` and `raceRole` (`CAPTURED` | `OUTSIDE_RACE`, or null). `raceId` names the multi-stage race section that displays the row; `sectionId` keeps its configuration-derived meaning and is not used to route a race row.
+
 `ageSplits?: AgeSplitRef[]` adds the stored configuration per protocol category: `enabled` plus the ordered `categories[]`, each with `id` (`CATEGORY_1`…`CATEGORY_9`), `number`, `title` («Категория N»), `subtitle` (member ranges such as `15–16, 17–18`) and `groupIds[]`. Every row carries `sectionId`: `CATEGORY_n` for a configured age category, `REMAINDER` or `NO_BIRTH_YEAR` for the implicit ones, and `CATEGORY` when the protocol category is unsplit. `place` is age-category-scoped when the category is configured and keeps today's category-wide value otherwise.
 
 ## Age categories (AGE-CATEGORIES)
@@ -66,7 +70,7 @@ A protocol category (`event × gender × start × format`) may carry one **age-c
 - Places restart inside every age category (and inside `REMAINDER` / `NO_BIRTH_YEAR`) with today's rules; see [results.md](results.md).
 - The dialog never changes the protocol: a reset or a save creates, deletes, moves or modifies no participation, enrollment, result or category finish and rewrites no stored place snapshot. Rendering of a saved configuration is unchanged: headings «Категория {number}» with the range subtitle, age-based order, per-category places from 1, the implicit «Остальные участники» and «Возраст не указан», one «Итоговый протокол» collapse, one compact/full toggle and one finish per protocol category.
 - «Завершить гонку» stays one action per gender × start × format over the full category row set, and the configuration adds no age dimension to its uniqueness. Changes are allowed before results, after results and after the finish: only displayed places are recomputed, while the finish tag, row-editing lock and stored `Result.place` snapshots stay as they are. One «Итоговый протокол» collapse and one compact/full toggle stay per protocol category.
-- A category owned by a class competition keeps the stored configuration but is rendered unsplit while the bracket exists; it applies on the next read after the bracket is removed. The dialog states that the stored configuration is not applied meanwhile.
+- A category owned by a whole-category class competition keeps the stored configuration but is rendered unsplit while that bracket exists; it applies on the next read after the bracket is removed. A section-scoped race suppresses nothing: sibling configured sections stay visible and editable. The dialog states which sections are owned by races and that their captured participants will not move.
 - Only administrators and organizers get the control; other viewers receive the configuration read-only. The control is offered only for a protocol category with at least one row: a configuration retained on a temporarily empty category is not applied and comes back with the rows.
 - Legacy events without starts keep the gender → format protocol, receive no `ageSplits` and cannot be configured.
 - Read model: `EventParticipant.ageGroupId` (one of the nine group ids or `null`) is additive and present on every protocol row — split, suppressed, unsplit and legacy gender → format protocols — derived with the unchanged season/control-year rule (1 July – 30 June, `controlYear` from the event date in `Europe/Moscow`, age = `controlYear − birthYear`) and independent of the stored configuration. Every existing field keeps its name, type and meaning; a client that ignores the new value renders as before. An unsplit category reports `enabled: false`, an empty `categories` array and `CATEGORY` on every row.
@@ -114,6 +118,7 @@ A protocol category (`event × gender × start × format`) may carry one **age-c
 - `place` becoming a stored snapshot for configured categories.
 - An age-category mutation touching registrations, enrollments, results or category finishes.
 - Finish uniqueness gaining an age dimension.
-- The configuration applied while a class competition exists for the category.
+- The configuration applied while a whole-category class race exists, or a section race suppressing a sibling section.
+- `raceId` / `raceRole` missing from protocol rows, or a row routed by a stored `CATEGORY_n`.
 - A base group silently dropped from the protocol (a row rendered twice or not at all).
 - A new required response field breaking clients that ignore `sectionId` / `ageSplits`.

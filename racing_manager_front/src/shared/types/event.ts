@@ -144,6 +144,9 @@ export type EventParticipant = {
   sectionId: string;
   /** Derived from the birth year with the unchanged season rule; additive. */
   ageGroupId?: AgeGroupId | null;
+  /** Race that displays this row, or null for a simple section. */
+  raceId?: string | null;
+  raceRole?: 'CAPTURED' | 'OUTSIDE_RACE' | null;
 };
 
 export type EnrollmentInputRequest = {

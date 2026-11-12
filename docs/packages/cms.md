@@ -1,6 +1,6 @@
 ---
 type: package
-updated: 2026-11-03
+updated: 2026-11-12
 ---
 
 # Package: competition_managment_service (CMS)
@@ -23,6 +23,8 @@ Defaults: preferred heat size 6, max 8. Preset `knockout-24` remains; prefer pla
 
 - Stateless: formats validate, plans propose/revise, start-lists, advance.
 - Persisted: competitions CRUD, plan snapshot, stage start-lists / heats / advance.
+- `DELETE /v1/competitions/:id` exists only as creation compensation for the main API's section-scoped races; the product exposes no race-deletion action.
+- Main API passes one competition per `start × format × gender × frozen age membership`, so the CMS never receives a coalesced multi-start or cross-category field.
 
 Main app maps class competitions under `racing_manager_back` `class-competitions` module. Entity bridge: [class-competition](../entities/class-competition.md).
 

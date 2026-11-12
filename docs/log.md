@@ -93,3 +93,19 @@ Wired kit skill `functional-analysis`: English `Tasks/<KEY>/PRD.md` (problem, ac
 ## [2026-11-03] ingest | Initial codebase compilation
 
 Seeded Karpathy-style wiki under `docs/`: SCHEMA, raw catalog, overview, packages, entities, concepts, domains, INDEX. Wired root `AGENTS.md` and `.cursor/rules/project-knowledge.mdc`. Sources: package READMEs, Prisma schema enums/models, Nest controllers, front layout, infra docs pointers.
+
+## 2026-11-12 — START-CATEGORY-BRACKETS
+
+Shipped multi-stage races scoped to one start and one displayed age section. A race is identified by `event × start × format × gender × frozen target membership` (whole `CATEGORY`, exact base-group set, `REMAINDER`, or `NO_BIRTH_YEAR`), never by a positional `CATEGORY_n`. The field is captured once from the race's own start; configuration saves never move a row into or out of a race. Several races coexist in one protocol category; a `CATEGORY` race is allowed only when unsplit and alone. Protocol rows gained additive `raceId` / `raceRole`; a section race suppresses nothing, while a whole-category race suppresses the split. Ordinary result entry is blocked only for rows displayed in a race section; race heat times write to the race start's enrollment; start numbers are event-wide read-only while a participant appears in any race section. «Завершить гонку» stays per start × format × gender and treats a `DONE` race as complete. Existing races backfill to the single/first start + `CATEGORY`; the migration is idempotent and reports anomalies. Updated [domains/cms.md](domains/cms.md), [domains/events.md](domains/events.md), [domains/results.md](domains/results.md), [entities/class-competition.md](entities/class-competition.md), [packages/cms.md](packages/cms.md). Spec: `specs/start-category-brackets-ears.md`; PRD: `Tasks/START-CATEGORY-BRACKETS/PRD.md`.
+
+## 2026-11-12 — CATEGORY-SELF-CONTAINED
+
+The event protocol now renders each displayed section as one self-contained block: header (title, range subtitle, count, race marker), creation action in the header of an eligible simple block, race panel under the header, and the section's own final protocol table. The shared «Итоговый протокол» collapse is removed. «Возрастные категории», «Завершить гонку» and the compact/full control stay once above the blocks of each protocol category. No API, schema, stored value, place, result, finish or race behaviour changed. Updated [domains/events.md](domains/events.md). Spec: `specs/category-self-contained-ears.md`; PRD: `Tasks/CATEGORY-SELF-CONTAINED/PRD.md`.
+
+## 2026-11-12 — CATEGORY-COLLAPSE
+
+Each self-contained category block in the event protocol now has a header collapse control. Collapsing hides the block's race panel and protocol table while the header, title, range, count, race marker, creation action and category-wide controls stay visible; expanding restores the block. This makes a finished or idle category easier to fold away. Presentation-only; no API, schema or domain behavior changed. Updated [domains/events.md](domains/events.md).
+
+## 2026-11-12 — START-CATEGORY-BRACKETS legacy unique index fix
+
+A second multi-stage race in the same start but a different age section failed with 409 «уже создана». The database still carried Prisma's legacy unique index `class_competitions_event_format_gender_key` on `(event_id, format_id, gender)`, while the scoped identity index allows one race per `(event, start, format, gender, target_key)`. Added `db/migrate_start_category_brackets_2026_11_12_drop_legacy_unique.sql` (and its down file) and included both legacy index names in the original migration's drop step.

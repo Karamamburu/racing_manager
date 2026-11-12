@@ -30,8 +30,10 @@ export type AgeSplitModalProps = {
   value: AgeSplitRef | null;
   /** Participant count per base group; a missing group counts as 0. */
   groupCounts?: Partial<Record<AgeGroupId, number>>;
-  /** A class competition suppresses the stored split. */
+  /** A whole-category class competition suppresses the stored split. */
   notApplied?: boolean;
+  /** Frozen titles of sections owned by a section race. */
+  raceSections?: string[];
   saving?: boolean;
   onClose: () => void;
   onSave: (payload: SetAgeCategoriesRequest) => void | Promise<void>;
@@ -66,6 +68,7 @@ export function AgeSplitModal({
   value,
   groupCounts = {},
   notApplied = false,
+  raceSections = [],
   saving = false,
   onClose,
   onSave,
@@ -318,7 +321,16 @@ export function AgeSplitModal({
           showIcon
           style={{ marginBottom: 16 }}
           message="Категории сохранены, но не применяются"
-          description="Пока для категории существует многоэтапная гонка, протокол выводится без возрастных категорий."
+          description="Пока для категории существует общая многоэтапная гонка, протокол выводится без возрастных категорий."
+        />
+      ) : null}
+      {raceSections.length > 0 ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="В категории уже идут многоэтапные гонки"
+          description={`Сохранение не добавит и не уберёт участников этих гонок: ${raceSections.join(', ')}.`}
         />
       ) : null}
 

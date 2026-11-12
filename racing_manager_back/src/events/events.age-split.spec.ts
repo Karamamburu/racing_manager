@@ -49,8 +49,23 @@ type CategoryRow = CategorySeed & {
 };
 
 type BracketSeed = {
+  id: string;
+  startId: string | null;
   formatId: number | null;
   gender: string;
+  status: string;
+  sectionId: string | null;
+  sectionKind: string | null;
+  targetKey: string;
+  targetGroupIds: string[];
+  targetWholeCategory: boolean;
+  frozenTitle: string | null;
+  frozenSubtitle: string | null;
+  frozenYoungestBound: number | null;
+  frozenMemberBounds: number[];
+  frozenSectionNumber: number | null;
+  capturedEnrollmentIds: string[];
+  capturedRegistrationIds: string[];
 };
 
 type FinishedCategorySeed = {
@@ -65,6 +80,7 @@ type HarnessOptions = {
   sections?: StoredSectionSeed[];
   categories?: CategorySeed[];
   bracketGender?: Gender;
+  brackets?: BracketSeed[];
   finishedCategories?: FinishedCategorySeed[];
 };
 
@@ -148,9 +164,31 @@ function makeHarness(options: HarnessOptions = {}) {
   const starts = options.starts === 'none' ? [] : [startRow()];
   const sectionRows = sectionsFor(options.sections ?? []);
   const categoryRows = categoriesFor(options.categories ?? []);
-  const brackets: BracketSeed[] = options.bracketGender
-    ? [{ formatId: FORMAT_ID, gender: options.bracketGender }]
-    : [];
+  const brackets: BracketSeed[] = options.brackets
+    ? options.brackets
+    : options.bracketGender
+      ? [
+          {
+            id: 'bracket-1',
+            startId: START_ID,
+            formatId: FORMAT_ID,
+            gender: options.bracketGender,
+            status: 'DRAFT',
+            sectionId: 'CATEGORY',
+            sectionKind: 'CATEGORY',
+            targetKey: 'WHOLE',
+            targetGroupIds: [],
+            targetWholeCategory: true,
+            frozenTitle: 'Категория',
+            frozenSubtitle: null,
+            frozenYoungestBound: 0,
+            frozenMemberBounds: [],
+            frozenSectionNumber: null,
+            capturedEnrollmentIds: [],
+            capturedRegistrationIds: [],
+          },
+        ]
+      : [];
   const finishedCategories: FinishedCategorySeed[] =
     options.finishedCategories ?? [];
 
@@ -216,6 +254,8 @@ type ProtocolRowLike = {
   ageGroupId: string | null;
   finishTimeMs?: number | null;
   outcome?: string | null;
+  raceId?: string | null;
+  raceRole?: 'CAPTURED' | 'OUTSIDE_RACE' | null;
 };
 
 function rowOf(rows: ProtocolRowLike[], key: string): ProtocolRowLike {
@@ -687,6 +727,62 @@ describe('EventsService.findById age categories', () => {
     expect(rows.every((row) => row.sectionId === 'CATEGORY')).toBe(true);
   });
 
+  it('keeps a sibling configured section simple-timed beside a section race', async () => {
+    const { service } = makeHarness({
+      people: [
+        {
+          key: 'young',
+          gender: 'M',
+          birthYear: CONTROL_YEAR - 10,
+          startNumber: 1,
+          timeMs: 2_000_000,
+        },
+        {
+          key: 'adult',
+          gender: 'M',
+          birthYear: CONTROL_YEAR - 30,
+          startNumber: 2,
+          timeMs: 1_000_000,
+        },
+      ],
+      categories: [
+        { categoryNumber: 1, groupId: 'AGE_LE_14' },
+        { categoryNumber: 2, groupId: 'AGE_24_40' },
+      ],
+      brackets: [
+        {
+          id: 'bracket-adult',
+          startId: START_ID,
+          formatId: FORMAT_ID,
+          gender: 'M',
+          status: 'IN_PROGRESS',
+          sectionId: 'CATEGORY_2',
+          sectionKind: 'CATEGORY_NUMBER',
+          targetKey: 'GROUPS:AGE_24_40',
+          targetGroupIds: ['AGE_24_40'],
+          targetWholeCategory: false,
+          frozenTitle: 'Категория 2',
+          frozenSubtitle: '24–40',
+          frozenYoungestBound: 24,
+          frozenMemberBounds: [24],
+          frozenSectionNumber: 2,
+          capturedEnrollmentIds: ['enrollment-adult'],
+          capturedRegistrationIds: ['registration-adult'],
+        },
+      ],
+    });
+
+    const event = await service.findById(EVENT_ID, { syncStatuses: false });
+    const rows = event.registrations ?? [];
+
+    expect(rowOf(rows, 'adult').raceId).toBe('bracket-adult');
+    expect(rowOf(rows, 'adult').raceRole).toBe('CAPTURED');
+    expect(rowOf(rows, 'young').raceId ?? null).toBeNull();
+    expect(rowOf(rows, 'young').sectionId).toBe('CATEGORY_1');
+    expect(placeOf(rows, 'young')).toBe(1);
+    expect(placeOf(rows, 'adult')).toBeNull();
+  });
+
   it('keeps a class competition category whole while reporting the stored categories', async () => {
     const { service } = makeHarness({
       bracketGender: 'M',
@@ -713,8 +809,8 @@ describe('EventsService.findById age categories', () => {
     const rows = event.registrations ?? [];
 
     expect(rows.every((row) => row.sectionId === 'CATEGORY')).toBe(true);
-    expect(placeOf(rows, 'adult')).toBe(1);
-    expect(placeOf(rows, 'young')).toBe(2);
+    expect(placeOf(rows, 'adult')).toBeNull();
+    expect(placeOf(rows, 'young')).toBeNull();
     // U-21: class-competition suppression does not hide the row group.
     expect(ageGroupOf(rows, 'young')).toBe('AGE_LE_14');
     expect(ageGroupOf(rows, 'adult')).toBe('AGE_24_40');

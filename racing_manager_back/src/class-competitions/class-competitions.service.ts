@@ -17,9 +17,14 @@ import {
   PAST_COMPLETED_EVENT_LOCKED_MESSAGE,
   isPastCompletedEvent,
 } from '../events/event-status';
+import { resolveControlYear } from '../events/age-groups';
+import {
+  categoriesFromStoredRows,
+  convertLegacySections,
+} from '../events/age-groups';
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  ACTIVE_REGISTRATION_STATUSES,
+  LISTED_REGISTRATION_STATUSES,
   RegistrationStatusCode,
 } from '../registrations/registration-status';
 import { competitionPlaces } from '../ranking/competition-places';
@@ -37,6 +42,13 @@ import {
   parseStageQualificationBody,
 } from './parse-class-competition';
 import { buildAddStageOp } from './stage-templates';
+import {
+  currentPlacement,
+  placementKey,
+  targetForSection,
+  type RaceSectionKind,
+  type RaceTarget,
+} from './race-scope';
 import { logEvent } from '../logging/log-event';
 
 type StoredEvent = {
@@ -45,6 +57,11 @@ type StoredEvent = {
   status: string;
   eventDate: Date;
   registrationClose: Date | null;
+  starts?: Array<{
+    id: string;
+    sortOrder: number;
+    formats: Array<{ formatId: number }>;
+  }>;
 };
 
 type StoredRegistration = {
@@ -53,6 +70,7 @@ type StoredRegistration = {
   lastName: string;
   startNumber: number | null;
   gender: string;
+  birthYear: number | null;
   formatId: number | null;
   status: string;
 };
@@ -73,8 +91,21 @@ type StoredHeatTime = {
 type StoredClassCompetition = {
   id: string;
   eventId: string;
+  startId: string | null;
   formatId: number | null;
   gender: string;
+  sectionId: string | null;
+  sectionKind: string | null;
+  targetKey: string;
+  targetGroupIds: string[];
+  targetWholeCategory: boolean;
+  frozenTitle: string | null;
+  frozenSubtitle: string | null;
+  frozenYoungestBound: number | null;
+  frozenMemberBounds: number[];
+  frozenSectionNumber: number | null;
+  capturedEnrollmentIds: string[];
+  capturedRegistrationIds: string[];
   cmsCompetitionId: string;
   status: ClassCompetitionStatus;
   event: StoredEvent;
@@ -112,10 +143,19 @@ const classCompetitionInclude = {
 export type ClassCompetitionView = {
   id: string;
   eventId: string;
+  startId: string | null;
   formatId: number | null;
   gender: string;
+  sectionId: string;
+  sectionKind: RaceSectionKind;
+  title: string;
+  subtitle: string | null;
+  targetGroupIds: string[];
+  targetWholeCategory: boolean;
+  capturedEnrollmentIds: string[];
+  youngestBound: number | null;
   status: ClassCompetitionStatus;
-    stages: Array<{
+  stages: Array<{
     stageId: string;
     kind: string;
     label: string | null;
@@ -188,57 +228,179 @@ export class ClassCompetitionsService {
     const event = await this.requireEvent(eventId);
     this.assertMutableEvent(event);
     this.assertRegistrationClosed(event);
-    this.assertFormatBelongs(event, parsed.formatId);
 
-    const registrations = await this.loadRegistrations(eventId);
-    const starters = registrations.filter(
-      (registration) =>
-        registration.gender === parsed.gender &&
-        registration.formatId === parsed.formatId &&
-        (ACTIVE_REGISTRATION_STATUSES as readonly string[]).includes(
-          registration.status ?? '',
-        ),
+    const start =
+      parsed.startId == null
+        ? null
+        : ((event.starts ?? []).find((item) => item.id === parsed.startId) ??
+          null);
+    if ((event.starts ?? []).length === 0 && parsed.startId != null) {
+      throw new BadRequestException('У этого мероприятия нет стартов.');
+    }
+    if ((event.starts ?? []).length > 0 && !start) {
+      throw new BadRequestException('Старт не принадлежит этому мероприятию.');
+    }
+    let formatId = parsed.formatId;
+    if (start) {
+      const formats = start.formats.map((item) => item.formatId);
+      if (formatId == null && formats.length === 1) {
+        formatId = formats[0];
+      }
+      if (formatId == null || !formats.includes(formatId)) {
+        throw new BadRequestException(
+          'Такой формат не заявлен на этом старте.',
+        );
+      }
+    } else {
+      this.assertFormatBelongs(event, formatId);
+    }
+
+    const controlYear = resolveControlYear(event.eventDate);
+    const categories = await this.readAgeCategories(
+      eventId,
+      start?.id ?? null,
+      formatId,
+      parsed.gender,
     );
-    if (starters.some((registration) => registration.startNumber == null)) {
+    if (parsed.sectionId === 'CATEGORY' && categories.length > 0) {
       throw new BadRequestException(
-        'Перед формированием сетки выдайте стартовый номер каждому участнику.',
+        'Сначала выберите возрастную категорию: у категории есть возрастное деление.',
       );
     }
-    if (starters.length === 0) {
-      throw new BadRequestException('В этой категории нет участников для сетки.');
+    if (parsed.sectionId !== 'CATEGORY' && categories.length === 0) {
+      throw new BadRequestException(
+        'У этой категории нет возрастного деления.',
+      );
+    }
+    let target: RaceTarget;
+    try {
+      target = targetForSection(parsed.sectionId, categories);
+    } catch {
+      throw new BadRequestException(
+        'Такой возрастной категории нет в протоколе.',
+      );
     }
 
-    const existing = await this.prisma.classCompetition.findFirst({
-      where: { eventId, gender: parsed.gender, formatId: parsed.formatId },
-      select: { id: true },
-    });
-    if (existing) {
-      throw new ConflictException('Для этой категории многоэтапная гонка уже создана.');
-    }
-    const protocolResults = await this.prisma.result.count({
+    const races = await this.prisma.classCompetition.findMany({
       where: {
-        registration: {
-          eventId,
-          gender: parsed.gender,
-          formatId: parsed.formatId,
-        },
+        eventId,
+        startId: start?.id ?? null,
+        formatId,
+        gender: parsed.gender,
       },
     });
+    if (target.targetWholeCategory) {
+      if (races.length > 0) {
+        throw new ConflictException(
+          'В этой категории уже есть многоэтапная гонка. Удалите её перед созданием общей.',
+        );
+      }
+    } else if (races.some((race) => race.targetWholeCategory)) {
+      throw new ConflictException(
+        'В этой категории уже идёт общая многоэтапная гонка.',
+      );
+    }
+
+    const existing = races.find((race) => race.targetKey === target.targetKey);
+    if (existing) {
+      throw new ConflictException(
+        'Для этой категории многоэтапная гонка уже создана.',
+      );
+    }
+
+    const candidates = await this.loadRaceCandidates(
+      eventId,
+      start?.id ?? null,
+      formatId,
+      parsed.gender,
+    );
+    const capturedEnrollmentIds: string[] = [];
+    const capturedRegistrationIds: string[] = [];
+    const starters: Array<{
+      registrationId: string;
+      startNumber: number;
+    }> = [];
+    for (const candidate of candidates) {
+      const placement = currentPlacement(
+        candidate.birthYear,
+        controlYear,
+        categories,
+      );
+      const inTarget =
+        target.targetWholeCategory ||
+        (target.sectionKind === 'NO_BIRTH_YEAR'
+          ? placement.noBirthYear
+          : placementKey(placement) === target.targetKey);
+      if (!inTarget) continue;
+      const alreadyCaptured = races.some(
+        (race) =>
+          (candidate.enrollmentId != null &&
+            race.capturedEnrollmentIds.includes(candidate.enrollmentId)) ||
+          race.capturedRegistrationIds.includes(candidate.registrationId),
+      );
+      if (alreadyCaptured) continue;
+      if (candidate.startNumber == null) {
+        throw new BadRequestException(
+          'Перед формированием сетки выдайте стартовый номер каждому участнику.',
+        );
+      }
+      starters.push({
+        registrationId: candidate.registrationId,
+        startNumber: candidate.startNumber,
+      });
+      if (candidate.enrollmentId != null) {
+        capturedEnrollmentIds.push(candidate.enrollmentId);
+      }
+      capturedRegistrationIds.push(candidate.registrationId);
+    }
+    if (starters.length === 0) {
+      throw new BadRequestException(
+        'В этой категории нет участников для сетки.',
+      );
+    }
+    const uniqueStarters = [
+      ...new Map(starters.map((item) => [item.registrationId, item])).values(),
+    ].sort((a, b) => a.startNumber - b.startNumber);
+
+    const protocolResults =
+      capturedEnrollmentIds.length > 0
+        ? await this.prisma.result.count({
+            where: { enrollmentId: { in: capturedEnrollmentIds } },
+          })
+        : await this.prisma.result.count({
+            where: { registrationId: { in: capturedRegistrationIds } },
+          });
     if (protocolResults > 0) {
       throw new ConflictException(
         'В этой категории уже есть результаты в итоговом протоколе.',
       );
     }
-    if (await categoryIsFinished(this.prisma, eventId, parsed.formatId, parsed.gender)) {
+    if (
+      await categoryIsFinished(
+        this.prisma,
+        eventId,
+        formatId,
+        parsed.gender,
+        start?.id ?? null,
+      )
+    ) {
       throw new ConflictException('Гонка в этой категории уже завершена.');
     }
 
-    const formatName = event.eventFormats.find((item) => item.formatId === parsed.formatId);
+    const formatName = event.eventFormats.find(
+      (item) => item.formatId === formatId,
+    );
+    const title = target.targetWholeCategory
+      ? (formatName?.format.name ?? 'Категория')
+      : target.title;
+    const subtitle = target.subtitle;
     const cms = await this.cms.createCompetition({
-      name: [event.name, formatName?.format.name, parsed.gender].filter(Boolean).join(' · '),
-      participants: starters.map((registration) => ({
-        id: registration.id,
-        seed: registration.startNumber as number,
+      name: [event.name, formatName?.format.name, title, parsed.gender]
+        .filter(Boolean)
+        .join(' · '),
+      participants: uniqueStarters.map((registration) => ({
+        id: registration.registrationId,
+        seed: registration.startNumber,
       })),
     });
 
@@ -246,8 +408,21 @@ export class ClassCompetitionsService {
       const created = await this.prisma.classCompetition.create({
         data: {
           eventId,
-          formatId: parsed.formatId,
+          startId: start?.id ?? null,
+          formatId,
           gender: parsed.gender,
+          sectionId: target.sectionId,
+          sectionKind: target.sectionKind,
+          targetKey: target.targetKey,
+          targetGroupIds: target.targetGroupIds,
+          targetWholeCategory: target.targetWholeCategory,
+          frozenTitle: title,
+          frozenSubtitle: subtitle,
+          frozenYoungestBound: target.youngestBound,
+          frozenMemberBounds: target.memberBounds,
+          frozenSectionNumber: target.sectionNumber,
+          capturedEnrollmentIds,
+          capturedRegistrationIds,
           cmsCompetitionId: cms.id,
           status: cms.status,
         },
@@ -258,17 +433,154 @@ export class ClassCompetitionsService {
         eventId,
         classCompetitionId: created.id,
         cmsCompetitionId: cms.id,
-        formatId: parsed.formatId,
+        startId: start?.id ?? null,
+        formatId,
         gender: parsed.gender,
+        sectionId: target.sectionId,
         userSub: authentikId,
       });
-      return this.present(created, cms, registrations);
+      return this.present(created, cms, await this.loadRegistrations(eventId));
     } catch (error) {
+      await this.cms.deleteCompetition(cms.id).catch((cleanupError) => {
+        logEvent(
+          this.logger,
+          {
+            event: 'class_competition.cms_cleanup_failed',
+            eventId,
+            cmsCompetitionId: cms.id,
+            reason:
+              cleanupError instanceof Error ? cleanupError.message : 'unknown',
+          },
+          'warn',
+        );
+      });
       if (isUniqueViolation(error)) {
-        throw new ConflictException('Для этой категории многоэтапная гонка уже создана.');
+        throw new ConflictException(
+          'Для этой категории многоэтапная гонка уже создана.',
+        );
       }
       throw error;
     }
+  }
+
+  private async readAgeCategories(
+    eventId: string,
+    startId: string | null,
+    formatId: number | null,
+    gender: string,
+  ) {
+    if (startId == null || formatId == null) return [];
+    const key = { eventId, startId, formatId, gender: gender as 'M' | 'F' };
+    const rows = await this.prisma.ageSplitCategory.findMany({
+      where: key,
+      select: { categoryNumber: true, groupId: true },
+      orderBy: [{ categoryNumber: 'asc' }, { groupId: 'asc' }],
+    });
+    if (rows.length > 0) return categoriesFromStoredRows(rows);
+    const legacy = await this.prisma.ageSplitSection.findMany({
+      where: key,
+      select: { sectionId: true, sectionKind: true, sortOrder: true },
+      orderBy: { sortOrder: 'asc' },
+    });
+    return legacy.length > 0 ? convertLegacySections(legacy) : [];
+  }
+
+  private async loadRaceCandidates(
+    eventId: string,
+    startId: string | null,
+    formatId: number | null,
+    gender: 'M' | 'F',
+  ): Promise<
+    Array<{
+      enrollmentId: string | null;
+      registrationId: string;
+      birthYear: number | null;
+      startNumber: number | null;
+    }>
+  > {
+    if (startId == null) {
+      const registrations = await this.prisma.registration.findMany({
+        where: {
+          eventId,
+          gender,
+          ...(formatId == null ? { formatId: null } : { formatId }),
+          status: { in: [...LISTED_REGISTRATION_STATUSES] },
+        },
+        select: { id: true, birthYear: true, startNumber: true },
+      });
+      return registrations.map((row) => ({
+        enrollmentId: null,
+        registrationId: row.id,
+        birthYear: row.birthYear,
+        startNumber: row.startNumber,
+      }));
+    }
+    const enrollments = await this.prisma.enrollment.findMany({
+      where: {
+        eventId,
+        startId,
+        ...(formatId == null ? {} : { formatId }),
+        status: 'REGISTERED',
+        registration: {
+          gender,
+          status: { in: [...LISTED_REGISTRATION_STATUSES] },
+        },
+      },
+      select: {
+        id: true,
+        registrationId: true,
+        registration: { select: { birthYear: true, startNumber: true } },
+      },
+    });
+    return enrollments.map((row) => ({
+      enrollmentId: row.id,
+      registrationId: row.registrationId,
+      birthYear: row.registration.birthYear,
+      startNumber: row.registration.startNumber,
+    }));
+  }
+
+  private async ensureCapturedSnapshot(
+    row: StoredClassCompetition,
+    cms: CmsCompetition,
+  ): Promise<StoredClassCompetition> {
+    if (
+      row.capturedEnrollmentIds.length > 0 ||
+      row.capturedRegistrationIds.length > 0
+    ) {
+      return row;
+    }
+    const registrationIds = cms.participants.map(
+      (participant) => participant.id,
+    );
+    let enrollmentIds: string[] = [];
+    if (
+      row.startId != null &&
+      row.formatId != null &&
+      registrationIds.length > 0
+    ) {
+      const enrollments = await this.prisma.enrollment.findMany({
+        where: {
+          eventId: row.eventId,
+          startId: row.startId,
+          formatId: row.formatId,
+          registrationId: { in: registrationIds },
+        },
+        select: { id: true },
+      });
+      enrollmentIds = enrollments.map((item) => item.id);
+    }
+    if (registrationIds.length === 0 && enrollmentIds.length === 0) {
+      return row;
+    }
+    const updated = await this.prisma.classCompetition.update({
+      where: { id: row.id },
+      data: {
+        capturedRegistrationIds: registrationIds,
+        capturedEnrollmentIds: enrollmentIds,
+      },
+    });
+    return { ...row, ...updated };
   }
 
   async updatePlan(
@@ -288,7 +600,11 @@ export class ClassCompetitionsService {
         ? { removeStageIds: parsed.removeStageIds }
         : {
             addStages: [
-              buildAddStageOp(parsed.addStage, current.format.stages, current.participants.length),
+              buildAddStageOp(
+                parsed.addStage,
+                current.format.stages,
+                current.participants.length,
+              ),
             ],
           },
     );
@@ -300,7 +616,11 @@ export class ClassCompetitionsService {
       cmsCompetitionId: row.cmsCompetitionId,
       userSub: authentikId,
     });
-    return this.present(await this.reload(row.id), next, await this.loadRegistrations(eventId));
+    return this.present(
+      await this.reload(row.id),
+      next,
+      await this.loadRegistrations(eventId),
+    );
   }
 
   async seedStage(
@@ -314,7 +634,11 @@ export class ClassCompetitionsService {
     this.assertMutableEvent(row.event);
     const cms = await this.cms.getCompetition(row.cmsCompetitionId);
     const registrations = await this.loadRegistrations(eventId);
-    const frozen = await this.freezeMissingQualifications(row, cms, registrations);
+    const frozen = await this.freezeMissingQualifications(
+      row,
+      cms,
+      registrations,
+    );
     const target = cms.stages.find((item) => item.stageId === stageId);
     if (target && target.status === 'PENDING' && target.entries.length === 0) {
       const source = sourceOfStage(cms.format.stages, stageId);
@@ -376,7 +700,11 @@ export class ClassCompetitionsService {
       heatCount: parsed.heats.length,
       userSub: authentikId,
     });
-    return this.present(await this.reload(row.id), next, await this.loadRegistrations(eventId));
+    return this.present(
+      await this.reload(row.id),
+      next,
+      await this.loadRegistrations(eventId),
+    );
   }
 
   async recordHeatTimes(
@@ -418,7 +746,9 @@ export class ClassCompetitionsService {
       stage = current.stages.find((item) => item.stageId === stageId);
     }
     if (!stage || stage.status !== 'SEEDED') {
-      throw new BadRequestException('Время можно записать только после формирования заездов.');
+      throw new BadRequestException(
+        'Время можно записать только после формирования заездов.',
+      );
     }
     const heatByRegistration = new Map<string, number>();
     for (const heat of stage.heats) {
@@ -442,16 +772,24 @@ export class ClassCompetitionsService {
       );
     }
     if (stage.heats.some((heat) => heat.slots.length === 0)) {
-      throw new BadRequestException('Пустой заезд нужно удалить или заполнить участниками.');
+      throw new BadRequestException(
+        'Пустой заезд нужно удалить или заполнить участниками.',
+      );
     }
 
     const stored = await this.prisma.classHeatTime.findMany({
       where: { classCompetitionId: row.id, stageId },
     });
-    const byRegistration = new Map(stored.map((item) => [item.registrationId, item]));
+    const byRegistration = new Map(
+      stored.map((item) => [item.registrationId, item]),
+    );
     for (const [registrationId, heatNumber] of heatByRegistration) {
       const item = byRegistration.get(registrationId);
-      if (!item || item.heatNumber !== heatNumber || (item.status === 'OK' && item.timeMilliseconds == null)) {
+      if (
+        !item ||
+        item.heatNumber !== heatNumber ||
+        (item.status === 'OK' && item.timeMilliseconds == null)
+      ) {
         throw new BadRequestException(
           'Перед фиксацией этапа укажите время или статус DNS, DNF, DSQ каждому участнику.',
         );
@@ -459,11 +797,16 @@ export class ClassCompetitionsService {
     }
 
     const registrations = await this.loadRegistrations(eventId);
-    const startNumbers = new Map(registrations.map((item) => [item.id, item.startNumber]));
+    const startNumbers = new Map(
+      registrations.map((item) => [item.id, item.startNumber]),
+    );
     const heatResults = stage.heats.map((heat) => {
       const finished = heat.slots
         .map((slot) => byRegistration.get(slot.participantId))
-        .filter((item): item is NonNullable<typeof item> => item != null && item.status === 'OK')
+        .filter(
+          (item): item is NonNullable<typeof item> =>
+            item != null && item.status === 'OK',
+        )
         .sort((a, b) => {
           const byTime = (a.timeMilliseconds ?? 0) - (b.timeMilliseconds ?? 0);
           if (byTime !== 0) return byTime;
@@ -472,7 +815,10 @@ export class ClassCompetitionsService {
             (startNumbers.get(b.registrationId) ?? Number.POSITIVE_INFINITY)
           );
         });
-      const places = competitionPlaces(finished, (item) => item.timeMilliseconds ?? 0);
+      const places = competitionPlaces(
+        finished,
+        (item) => item.timeMilliseconds ?? 0,
+      );
       const placeById = new Map(
         finished.map((item, index) => [item.registrationId, places[index]]),
       );
@@ -484,16 +830,30 @@ export class ClassCompetitionsService {
           return {
             participantId: slot.participantId,
             status,
-            ...(status === 'OK' ? { place: placeById.get(slot.participantId) } : {}),
+            ...(status === 'OK'
+              ? { place: placeById.get(slot.participantId) }
+              : {}),
           };
         }),
       };
     });
 
     await this.cms.recordResults(row.cmsCompetitionId, stageId, heatResults);
-    const terminal = isTerminalStage(current.format.stages.find((item) => item.id === stageId));
-    await this.assignQualification(row.id, stage, byRegistration, startNumbers, terminal);
-    const completed = await this.cms.completeStage(row.cmsCompetitionId, stageId);
+    const terminal = isTerminalStage(
+      current.format.stages.find((item) => item.id === stageId),
+    );
+    await this.assignQualification(
+      row.id,
+      stage,
+      byRegistration,
+      startNumbers,
+      terminal,
+      row.startId == null,
+    );
+    const completed = await this.cms.completeStage(
+      row.cmsCompetitionId,
+      stageId,
+    );
     await this.persistOutcome(row.id, completed);
     return this.present(
       await this.reload(row.id),
@@ -516,10 +876,14 @@ export class ClassCompetitionsService {
     const cms = await this.cms.getCompetition(row.cmsCompetitionId);
     const stage = cms.stages.find((item) => item.stageId === stageId);
     if (!stage || stage.status !== 'COMPLETED') {
-      throw new BadRequestException('Статус этапа можно менять только после его фиксации.');
+      throw new BadRequestException(
+        'Статус этапа можно менять только после его фиксации.',
+      );
     }
     const heatTime = row.heatTimes.find(
-      (item) => item.stageId === stageId && item.registrationId === parsed.registrationId,
+      (item) =>
+        item.stageId === stageId &&
+        item.registrationId === parsed.registrationId,
     );
     if (!heatTime) {
       throw new NotFoundException('Участник не выступал на этом этапе.');
@@ -527,9 +891,12 @@ export class ClassCompetitionsService {
     const spec = cms.format.stages.find((item) => item.id === stageId);
     if (
       isTerminalStage(spec) &&
-      (parsed.status === RegistrationStatusCode.QQ || parsed.status === RegistrationStatusCode.NQ)
+      (parsed.status === RegistrationStatusCode.QQ ||
+        parsed.status === RegistrationStatusCode.NQ)
     ) {
-      throw new BadRequestException('В финале гонка завершается, статусы QQ и NQ не ставятся.');
+      throw new BadRequestException(
+        'В финале гонка завершается, статусы QQ и NQ не ставятся.',
+      );
     }
     await this.prisma.classHeatTime.updateMany({
       where: {
@@ -539,7 +906,10 @@ export class ClassCompetitionsService {
       },
       data: { qualificationStatus: parsed.status },
     });
-    if (!appearedOnLaterStage(cms, stageId, parsed.registrationId)) {
+    if (
+      row.startId == null &&
+      !appearedOnLaterStage(cms, stageId, parsed.registrationId)
+    ) {
       await this.prisma.registration.update({
         where: { id: parsed.registrationId },
         data: { status: parsed.status },
@@ -564,11 +934,18 @@ export class ClassCompetitionsService {
   private async assignQualification(
     classCompetitionId: string,
     stage: CmsCompetition['stages'][number],
-    byRegistration: Map<string, { status: string; timeMilliseconds: number | null }>,
+    byRegistration: Map<
+      string,
+      { status: string; timeMilliseconds: number | null }
+    >,
     startNumbers: Map<string, number | null>,
     terminal = false,
+    updateRegistration = true,
   ) {
-    const updates: Array<{ registrationId: string; status: RegistrationStatusCode }> = [];
+    const updates: Array<{
+      registrationId: string;
+      status: RegistrationStatusCode;
+    }> = [];
     for (const heat of stage.heats) {
       const slots = heat.slots.map((slot) => {
         const stored = byRegistration.get(slot.participantId);
@@ -593,10 +970,12 @@ export class ClassCompetitionsService {
           },
           data: { qualificationStatus: update.status },
         });
-        await tx.registration.update({
-          where: { id: update.registrationId },
-          data: { status: update.status },
-        });
+        if (updateRegistration) {
+          await tx.registration.update({
+            where: { id: update.registrationId },
+            data: { status: update.status },
+          });
+        }
       }
     });
   }
@@ -608,7 +987,9 @@ export class ClassCompetitionsService {
   ): string[] {
     const source = sourceOfStage(cms.format.stages, stageId);
     if (!source) return [];
-    const previous = cms.stages.find((stage) => stage.stageId === source.sourceStageId);
+    const previous = cms.stages.find(
+      (stage) => stage.stageId === source.sourceStageId,
+    );
     if (!previous || previous.status !== 'COMPLETED') return [];
     const ids = row.heatTimes
       .filter(
@@ -627,7 +1008,9 @@ export class ClassCompetitionsService {
     for (const entry of parsed.entries) {
       const heatNumber = heatByRegistration.get(entry.registrationId);
       if (heatNumber == null || heatNumber !== entry.heatNumber) {
-        throw new BadRequestException('Участник не состоит в указанном заезде.');
+        throw new BadRequestException(
+          'Участник не состоит в указанном заезде.',
+        );
       }
     }
   }
@@ -641,13 +1024,19 @@ export class ClassCompetitionsService {
     const lapByNumber = new Map(eventLaps.map((lap) => [lap.lapNumber, lap]));
     await this.prisma.$transaction(async (tx) => {
       for (const entry of parsed.entries) {
-        if (eventLaps.length > 0 && entry.status === 'OK' && entry.lapNumber == null) {
+        if (
+          eventLaps.length > 0 &&
+          entry.status === 'OK' &&
+          entry.lapNumber == null
+        ) {
           throw new BadRequestException(
             'Это мероприятие учитывает время по кругам. Укажите номер круга.',
           );
         }
         if (eventLaps.length === 0 && entry.lapNumber != null) {
-          throw new BadRequestException('У мероприятия нет кругов. Укажите общее время.');
+          throw new BadRequestException(
+            'У мероприятия нет кругов. Укажите общее время.',
+          );
         }
         const heatTime = await tx.classHeatTime.upsert({
           where: {
@@ -664,15 +1053,21 @@ export class ClassCompetitionsService {
             heatNumber: entry.heatNumber,
             registrationId: entry.registrationId,
             status: entry.status,
-            timeMilliseconds: entry.lapNumber == null ? entry.timeMilliseconds : null,
+            timeMilliseconds:
+              entry.lapNumber == null ? entry.timeMilliseconds : null,
           },
           update:
             entry.lapNumber == null
-              ? { status: entry.status, timeMilliseconds: entry.timeMilliseconds }
+              ? {
+                  status: entry.status,
+                  timeMilliseconds: entry.timeMilliseconds,
+                }
               : { status: 'OK' },
         });
         if (entry.status !== 'OK') {
-          await tx.classHeatLapTime.deleteMany({ where: { classHeatTimeId: heatTime.id } });
+          await tx.classHeatLapTime.deleteMany({
+            where: { classHeatTimeId: heatTime.id },
+          });
           continue;
         }
         if (entry.lapNumber == null || entry.timeMilliseconds == null) continue;
@@ -698,12 +1093,20 @@ export class ClassCompetitionsService {
         });
         const stored = await tx.classHeatLapTime.findMany({
           where: { classHeatTimeId: heatTime.id },
-          select: { timeMilliseconds: true, eventLap: { select: { lapNumber: true } } },
+          select: {
+            timeMilliseconds: true,
+            eventLap: { select: { lapNumber: true } },
+          },
         });
-        const byLap = new Map(stored.map((lap) => [lap.eventLap.lapNumber, lap.timeMilliseconds]));
+        const byLap = new Map(
+          stored.map((lap) => [lap.eventLap.lapNumber, lap.timeMilliseconds]),
+        );
         const complete = eventLaps.every((lap) => byLap.has(lap.lapNumber));
         const total = complete
-          ? eventLaps.reduce((sum, lap) => sum + (byLap.get(lap.lapNumber) ?? 0), 0)
+          ? eventLaps.reduce(
+              (sum, lap) => sum + (byLap.get(lap.lapNumber) ?? 0),
+              0,
+            )
           : null;
         await tx.classHeatTime.update({
           where: { id: heatTime.id },
@@ -722,7 +1125,9 @@ export class ClassCompetitionsService {
       where: { classCompetitionId, stageId },
       include: { laps: true },
     });
-    const byRegistration = new Map(existing.map((row) => [row.registrationId, row]));
+    const byRegistration = new Map(
+      existing.map((row) => [row.registrationId, row]),
+    );
     const next = heats.flatMap((heat) =>
       heat.registrationIds.flatMap((registrationId) => {
         const previous = byRegistration.get(registrationId);
@@ -742,7 +1147,9 @@ export class ClassCompetitionsService {
       }),
     );
     await this.prisma.$transaction(async (tx) => {
-      await tx.classHeatTime.deleteMany({ where: { classCompetitionId, stageId } });
+      await tx.classHeatTime.deleteMany({
+        where: { classCompetitionId, stageId },
+      });
       for (const row of next) {
         const created = await tx.classHeatTime.create({
           data: {
@@ -769,9 +1176,31 @@ export class ClassCompetitionsService {
   }
 
   private async persistOutcome(id: string, cms: CmsCompetition) {
-    const times = await this.prisma.classHeatTime.findMany({ where: { classCompetitionId: id } });
+    const row = await this.prisma.classCompetition.findUnique({
+      where: { id },
+      select: { eventId: true, startId: true, formatId: true },
+    });
+    const times = await this.prisma.classHeatTime.findMany({
+      where: { classCompetitionId: id },
+    });
     const timeByRegistration = lastOkTimes(cms, times);
-    const places = cms.status === 'DONE' ? classifyBracket(cms, timeByRegistration) : null;
+    const places =
+      cms.status === 'DONE' ? classifyBracket(cms, timeByRegistration) : null;
+    const enrollmentByRegistration = new Map<string, string>();
+    if (places && row?.startId != null && row.formatId != null) {
+      const enrollments = await this.prisma.enrollment.findMany({
+        where: {
+          eventId: row.eventId,
+          startId: row.startId,
+          formatId: row.formatId,
+          registrationId: { in: [...places.keys()] },
+        },
+        select: { id: true, registrationId: true },
+      });
+      for (const enrollment of enrollments) {
+        enrollmentByRegistration.set(enrollment.registrationId, enrollment.id);
+      }
+    }
     await this.prisma.$transaction(async (tx) => {
       await tx.classCompetition.update({
         where: { id },
@@ -781,11 +1210,28 @@ export class ClassCompetitionsService {
       for (const [registrationId, place] of places) {
         const timeMilliseconds = timeByRegistration.get(registrationId);
         if (timeMilliseconds == null) continue;
-        await tx.result.upsert({
-          where: { registrationId },
-          create: { registrationId, timeMilliseconds, place },
-          update: { timeMilliseconds, place },
-        });
+        const enrollmentId =
+          enrollmentByRegistration.get(registrationId) ?? null;
+        const existing = enrollmentId
+          ? await tx.result.findUnique({ where: { enrollmentId } })
+          : await tx.result.findFirst({
+              where: { registrationId, enrollmentId: null },
+            });
+        if (existing) {
+          await tx.result.update({
+            where: { id: existing.id },
+            data: { timeMilliseconds, place },
+          });
+        } else {
+          await tx.result.create({
+            data: {
+              registrationId,
+              enrollmentId,
+              timeMilliseconds,
+              place,
+            },
+          });
+        }
       }
     });
   }
@@ -795,6 +1241,14 @@ export class ClassCompetitionsService {
       where: { id: eventId },
       include: {
         eventFormats: { include: { format: { select: { name: true } } } },
+        starts: {
+          select: {
+            id: true,
+            sortOrder: true,
+            formats: { select: { formatId: true } },
+          },
+          orderBy: { sortOrder: 'asc' },
+        },
       },
     });
     if (!event) throw new NotFoundException('Event not found.');
@@ -828,6 +1282,7 @@ export class ClassCompetitionsService {
         lastName: true,
         startNumber: true,
         gender: true,
+        birthYear: true,
         formatId: true,
         status: true,
       },
@@ -836,7 +1291,9 @@ export class ClassCompetitionsService {
 
   private assertMutableEvent(event: StoredEvent) {
     if (event.status === 'CANCELLED') {
-      throw new BadRequestException('Нельзя собрать сетку для отменённого мероприятия.');
+      throw new BadRequestException(
+        'Нельзя собрать сетку для отменённого мероприятия.',
+      );
     }
     if (isPastCompletedEvent(event.status, event.eventDate)) {
       throw new BadRequestException(PAST_COMPLETED_EVENT_LOCKED_MESSAGE);
@@ -862,8 +1319,13 @@ export class ClassCompetitionsService {
       }
       return;
     }
-    if (formatId == null || !event.eventFormats.some((item) => item.formatId === formatId)) {
-      throw new BadRequestException('Такой формат не заявлен на этом мероприятии.');
+    if (
+      formatId == null ||
+      !event.eventFormats.some((item) => item.formatId === formatId)
+    ) {
+      throw new BadRequestException(
+        'Такой формат не заявлен на этом мероприятии.',
+      );
     }
   }
 
@@ -872,7 +1334,9 @@ export class ClassCompetitionsService {
     cms: CmsCompetition,
     registrations: StoredRegistration[],
   ): ClassCompetitionView {
-    const people = new Map(registrations.map((registration) => [registration.id, registration]));
+    const people = new Map(
+      registrations.map((registration) => [registration.id, registration]),
+    );
     const times = new Map(
       row.heatTimes.map((item) => [
         `${item.stageId}:${item.heatNumber}:${item.registrationId}`,
@@ -882,18 +1346,35 @@ export class ClassCompetitionsService {
     const runs = new Map(cms.stages.map((stage) => [stage.stageId, stage]));
     const timeByRegistration = lastOkTimes(cms, row.heatTimes);
     const places =
-      cms.status === 'DONE' ? classifyBracket(cms, timeByRegistration) : new Map<string, number>();
+      cms.status === 'DONE'
+        ? classifyBracket(cms, timeByRegistration)
+        : new Map<string, number>();
 
     return {
       id: row.id,
       eventId: row.eventId,
+      startId: row.startId,
       formatId: row.formatId,
       gender: row.gender,
+      sectionId: row.sectionId ?? 'CATEGORY',
+      sectionKind: (row.sectionKind as RaceSectionKind | null) ?? 'CATEGORY',
+      title: row.frozenTitle ?? '',
+      subtitle: row.frozenSubtitle,
+      targetGroupIds: row.targetGroupIds,
+      targetWholeCategory: row.targetWholeCategory,
+      capturedEnrollmentIds: row.capturedEnrollmentIds,
+      youngestBound: row.frozenYoungestBound,
       status: cms.status,
       stages: orderFinals(cms.format.stages).map((spec) => {
         const source = sourceOfStage(cms.format.stages, spec.id);
         return {
-          ...this.toStage(spec, runs.get(spec.id), people, times),
+          ...this.toStage(
+            spec,
+            runs.get(spec.id),
+            people,
+            times,
+            row.startId == null,
+          ),
           sourceStageId: source?.sourceStageId ?? null,
           qualifierStatus: source?.qualifierStatus ?? null,
         };
@@ -913,7 +1394,11 @@ export class ClassCompetitionsService {
     run: CmsCompetition['stages'][number] | undefined,
     people: Map<string, StoredRegistration>,
     times: Map<string, StoredHeatTime>,
-  ): Omit<ClassCompetitionView['stages'][number], 'sourceStageId' | 'qualifierStatus'> {
+    useRegistrationStatus: boolean,
+  ): Omit<
+    ClassCompetitionView['stages'][number],
+    'sourceStageId' | 'qualifierStatus'
+  > {
     const person = (registrationId: string) => {
       const registration = people.get(registrationId);
       return {
@@ -921,12 +1406,16 @@ export class ClassCompetitionsService {
         firstName: registration?.firstName ?? '',
         lastName: registration?.lastName ?? '',
         startNumber: registration?.startNumber ?? null,
-        registrationStatus: registration?.status ?? RegistrationStatusCode.REGISTERED,
+        registrationStatus: useRegistrationStatus
+          ? (registration?.status ?? RegistrationStatusCode.REGISTERED)
+          : RegistrationStatusCode.REGISTERED,
       };
     };
-    const stageStatus = (registrationId: string, stored: StoredHeatTime | undefined) =>
-      stored?.qualificationStatus ??
-      person(registrationId).registrationStatus;
+    const stageStatus = (
+      registrationId: string,
+      stored: StoredHeatTime | undefined,
+    ) =>
+      stored?.qualificationStatus ?? person(registrationId).registrationStatus;
     return {
       stageId: spec.id,
       kind: spec.kind,
@@ -935,14 +1424,17 @@ export class ClassCompetitionsService {
       heats: (run?.heats ?? []).map((heat) => ({
         heatNumber: heat.heatNumber,
         slots: heat.slots.map((slot) => {
-          const stored = times.get(`${spec.id}:${heat.heatNumber}:${slot.participantId}`);
+          const stored = times.get(
+            `${spec.id}:${heat.heatNumber}:${slot.participantId}`,
+          );
           return {
             ...person(slot.participantId),
             registrationStatus: stageStatus(slot.participantId, stored),
             position: slot.position,
             timeMilliseconds: stored?.timeMilliseconds ?? null,
             resultStatus:
-              stored == null || (stored.status === 'OK' && stored.timeMilliseconds == null)
+              stored == null ||
+              (stored.status === 'OK' && stored.timeMilliseconds == null)
                 ? null
                 : stored.status,
             laps: (stored?.laps ?? []).map((lap) => ({
@@ -965,7 +1457,12 @@ export class ClassCompetitionsService {
     cms: CmsCompetition,
     registrations: StoredRegistration[],
   ): Promise<ClassCompetitionView> {
-    const frozen = await this.freezeMissingQualifications(row, cms, registrations);
+    const snapshot = await this.ensureCapturedSnapshot(row, cms);
+    const frozen = await this.freezeMissingQualifications(
+      snapshot,
+      cms,
+      registrations,
+    );
     return this.toView(frozen, cms, registrations);
   }
 
@@ -974,33 +1471,50 @@ export class ClassCompetitionsService {
     cms: CmsCompetition,
     registrations: StoredRegistration[],
   ): Promise<StoredClassCompetition> {
-    const startNumbers = new Map(registrations.map((item) => [item.id, item.startNumber]));
-    const registrationStatus = new Map(registrations.map((item) => [item.id, item.status]));
+    const startNumbers = new Map(
+      registrations.map((item) => [item.id, item.startNumber]),
+    );
+    const registrationStatus = new Map(
+      registrations.map((item) => [item.id, item.status]),
+    );
+    const scoped = row.startId != null;
     const heatTimes = row.heatTimes.map((item) => ({ ...item }));
     const updates: Array<{
       stageId: string;
       registrationId: string;
       status: RegistrationStatus;
     }> = [];
-    const clearQualification: Array<{ stageId: string; registrationId: string }> = [];
+    const clearQualification: Array<{
+      stageId: string;
+      registrationId: string;
+    }> = [];
     const finishRegistrations = new Set<string>();
 
     for (const run of cms.stages) {
       if (run.status !== 'COMPLETED') continue;
       const spec = cms.format.stages.find((item) => item.id === run.stageId);
       const terminal = isTerminalStage(spec);
-      const stageTimes = heatTimes.filter((item) => item.stageId === run.stageId);
+      const stageTimes = heatTimes.filter(
+        (item) => item.stageId === run.stageId,
+      );
       if (terminal) {
         for (const item of stageTimes) {
           const closedAsQualifier =
             item.qualificationStatus === RegistrationStatus.QQ ||
             item.qualificationStatus === RegistrationStatus.NQ;
-          const closedAsConfirmed = item.qualificationStatus === RegistrationStatus.CONFIRMED;
+          const closedAsConfirmed =
+            item.qualificationStatus === RegistrationStatus.CONFIRMED;
           if (!closedAsQualifier && !closedAsConfirmed) continue;
           item.qualificationStatus = RegistrationStatus.FINISHED;
-          clearQualification.push({ stageId: run.stageId, registrationId: item.registrationId });
-          const current = registrationStatus.get(item.registrationId);
+          clearQualification.push({
+            stageId: run.stageId,
+            registrationId: item.registrationId,
+          });
+          const current = scoped
+            ? RegistrationStatusCode.REGISTERED
+            : registrationStatus.get(item.registrationId);
           if (
+            !scoped &&
             (current === RegistrationStatusCode.QQ ||
               current === RegistrationStatusCode.NQ ||
               current === RegistrationStatusCode.CONFIRMED) &&
@@ -1010,7 +1524,8 @@ export class ClassCompetitionsService {
           }
         }
       }
-      if (stageTimes.every((item) => item.qualificationStatus != null)) continue;
+      if (stageTimes.every((item) => item.qualificationStatus != null))
+        continue;
       const byHeat = new Map<number, StoredHeatTime[]>();
       for (const item of stageTimes) {
         const group = byHeat.get(item.heatNumber) ?? [];
@@ -1035,15 +1550,23 @@ export class ClassCompetitionsService {
         if (item.qualificationStatus != null) continue;
         const computed = assigned.get(item.registrationId);
         if (!computed) continue;
-        const current = registrationStatus.get(item.registrationId);
+        const current = scoped
+          ? RegistrationStatusCode.REGISTERED
+          : registrationStatus.get(item.registrationId);
         const keepCurrent =
+          !scoped &&
           !terminal &&
           !appearedOnLaterStage(cms, run.stageId, item.registrationId) &&
           isStageOutcomeStatus(current);
         const status = keepCurrent ? (current as RegistrationStatus) : computed;
         item.qualificationStatus = status;
-        updates.push({ stageId: run.stageId, registrationId: item.registrationId, status });
+        updates.push({
+          stageId: run.stageId,
+          registrationId: item.registrationId,
+          status,
+        });
         if (
+          !scoped &&
           terminal &&
           status === RegistrationStatusCode.FINISHED &&
           (current === RegistrationStatusCode.QQ ||
@@ -1056,7 +1579,11 @@ export class ClassCompetitionsService {
       }
     }
 
-    if (updates.length > 0 || clearQualification.length > 0 || finishRegistrations.size > 0) {
+    if (
+      updates.length > 0 ||
+      clearQualification.length > 0 ||
+      finishRegistrations.size > 0
+    ) {
       await this.prisma.$transaction(async (tx) => {
         for (const update of updates) {
           await tx.classHeatTime.updateMany({
@@ -1086,12 +1613,16 @@ export class ClassCompetitionsService {
             data: { qualificationStatus: RegistrationStatus.FINISHED },
           });
         }
-        for (const registrationId of finishRegistrations) {
+        for (const registrationId of scoped ? [] : finishRegistrations) {
           await tx.registration.updateMany({
             where: {
               id: registrationId,
               status: {
-                in: [RegistrationStatus.QQ, RegistrationStatus.NQ, RegistrationStatus.CONFIRMED],
+                in: [
+                  RegistrationStatus.QQ,
+                  RegistrationStatus.NQ,
+                  RegistrationStatus.CONFIRMED,
+                ],
               },
             },
             data: { status: RegistrationStatus.FINISHED },
@@ -1105,11 +1636,17 @@ export class ClassCompetitionsService {
 
 function orderFinals(stages: CmsStageSpec[]): CmsStageSpec[] {
   const next = [...stages];
-  const finalB = next.findIndex((stage) => stage.kind === 'FINAL_B' || stage.id === 'final_b');
-  const finalA = next.findIndex((stage) => stage.kind === 'FINAL_A' || stage.id === 'final_a');
+  const finalB = next.findIndex(
+    (stage) => stage.kind === 'FINAL_B' || stage.id === 'final_b',
+  );
+  const finalA = next.findIndex(
+    (stage) => stage.kind === 'FINAL_A' || stage.id === 'final_a',
+  );
   if (finalB < 0 || finalA < 0 || finalB < finalA) return next;
   const [consolation] = next.splice(finalB, 1);
-  const finalAIndex = next.findIndex((stage) => stage.kind === 'FINAL_A' || stage.id === 'final_a');
+  const finalAIndex = next.findIndex(
+    (stage) => stage.kind === 'FINAL_A' || stage.id === 'final_a',
+  );
   next.splice(finalAIndex, 0, consolation);
   return next;
 }
@@ -1124,7 +1661,11 @@ const STAGE_OUTCOME_STATUSES = new Set<string>([
 
 function isTerminalStage(stage: CmsStageSpec | undefined): boolean {
   if (!stage) return false;
-  return stage.kind === 'FINAL' || stage.kind === 'FINAL_A' || stage.kind === 'FINAL_B';
+  return (
+    stage.kind === 'FINAL' ||
+    stage.kind === 'FINAL_A' ||
+    stage.kind === 'FINAL_B'
+  );
 }
 
 function isStageOutcomeStatus(status: string | undefined): boolean {
@@ -1138,13 +1679,18 @@ function appearedOnLaterStage(
 ): boolean {
   const index = cms.format.stages.findIndex((stage) => stage.id === stageId);
   if (index < 0) return false;
-  const laterIds = new Set(cms.format.stages.slice(index + 1).map((stage) => stage.id));
+  const laterIds = new Set(
+    cms.format.stages.slice(index + 1).map((stage) => stage.id),
+  );
   return cms.stages.some((stage) => {
-    if (!laterIds.has(stage.stageId) || stage.status === 'PENDING') return false;
+    if (!laterIds.has(stage.stageId) || stage.status === 'PENDING')
+      return false;
     const inHeat = stage.heats.some((heat) =>
       heat.slots.some((slot) => slot.participantId === registrationId),
     );
-    const inField = stage.entries.some((entry) => entry.participantId === registrationId);
+    const inField = stage.entries.some(
+      (entry) => entry.participantId === registrationId,
+    );
     return inHeat || inField;
   });
 }
@@ -1165,7 +1711,8 @@ function sourceOfStage(
     if (stage.advancement.type !== 'ROUTES') continue;
     for (const route of stage.advancement.routes) {
       if (route.toStageId !== stageId) continue;
-      const qualifierStatus = route.cut.type === 'SECOND_HALF' || stageId === 'final_b' ? 'NQ' : 'QQ';
+      const qualifierStatus =
+        route.cut.type === 'SECOND_HALF' || stageId === 'final_b' ? 'NQ' : 'QQ';
       return { sourceStageId: stage.id, qualifierStatus };
     }
   }

@@ -53,6 +53,8 @@ const STATUS_OPTIONS: Array<{ value: HeatResultStatus; label: string }> = [
 type ClassCompetitionPanelProps = {
   eventId: string;
   competition: ClassCompetitionView | null;
+  startId: string;
+  sectionId: string;
   formatId: number | null;
   gender: string;
   eventLaps: EventLap[];
@@ -65,6 +67,8 @@ type ClassCompetitionPanelProps = {
 export function ClassCompetitionPanel({
   eventId,
   competition,
+  startId,
+  sectionId,
   formatId,
   gender,
   eventLaps,
@@ -117,6 +121,8 @@ export function ClassCompetitionPanel({
             'create',
             async () => {
               await classCompetitionsService.create(eventId, {
+                startId: startId || null,
+                sectionId,
                 formatId,
                 gender: classGender,
               });

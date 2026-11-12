@@ -18,6 +18,7 @@ type HarnessOptions = {
   enrollmentStatus?: string;
   startNumber?: number | null;
   hasExistingResult?: boolean;
+  hasBracket?: boolean;
 };
 
 function makeHarness(options: HarnessOptions = {}) {
@@ -82,7 +83,36 @@ function makeHarness(options: HarnessOptions = {}) {
       ),
     },
     enrollment: { findFirst: jest.fn(() => Promise.resolve(enrollment)) },
-    classCompetition: { findFirst: jest.fn(() => Promise.resolve(null)) },
+    classCompetition: {
+      findMany: jest.fn(() =>
+        Promise.resolve(
+          options.hasBracket
+            ? [
+                {
+                  id: 'bracket-1',
+                  startId: enrollment.startId,
+                  formatId: 1,
+                  gender: 'M',
+                  sectionId: 'CATEGORY_2',
+                  sectionKind: 'CATEGORY_NUMBER',
+                  targetKey: 'GROUPS:AGE_24_40',
+                  targetGroupIds: ['AGE_24_40'],
+                  targetWholeCategory: false,
+                  frozenTitle: 'Категория 2',
+                  frozenSubtitle: '24–40',
+                  frozenYoungestBound: 24,
+                  frozenMemberBounds: [24],
+                  frozenSectionNumber: 2,
+                  capturedEnrollmentIds: [ENROLLMENT_ID],
+                  capturedRegistrationIds: [REGISTRATION_ID],
+                },
+              ]
+            : [],
+        ),
+      ),
+    },
+    ageSplitCategory: { findMany: jest.fn(() => Promise.resolve([])) },
+    ageSplitSection: { findMany: jest.fn(() => Promise.resolve([])) },
     categoryFinish: { findFirst: jest.fn(() => Promise.resolve(null)) },
     $transaction: jest.fn((work: (client: typeof tx) => Promise<unknown>) =>
       work(tx),
@@ -165,6 +195,18 @@ describe('ResultsService enrollment upsert', () => {
       timeMilliseconds: 3_600_000,
     });
     expect(state.executeRawCalls).toHaveLength(1);
+  });
+
+  it('rejects a simple result for a row displayed in a race section', async () => {
+    const { service, state } = makeHarness({ hasBracket: true });
+
+    await expect(
+      service.upsert('admin-sub', EVENT_ID, ENROLLMENT_ID, {
+        outcome: 'FINISHED',
+        timeMilliseconds: 3_600_000,
+      }),
+    ).rejects.toThrow('Это многоэтапная гонка');
+    expect(state.executeRawCalls).toHaveLength(0);
   });
 
   it('updates the same result on correction and clears timing for DNS', async () => {
