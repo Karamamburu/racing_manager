@@ -1373,6 +1373,51 @@ export function EventPage() {
                                 {categoryFinished ? <Tag>Гонка завершена</Tag> : null}
                               </Space>
                             </div>
+                            {sectionViews.map((view) => (
+                              <div
+                                key={`panel-${view.key}`}
+                                style={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: 8,
+                                  padding: '12px 12px 0',
+                                  border: '1px solid #f0f0f0',
+                                  borderRadius: 8,
+                                }}
+                              >
+                                <Space size={8} align="baseline" wrap>
+                                  <Typography.Text strong>
+                                    {view.title}
+                                  </Typography.Text>
+                                  {view.subtitle ? (
+                                    <Typography.Text type="secondary">
+                                      {view.subtitle}
+                                    </Typography.Text>
+                                  ) : null}
+                                  <Typography.Text type="secondary">
+                                    {formatParticipantCount(view.rows.length, group.key)}
+                                  </Typography.Text>
+                                  {view.competition ? (
+                                    <Tag>Многоэтапная гонка</Tag>
+                                  ) : null}
+                                </Space>
+                                {classCompetitionsQuery.isSuccess ? (
+                                  <ClassCompetitionPanel
+                                    eventId={event.id}
+                                    competition={view.competition}
+                                    startId={startId}
+                                    sectionId={view.sectionId}
+                                    formatId={formatId}
+                                    gender={gender}
+                                    eventLaps={event.laps ?? []}
+                                    canManage={canRunBracket}
+                                    registrationClosed={registrationClosed}
+                                    categoryHasResults={hasResults || categoryFinished}
+                                    onChanged={refreshEvent}
+                                  />
+                                ) : null}
+                              </div>
+                            ))}
                             <Collapse
                               activeKey={expandedProtocolKeys}
                               onChange={(keys) => changeProtocolExpansion(section.key, keys)}
@@ -1398,55 +1443,12 @@ export function EventPage() {
                                             : 'Полный протокол'}
                                         </Button>
                                       ) : null}
-                                      {sectionViews.map((view) => (
-                                        <Space
-                                          key={view.key}
-                                          direction="vertical"
-                                          size={8}
-                                          style={{ width: '100%' }}
-                                        >
-                                          <Space size={8} align="baseline" wrap>
-                                            <Typography.Text strong>
-                                              {view.title}
-                                            </Typography.Text>
-                                            {view.subtitle ? (
-                                              <Typography.Text type="secondary">
-                                                {view.subtitle}
-                                              </Typography.Text>
-                                            ) : null}
-                                            <Typography.Text type="secondary">
-                                              {formatParticipantCount(
-                                                view.rows.length,
-                                                group.key,
-                                              )}
-                                            </Typography.Text>
-                                            {view.competition ? (
-                                              <Tag>Многоэтапная гонка</Tag>
-                                            ) : null}
-                                          </Space>
-                                          {classCompetitionsQuery.isSuccess ? (
-                                            <ClassCompetitionPanel
-                                              eventId={event.id}
-                                              competition={view.competition}
-                                              startId={startId}
-                                              sectionId={view.sectionId}
-                                              formatId={formatId}
-                                              gender={gender}
-                                              eventLaps={event.laps ?? []}
-                                              canManage={canRunBracket}
-                                              registrationClosed={registrationClosed}
-                                              categoryHasResults={
-                                                hasResults || categoryFinished
-                                              }
-                                              onChanged={refreshEvent}
-                                            />
-                                          ) : null}
-                                          {view.competition &&
-                                          view.competition.status !== 'DONE'
-                                            ? null
-                                            : renderTable(view)}
-                                        </Space>
-                                      ))}
+                                      {sectionViews.map((view) =>
+                                        view.competition &&
+                                        view.competition.status !== 'DONE'
+                                          ? null
+                                          : renderTable(view),
+                                      )}
                                     </Space>
                                   ),
                                 },
