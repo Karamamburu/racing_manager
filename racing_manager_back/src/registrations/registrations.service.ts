@@ -35,6 +35,7 @@ import {
   guestPersonKey,
   type TestPerson,
 } from './seed-test-people';
+import { resolveControlYear } from '../events/age-groups';
 import { logEvent } from '../logging/log-event';
 import {
   ACTIVE_REGISTRATION_STATUSES,
@@ -423,6 +424,7 @@ export class RegistrationsService {
         existing.map((row) =>
           guestPersonKey(row.firstName, row.lastName, row.birthYear),
         ),
+        resolveControlYear(event.eventDate),
       );
     } catch {
       throw new BadRequestException(
