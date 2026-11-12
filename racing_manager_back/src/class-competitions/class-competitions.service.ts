@@ -441,7 +441,19 @@ export class ClassCompetitionsService {
       });
       return this.present(created, cms, await this.loadRegistrations(eventId));
     } catch (error) {
-      await this.cms.deleteCompetition(cms.id).catch(() => undefined);
+      await this.cms.deleteCompetition(cms.id).catch((cleanupError) => {
+        logEvent(
+          this.logger,
+          {
+            event: 'class_competition.cms_cleanup_failed',
+            eventId,
+            cmsCompetitionId: cms.id,
+            reason:
+              cleanupError instanceof Error ? cleanupError.message : 'unknown',
+          },
+          'warn',
+        );
+      });
       if (isUniqueViolation(error)) {
         throw new ConflictException(
           'Для этой категории многоэтапная гонка уже создана.',
