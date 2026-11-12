@@ -215,7 +215,7 @@ CREATE TABLE results (
 CREATE TABLE class_competitions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-  start_id UUID REFERENCES starts(id) ON DELETE CASCADE,
+  start_id UUID,
   format_id INT REFERENCES participation_formats(id),
   gender gender_type NOT NULL,
   section_id TEXT,
@@ -731,6 +731,10 @@ CREATE TABLE starts (
 CREATE UNIQUE INDEX uq_starts_id_event ON starts (id, event_id);
 CREATE UNIQUE INDEX uq_starts_event_sort_order ON starts (event_id, sort_order);
 CREATE INDEX idx_starts_event_id ON starts (event_id);
+
+ALTER TABLE class_competitions
+  ADD CONSTRAINT class_competitions_start_id_fkey
+  FOREIGN KEY (start_id) REFERENCES starts(id) ON DELETE CASCADE;
 
 CREATE TABLE start_formats (
   start_id UUID NOT NULL REFERENCES starts(id) ON DELETE CASCADE,
