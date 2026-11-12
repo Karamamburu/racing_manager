@@ -1340,41 +1340,43 @@ export class EventsService {
           }) == null
         );
       });
-      if (simpleEnrollments.length === 0) {
+      if (enrollments.length === 0) {
         throw new BadRequestException(
           'В этой категории нет участников для завершения.',
         );
       }
-      const missing = simpleEnrollments.some(
-        (row) =>
-          isRankedRegistrationStatus(row.registration.status) &&
-          row.result === null,
-      );
-      if (missing) {
-        throw new BadRequestException(
-          'Перед завершением гонки укажите результат каждому участнику, который занимает место, либо поставьте DNS, DNF, DSQ или NQ.',
+      if (simpleEnrollments.length > 0) {
+        const missing = simpleEnrollments.some(
+          (row) =>
+            isRankedRegistrationStatus(row.registration.status) &&
+            row.result === null,
         );
-      }
-      const ranked = rankEnrollments(
-        simpleEnrollments.map((row) => ({
-          enrollmentId: row.id,
-          registrationId: row.registration.id,
-          startId: row.startId,
-          formatId: row.formatId,
-          gender: row.registration.gender,
-          startNumber: row.registration.startNumber,
-          registeredAt: row.registration.registeredAt,
-          outcome: row.result?.outcome ?? null,
-          timeMilliseconds: row.result?.timeMilliseconds ?? null,
-          enrollmentStatus: row.status,
-        })),
-      );
-      for (const { enrollment, place } of ranked) {
-        if (place == null) continue;
-        await tx.result.update({
-          where: { enrollmentId: enrollment.enrollmentId },
-          data: { place },
-        });
+        if (missing) {
+          throw new BadRequestException(
+            'Перед завершением гонки укажите результат каждому участнику, который занимает место, либо поставьте DNS, DNF, DSQ или NQ.',
+          );
+        }
+        const ranked = rankEnrollments(
+          simpleEnrollments.map((row) => ({
+            enrollmentId: row.id,
+            registrationId: row.registration.id,
+            startId: row.startId,
+            formatId: row.formatId,
+            gender: row.registration.gender,
+            startNumber: row.registration.startNumber,
+            registeredAt: row.registration.registeredAt,
+            outcome: row.result?.outcome ?? null,
+            timeMilliseconds: row.result?.timeMilliseconds ?? null,
+            enrollmentStatus: row.status,
+          })),
+        );
+        for (const { enrollment, place } of ranked) {
+          if (place == null) continue;
+          await tx.result.update({
+            where: { enrollmentId: enrollment.enrollmentId },
+            data: { place },
+          });
+        }
       }
       await tx.categoryFinish.create({
         data: {
