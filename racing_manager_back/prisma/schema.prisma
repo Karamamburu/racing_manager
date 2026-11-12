@@ -324,6 +324,7 @@ model Start {
   categoryFinishes         CategoryFinish[]
   ageSplitSections         AgeSplitSection[]
   ageSplitCategories       AgeSplitCategory[]
+  classCompetitions        ClassCompetition[]
 
   @@unique([id, eventId], map: "uq_starts_id_event")
   @@unique([eventId, sortOrder], map: "uq_starts_event_sort_order")
@@ -363,20 +364,35 @@ model Enrollment {
 }
 
 model ClassCompetition {
-  id               String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  eventId          String                 @map("event_id") @db.Uuid
-  event            Event                  @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  formatId         Int?                   @map("format_id")
-  format           ParticipationFormat?   @relation(fields: [formatId], references: [id])
-  gender           GenderType
-  cmsCompetitionId String                 @unique @map("cms_competition_id") @db.Uuid
-  status           ClassCompetitionStatus @default(DRAFT)
-  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
-  heatTimes        ClassHeatTime[]
+  id                      String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  eventId                 String                 @map("event_id") @db.Uuid
+  event                   Event                  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  startId                 String?                @map("start_id") @db.Uuid
+  start                   Start?                 @relation(fields: [startId], references: [id], onDelete: Cascade)
+  formatId                Int?                   @map("format_id")
+  format                  ParticipationFormat?   @relation(fields: [formatId], references: [id])
+  gender                  GenderType
+  sectionId               String?                @map("section_id")
+  sectionKind             String?                @map("section_kind")
+  targetKey               String                 @default("WHOLE") @map("target_key")
+  targetGroupIds          String[]               @default([]) @map("target_group_ids")
+  targetWholeCategory     Boolean                @default(true) @map("target_whole_category")
+  frozenTitle             String?                @map("frozen_title")
+  frozenSubtitle          String?                @map("frozen_subtitle")
+  frozenYoungestBound     Int?                   @map("frozen_youngest_bound")
+  frozenMemberBounds      Int[]                  @default([]) @map("frozen_member_bounds")
+  frozenSectionNumber     Int?                   @map("frozen_section_number")
+  capturedEnrollmentIds   String[]               @default([]) @map("captured_enrollment_ids")
+  capturedRegistrationIds String[]               @default([]) @map("captured_registration_ids")
+  cmsCompetitionId        String                 @unique @map("cms_competition_id") @db.Uuid
+  status                  ClassCompetitionStatus @default(DRAFT)
+  createdAt               DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  heatTimes               ClassHeatTime[]
 
-  @@unique([eventId, formatId, gender])
+  @@unique([eventId, startId, formatId, gender, targetKey])
   @@index([eventId], map: "idx_class_competitions_event_id")
+  @@index([startId], map: "idx_class_competitions_start_id")
   @@map("class_competitions")
 }
 

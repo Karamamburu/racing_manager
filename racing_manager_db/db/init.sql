@@ -215,16 +215,73 @@ CREATE TABLE results (
 CREATE TABLE class_competitions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  start_id UUID REFERENCES starts(id) ON DELETE CASCADE,
   format_id INT REFERENCES participation_formats(id),
   gender gender_type NOT NULL,
+  section_id TEXT,
+  section_kind TEXT,
+  target_key TEXT NOT NULL DEFAULT 'WHOLE',
+  target_group_ids TEXT[] NOT NULL DEFAULT '{}',
+  target_whole_category BOOLEAN NOT NULL DEFAULT TRUE,
+  frozen_title TEXT,
+  frozen_subtitle TEXT,
+  frozen_youngest_bound INT,
+  frozen_member_bounds INT[] NOT NULL DEFAULT '{}',
+  frozen_section_number INT,
+  captured_enrollment_ids TEXT[] NOT NULL DEFAULT '{}',
+  captured_registration_ids TEXT[] NOT NULL DEFAULT '{}',
   cms_competition_id UUID NOT NULL UNIQUE,
   status class_competition_status NOT NULL DEFAULT 'DRAFT',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX class_competitions_event_class
-  ON class_competitions (event_id, gender, COALESCE(format_id, -1));
+CREATE UNIQUE INDEX class_competitions_section_identity
+  ON class_competitions (
+    event_id,
+    COALESCE(start_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    COALESCE(format_id, -1),
+    gender,
+    target_key
+  );
+
+CREATE OR REPLACE FUNCTION class_competitions_scope_exclusive()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.target_whole_category THEN
+    IF EXISTS (
+      SELECT 1 FROM class_competitions AS other
+      WHERE other.event_id = NEW.event_id
+        AND COALESCE(other.start_id, '00000000-0000-0000-0000-000000000000'::uuid)
+          = COALESCE(NEW.start_id, '00000000-0000-0000-0000-000000000000'::uuid)
+        AND COALESCE(other.format_id, -1) = COALESCE(NEW.format_id, -1)
+        AND other.gender = NEW.gender
+        AND other.id <> NEW.id
+    ) THEN
+      RAISE EXCEPTION 'protocol category already has a race' USING ERRCODE = '23505';
+    END IF;
+  ELSE
+    IF EXISTS (
+      SELECT 1 FROM class_competitions AS other
+      WHERE other.event_id = NEW.event_id
+        AND COALESCE(other.start_id, '00000000-0000-0000-0000-000000000000'::uuid)
+          = COALESCE(NEW.start_id, '00000000-0000-0000-0000-000000000000'::uuid)
+        AND COALESCE(other.format_id, -1) = COALESCE(NEW.format_id, -1)
+        AND other.gender = NEW.gender
+        AND other.target_whole_category = TRUE
+        AND other.id <> NEW.id
+    ) THEN
+      RAISE EXCEPTION 'protocol category already has a whole-category race' USING ERRCODE = '23505';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_class_competitions_scope_exclusive
+  BEFORE INSERT OR UPDATE OF start_id, format_id, gender, target_whole_category
+  ON class_competitions
+  FOR EACH ROW EXECUTE FUNCTION class_competitions_scope_exclusive();
 
 -- A classification (format x gender) whose protocol was closed without a bracket.
 CREATE TABLE category_finishes (
