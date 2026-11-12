@@ -9,7 +9,12 @@ export class ClassCompetitionsService {
 
   public async create(
     eventId: string,
-    body: { formatId: number | null; gender: 'M' | 'F' },
+    body: {
+      startId?: string | null;
+      sectionId: string;
+      formatId: number | null;
+      gender: 'M' | 'F';
+    },
   ): Promise<ClassCompetitionView> {
     const result = await apiClient.postResult<ClassCompetitionView>(
       `/events/${eventId}/class-competitions`,

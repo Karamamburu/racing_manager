@@ -78,7 +78,7 @@ function participantFormats(
 /**
  * Splits one category's rows into age sections: configured categories ordered
  * youngest first, then `REMAINDER`, then `NO_BIRTH_YEAR`. A category without an
- * effective split (unsplit, disabled or suppressed by a class competition)
+ * effective split (unsplit, disabled or suppressed by a whole-category race)
  * stays one headerless `CATEGORY` section. Empty sections are dropped and an
  * unknown stored `sectionId` is appended defensively with its id as title.
  * The deprecated `sections` field is ignored; `categories` is the read shape.

@@ -17,7 +17,7 @@ import {
 import { eventsService } from '../../features/events/eventsService';
 import { recentEventsQueryKey } from '../../features/events/useRecentEventsQuery';
 import { EventStartBlocks } from '../../features/events/EventStartBlocks';
-import { countAgeGroups } from '../../features/events/ageCategories';
+import { categoryYoungestBound, countAgeGroups } from '../../features/events/ageCategories';
 import {
   categoryHasResults,
   categoryIsFinished,
@@ -120,19 +120,39 @@ function lastReachedStage(
   return reached;
 }
 
-function competitionForRows(
+function competitionsForRows(
   rows: EventParticipant[],
   competitions: ClassCompetitionView[],
-): ClassCompetitionView | null {
+): ClassCompetitionView[] {
   const sample = rows[0];
-  if (!sample) return null;
-  return (
-    competitions.find(
-      (competition) =>
-        competition.gender === sample.gender &&
-        competition.formatId === (sample.format?.id ?? null),
-    ) ?? null
+  if (!sample) return [];
+  return competitions.filter(
+    (competition) =>
+      competition.gender === sample.gender &&
+      competition.formatId === (sample.format?.id ?? null) &&
+      competition.startId === sample.startId,
   );
+}
+
+type ProtocolSectionView = {
+  key: string;
+  title: string;
+  subtitle: string | null;
+  rows: EventParticipant[];
+  competition: ClassCompetitionView | null;
+  sectionId: string;
+  bound: number;
+};
+
+function simpleSectionBound(
+  sectionId: string,
+  split: { categories: Array<{ id: string; groupIds: AgeGroupId[] }> } | null,
+): number {
+  if (sectionId === 'CATEGORY') return 0;
+  if (sectionId === 'REMAINDER') return 1_000_000;
+  if (sectionId === 'NO_BIRTH_YEAR') return 1_000_001;
+  const category = split?.categories.find((item) => item.id === sectionId);
+  return category ? categoryYoungestBound(category.groupIds) : 1_000_002;
 }
 
 type ProtocolParticipant = EventParticipant & { reachedStage?: string | null };
@@ -841,8 +861,22 @@ export function EventPage() {
     classCompetitions.some(
       (competition) =>
         competition.formatId === ageSplitCategory.formatId &&
-        competition.gender === ageSplitCategory.gender,
+        competition.gender === ageSplitCategory.gender &&
+        competition.startId === ageSplitCategory.startId &&
+        competition.targetWholeCategory,
     );
+  const ageSplitRaceSections =
+    ageSplitCategory === null
+      ? []
+      : classCompetitions
+          .filter(
+            (competition) =>
+              competition.formatId === ageSplitCategory.formatId &&
+              competition.gender === ageSplitCategory.gender &&
+              competition.startId === ageSplitCategory.startId &&
+              !competition.targetWholeCategory,
+          )
+          .map((competition) => competition.title || competition.sectionId);
   const ageSplitGroupCounts = resolveAgeSplitGroupCounts(
     participantGroups,
     ageSplitCategory,
@@ -1110,8 +1144,6 @@ export function EventPage() {
                   <Tabs
                     type="card"
                     items={group.sections.map((section) => {
-                      const competition = competitionForRows(section.rows, classCompetitions);
-                      const bracketInProgress = competition != null && competition.status !== 'DONE';
                       const sample = section.rows[0];
                       const formatId = sample?.format?.id ?? null;
                       const gender = sample?.gender ?? '';
@@ -1124,32 +1156,94 @@ export function EventPage() {
                       );
                       const hasResults = categoryHasResults(section.rows);
                       const readyToFinish = categoryReadyToFinish(section.rows);
-                      const lockedColumns = getParticipantColumns({
-                        showReachedStage: competition != null,
-                        canAssignNumbers: competition ? false : canAssignNumbers,
-                        canAssignResults: false,
-                        canChangeStatus: competition ? canChangeRegistrationStatus : false,
-                        savingNumberId: savingStartNumberId,
-                        savingResultId: savingFinishTimeId,
-                        savingStatusId: savingRegistrationStatusId,
-                        savingOutcomeId,
-                        onAssignNumber: assignStartNumber,
-                        onChangeStatus: assignRegistrationStatus,
-                        onAssignOutcome: assignOutcome,
-                        onAssignResult: assignFinishTime,
-                      });
-                      const columns = competition || categoryFinished ? lockedColumns : participantColumns;
+                      const sectionCompetitions = competitionsForRows(
+                        section.rows,
+                        classCompetitions,
+                      );
+                      const wholeRace =
+                        sectionCompetitions.find((item) => item.targetWholeCategory) ??
+                        null;
+                      const bracketInProgress = sectionCompetitions.some(
+                        (item) => item.status !== 'DONE',
+                      );
+                      const split =
+                        event.ageSplits?.find(
+                          (item) =>
+                            item.startId === startId &&
+                            item.formatId === formatId &&
+                            item.gender === gender,
+                        ) ?? null;
+                      const racedRegistrationIds = new Set(
+                        registrations
+                          .filter((row) => row.raceId != null)
+                          .map((row) => row.id),
+                      );
+                      const sectionViews: ProtocolSectionView[] = [];
+                      if (wholeRace) {
+                        sectionViews.push({
+                          key: `race-${wholeRace.id}`,
+                          title: wholeRace.title || section.title,
+                          subtitle: wholeRace.subtitle,
+                          rows: section.visibleRows,
+                          competition: wholeRace,
+                          sectionId: wholeRace.sectionId,
+                          bound: wholeRace.youngestBound ?? 0,
+                        });
+                      } else {
+                        for (const competition of sectionCompetitions) {
+                          sectionViews.push({
+                            key: `race-${competition.id}`,
+                            title: competition.title || section.title,
+                            subtitle: competition.subtitle,
+                            rows: section.visibleRows.filter(
+                              (row) => row.raceId === competition.id,
+                            ),
+                            competition,
+                            sectionId: competition.sectionId,
+                            bound: competition.youngestBound ?? 0,
+                          });
+                        }
+                        for (const ageSection of section.ageSections) {
+                          const rows = ageSection.visibleRows.filter(
+                            (row) => row.raceId == null,
+                          );
+                          if (rows.length === 0) continue;
+                          sectionViews.push({
+                            key: `simple-${ageSection.key}`,
+                            title: ageSection.title ?? section.title,
+                            subtitle: ageSection.subtitle,
+                            rows,
+                            competition: null,
+                            sectionId: ageSection.key,
+                            bound: simpleSectionBound(ageSection.key, split),
+                          });
+                        }
+                        if (sectionViews.length === 0) {
+                          sectionViews.push({
+                            key: `simple-${section.key}`,
+                            title: section.title,
+                            subtitle: null,
+                            rows: section.visibleRows,
+                            competition: null,
+                            sectionId: 'CATEGORY',
+                            bound: 0,
+                          });
+                        }
+                      }
+                      sectionViews.sort(
+                        (left, right) =>
+                          left.bound - right.bound ||
+                          (left.competition ? 0 : 1) -
+                            (right.competition ? 0 : 1) ||
+                          left.title.localeCompare(right.title),
+                      );
                       const compactActive =
                         compactProtocol && !fullProtocolKeys.includes(section.key);
-                      const hasAgeSectionHeaders =
-                        section.ageSections.length > 1 ||
-                        (section.ageSections.length === 1 &&
-                          section.ageSections[0].title !== null);
                       const ageSplitSelection: AgeSplitCategory | null =
                         resolveAgeSplitSelection({
                           roles: session?.roles,
                           eventStatus: event.status,
-                          bracketInProgress,
+                          bracketInProgress: false,
                           hasStarts: event.starts.length > 0,
                           rowCount: section.rows.length,
                           startId,
@@ -1160,40 +1254,62 @@ export function EventPage() {
                               ?.resolvedLabel ?? section.title,
                           formatName: sample?.format?.name ?? '',
                         });
-                      const renderProtocolTable = (
-                        rows: EventParticipant[],
-                        tableKey: string,
-                      ) => (
-                        <Table
-                          key={tableKey}
-                          className={
-                            compactActive
-                              ? 'protocol-table protocol-table--compact'
-                              : 'protocol-table'
-                          }
-                          columns={columnsForProtocol(columns, compactActive)}
-                          dataSource={rowsWithClassification(rows, competition)}
-                          rowKey="id"
-                          pagination={false}
-                          tableLayout={compactActive ? 'fixed' : undefined}
-                          scroll={compactActive ? undefined : { x: 'max-content' }}
-                        />
-                      );
-                      const classPanel = classCompetitionsQuery.isSuccess ? (
-                        <ClassCompetitionPanel
-                          eventId={event.id}
-                          competition={competition}
-                          formatId={formatId}
-                          gender={gender}
-                          eventLaps={event.laps ?? []}
-                          canManage={canRunBracket}
-                          registrationClosed={registrationClosed}
-                          categoryHasResults={hasResults || categoryFinished}
-                          onChanged={refreshEvent}
-                        />
-                      ) : null;
+                      const renderTable = (view: ProtocolSectionView) => {
+                        const raced = view.rows.some((row) =>
+                          racedRegistrationIds.has(row.id),
+                        );
+                        const locked = view.competition != null || categoryFinished;
+                        const columns = locked
+                          ? getParticipantColumns({
+                              showReachedStage: view.competition != null,
+                              canAssignNumbers: false,
+                              canAssignResults: false,
+                              canChangeStatus: false,
+                              savingNumberId: savingStartNumberId,
+                              savingResultId: savingFinishTimeId,
+                              savingStatusId: savingRegistrationStatusId,
+                              savingOutcomeId,
+                              onAssignNumber: assignStartNumber,
+                              onChangeStatus: assignRegistrationStatus,
+                              onAssignOutcome: assignOutcome,
+                              onAssignResult: assignFinishTime,
+                            })
+                          : getParticipantColumns({
+                              showReachedStage: false,
+                              canAssignNumbers: raced ? false : canAssignNumbers,
+                              canAssignResults: canAssignResults,
+                              canChangeStatus: canChangeRegistrationStatus,
+                              savingNumberId: savingStartNumberId,
+                              savingResultId: savingFinishTimeId,
+                              savingStatusId: savingRegistrationStatusId,
+                              savingOutcomeId,
+                              onAssignNumber: assignStartNumber,
+                              onChangeStatus: assignRegistrationStatus,
+                              onAssignOutcome: assignOutcome,
+                              onAssignResult: assignFinishTime,
+                            });
+                        return (
+                          <Table
+                            key={view.key}
+                            className={
+                              compactActive
+                                ? 'protocol-table protocol-table--compact'
+                                : 'protocol-table'
+                            }
+                            columns={columnsForProtocol(columns, compactActive)}
+                            dataSource={rowsWithClassification(
+                              view.rows,
+                              view.competition,
+                            )}
+                            rowKey="id"
+                            pagination={false}
+                            tableLayout={compactActive ? 'fixed' : undefined}
+                            scroll={compactActive ? undefined : { x: 'max-content' }}
+                          />
+                        );
+                      };
                       const finishControl =
-                        !competition && canRunBracket && !categoryFinished ? (
+                        canRunBracket && !categoryFinished ? (
                           <Tooltip
                             title={
                               readyToFinish
@@ -1206,9 +1322,11 @@ export function EventPage() {
                                 {...(readyToFinish
                                   ? { color: 'green', variant: 'solid' as const }
                                   : { type: 'primary' as const })}
-                                disabled={!readyToFinish}
+                                disabled={!readyToFinish || bracketInProgress}
                                 loading={finishingCategory === section.key}
-                                onClick={() => finishCategory(startId, formatId, gender, section.key)}
+                                onClick={() =>
+                                  finishCategory(startId, formatId, gender, section.key)
+                                }
                               >
                                 Завершить гонку
                               </Button>
@@ -1221,111 +1339,119 @@ export function EventPage() {
                           <Space size={8}>
                             <span>{section.title}</span>
                             <Typography.Text type="secondary">
-                              {formatParticipantCount(section.visibleRows.length, group.key)}
+                              {formatParticipantCount(
+                                section.visibleRows.length,
+                                group.key,
+                              )}
                             </Typography.Text>
                           </Space>
                         ),
                         children: (
                           <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                            {competition ? (
-                              classPanel
-                            ) : (
-                              <div
-                                style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'space-between',
-                                  gap: 12,
-                                  flexWrap: 'wrap',
-                                }}
-                              >
-                                <Space size={8} wrap>
-                                  {classPanel}
-                                  {ageSplitSelection ? (
-                                    <Button onClick={() => setAgeSplitCategory(ageSplitSelection)}>
-                                      Возрастные категории
-                                    </Button>
-                                  ) : null}
-                                </Space>
-                                <Space size={8} wrap>
-                                  {finishControl}
-                                  {categoryFinished ? <Tag>Гонка завершена</Tag> : null}
-                                </Space>
-                              </div>
-                            )}
-                            {competition && !bracketInProgress ? (
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: 12,
+                                flexWrap: 'wrap',
+                              }}
+                            >
                               <Space size={8} wrap>
-                                {categoryFinished ? <Tag>Гонка завершена</Tag> : null}
                                 {ageSplitSelection ? (
-                                  <Button onClick={() => setAgeSplitCategory(ageSplitSelection)}>
+                                  <Button
+                                    onClick={() =>
+                                      setAgeSplitCategory(ageSplitSelection)
+                                    }
+                                  >
                                     Возрастные категории
                                   </Button>
                                 ) : null}
                               </Space>
-                            ) : null}
-                            {bracketInProgress ? null : (
-                              <Collapse
-                                activeKey={expandedProtocolKeys}
-                                onChange={(keys) => changeProtocolExpansion(section.key, keys)}
-                                items={[
-                                  {
-                                    key: `${section.key}-protocol`,
-                                    label: 'Итоговый протокол',
-                                    children: (
-                                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                                        {compactProtocol ? (
-                                          <Button
-                                            type="link"
-                                            size="small"
-                                            style={{ paddingInline: 0 }}
-                                            onClick={() => toggleFullProtocol(section.key)}
-                                          >
-                                            {fullProtocolKeys.includes(section.key)
-                                              ? 'Краткий протокол'
-                                              : 'Полный протокол'}
-                                          </Button>
-                                        ) : null}
-                                        {hasAgeSectionHeaders
-                                          ? section.ageSections.map((ageSection) => (
-                                              <Space
-                                                key={ageSection.key}
-                                                direction="vertical"
-                                                size={4}
-                                                style={{ width: '100%' }}
-                                              >
-                                                <Space size={8} align="baseline" wrap>
-                                                  <Typography.Text strong>
-                                                    {ageSection.title ?? section.title}
-                                                  </Typography.Text>
-                                                  {ageSection.subtitle ? (
-                                                    <Typography.Text type="secondary">
-                                                      {ageSection.subtitle}
-                                                    </Typography.Text>
-                                                  ) : null}
-                                                  <Typography.Text type="secondary">
-                                                    {formatParticipantCount(
-                                                      ageSection.visibleRows.length,
-                                                      group.key,
-                                                    )}
-                                                  </Typography.Text>
-                                                </Space>
-                                                {renderProtocolTable(
-                                                  ageSection.visibleRows,
-                                                  `${section.key}-${ageSection.key}`,
-                                                )}
-                                              </Space>
-                                            ))
-                                          : renderProtocolTable(
-                                              section.ageSections[0]?.visibleRows ??
-                                                section.visibleRows,
-                                              `${section.key}-category`,
-                                            )}
-                                      </Space>
-                                    ),
-                                  },
-                                ]}
-                              />
-                            )}
+                              <Space size={8} wrap>
+                                {finishControl}
+                                {categoryFinished ? <Tag>Гонка завершена</Tag> : null}
+                              </Space>
+                            </div>
+                            <Collapse
+                              activeKey={expandedProtocolKeys}
+                              onChange={(keys) => changeProtocolExpansion(section.key, keys)}
+                              items={[
+                                {
+                                  key: `${section.key}-protocol`,
+                                  label: 'Итоговый протокол',
+                                  children: (
+                                    <Space
+                                      direction="vertical"
+                                      size={16}
+                                      style={{ width: '100%' }}
+                                    >
+                                      {compactProtocol ? (
+                                        <Button
+                                          type="link"
+                                          size="small"
+                                          style={{ paddingInline: 0 }}
+                                          onClick={() => toggleFullProtocol(section.key)}
+                                        >
+                                          {fullProtocolKeys.includes(section.key)
+                                            ? 'Краткий протокол'
+                                            : 'Полный протокол'}
+                                        </Button>
+                                      ) : null}
+                                      {sectionViews.map((view) => (
+                                        <Space
+                                          key={view.key}
+                                          direction="vertical"
+                                          size={8}
+                                          style={{ width: '100%' }}
+                                        >
+                                          <Space size={8} align="baseline" wrap>
+                                            <Typography.Text strong>
+                                              {view.title}
+                                            </Typography.Text>
+                                            {view.subtitle ? (
+                                              <Typography.Text type="secondary">
+                                                {view.subtitle}
+                                              </Typography.Text>
+                                            ) : null}
+                                            <Typography.Text type="secondary">
+                                              {formatParticipantCount(
+                                                view.rows.length,
+                                                group.key,
+                                              )}
+                                            </Typography.Text>
+                                            {view.competition ? (
+                                              <Tag>Многоэтапная гонка</Tag>
+                                            ) : null}
+                                          </Space>
+                                          {classCompetitionsQuery.isSuccess ? (
+                                            <ClassCompetitionPanel
+                                              eventId={event.id}
+                                              competition={view.competition}
+                                              startId={startId}
+                                              sectionId={view.sectionId}
+                                              formatId={formatId}
+                                              gender={gender}
+                                              eventLaps={event.laps ?? []}
+                                              canManage={canRunBracket}
+                                              registrationClosed={registrationClosed}
+                                              categoryHasResults={
+                                                hasResults || categoryFinished
+                                              }
+                                              onChanged={refreshEvent}
+                                            />
+                                          ) : null}
+                                          {view.competition &&
+                                          view.competition.status !== 'DONE'
+                                            ? null
+                                            : renderTable(view)}
+                                        </Space>
+                                      ))}
+                                    </Space>
+                                  ),
+                                },
+                              ]}
+                            />
                           </Space>
                         ),
                       };
@@ -1391,6 +1517,7 @@ export function EventPage() {
         value={ageSplitValue}
         groupCounts={ageSplitGroupCounts}
         notApplied={ageSplitNotApplied}
+        raceSections={ageSplitRaceSections}
         saving={isSavingAgeSplit}
         onClose={() => setAgeSplitCategory(null)}
         onSave={saveAgeSplit}
