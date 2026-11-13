@@ -430,7 +430,8 @@ CREATE UNIQUE INDEX idx_registrations_event_start_number
 -- ========================================
 INSERT INTO roles (code, name) VALUES
   ('ADMINISTRATOR', 'Administrator'),
-  ('ORGANIZER', 'Organizer');
+  ('ORGANIZER', 'Organizer'),
+  ('REFEREE', 'Referee');
 
 INSERT INTO tracks (id, name, location_city, description, is_active)
 VALUES (
