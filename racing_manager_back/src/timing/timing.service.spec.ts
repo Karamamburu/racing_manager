@@ -21,10 +21,12 @@ import type {
 import { TimingErrorCode, TimingDomainError } from './timing.errors';
 import type {
   ClaimCaptureLockInput,
+  CreateAnonymousSplitInput,
   CreateAttemptInput,
   CreateClockEpochInput,
   CreateMarkInput,
   CreateReceiptInput,
+  CreateRejectedReceiptInput,
   InsertAuditInput,
   PublishResultInput,
   ReleaseCaptureLockInput,
@@ -188,12 +190,27 @@ function createRepositoryFake() {
     ),
     closeOpenEpochs: jest.fn((): Promise<number> => Promise.resolve(0)),
     createMark: jest.fn(),
+    createAnonymousSplit: jest.fn(),
     updateMark: jest.fn(),
     updateAttemptOfficialStart: jest.fn(),
     findReceipt: jest.fn(
       (): Promise<TimingReceiptRow | null> => Promise.resolve(null),
     ),
     createReceipt: jest.fn(),
+    createRejectedReceipt: jest.fn(
+      (
+        _tx: unknown,
+        input: CreateRejectedReceiptInput,
+      ): Promise<TimingReceiptRow> =>
+        Promise.resolve({
+          attemptId: input.attemptId,
+          workstationInstanceId: input.workstationInstanceId,
+          deviceSequence: input.deviceSequence,
+          status: 'REJECTED',
+          reason: input.reason,
+          createdAt: NOW,
+        }),
+    ),
     insertAudit: jest.fn(),
   };
 }
@@ -1518,6 +1535,30 @@ describe('TimingService', () => {
           return updated;
         },
       );
+      repository.createAnonymousSplit.mockImplementation(
+        (_tx: unknown, input: CreateAnonymousSplitInput) => {
+          const created = markRow({
+            id: 'split-new',
+            attemptId: input.attemptId,
+            clockEpochId: input.clockEpochId,
+            enrollmentId: null,
+            registrationId: null,
+            startNumber: null,
+            kind: 'ANONYMOUS_SPLIT',
+            rawCapturedAt: input.rawCapturedAt,
+            rawElapsedMs: input.rawElapsedMs,
+            officialAt: input.officialAt,
+            officialElapsedMs: input.officialElapsedMs,
+            lapNumber: null,
+            status: 'PENDING',
+            workstationInstanceId: input.workstationInstanceId,
+            deviceSequence: input.deviceSequence,
+            idempotencyKey: input.idempotencyKey,
+          });
+          written.set(created.id, created);
+          return Promise.resolve(created);
+        },
+      );
       repository.createReceipt.mockImplementation(
         (_tx: unknown, input: CreateReceiptInput): TimingReceiptRow => ({
           attemptId: input.attemptId,
@@ -1869,6 +1910,126 @@ describe('TimingService', () => {
         enrollmentId: null,
         lapNumber: null,
         status: 'PENDING',
+      });
+    });
+
+    it('captures an anonymous split with no participant, no lap and no routing', async () => {
+      arrangeCapture();
+
+      const pass = await service.capturePass(
+        USER_ID,
+        EVENT_ID,
+        capturePassDto({
+          kind: 'ANONYMOUS_SPLIT',
+          startNumber: undefined,
+          deviceSequence: 6,
+        }),
+        'key-6',
+      );
+
+      // AD-17: no number routing, no participant lookup, no pass mark and no
+      // N check; the split is its own pending mark of the attempt.
+      expect(repository.findRoutingCandidates).not.toHaveBeenCalled();
+      expect(repository.findParticipant).not.toHaveBeenCalled();
+      expect(repository.createMark).not.toHaveBeenCalled();
+      const [, splitInput] = callArguments<
+        [unknown, CreateAnonymousSplitInput]
+      >(repository.createAnonymousSplit);
+      expect(splitInput).toEqual({
+        attemptId: ATTEMPT_ID,
+        clockEpochId: 'epoch-1',
+        rawCapturedAt: NOW,
+        rawElapsedMs: 30_000,
+        officialAt: new Date(NOW.getTime() + 30_000),
+        officialElapsedMs: 30_000,
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 6,
+        idempotencyKey: 'key-6',
+      });
+      const [, receiptInput] = callArguments<[unknown, CreateReceiptInput]>(
+        repository.createReceipt,
+      );
+      expect(receiptInput).toEqual({
+        attemptId: ATTEMPT_ID,
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 6,
+        status: 'APPLIED',
+        reason: null,
+      });
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        attemptId: ATTEMPT_ID,
+        actorUserId: USER_ID,
+        action: 'ANONYMOUS_SPLIT_CAPTURE',
+        targetType: 'ANONYMOUS_SPLIT',
+        targetId: 'split-new',
+        reason: null,
+        newValues: {
+          kind: 'ANONYMOUS_SPLIT',
+          enrollmentId: null,
+          startNumber: null,
+          lapNumber: null,
+          officialElapsedMs: 30_000,
+          workstationInstanceId: WORKSTATION,
+          deviceSequence: 6,
+          idempotencyKey: 'key-6',
+        },
+      });
+      expect(pass).toEqual({
+        passId: 'split-new',
+        attemptId: ATTEMPT_ID,
+        enrollmentId: null,
+        lapNumber: null,
+        rawCapturedAt: NOW.toISOString(),
+        officialAt: new Date(NOW.getTime() + 30_000).toISOString(),
+        officialElapsedMs: 30_000,
+        status: 'PENDING',
+      });
+    });
+
+    it('closes a refused tile sequence with a REJECTED receipt', async () => {
+      arrangeCapture({
+        participants: [
+          participantRow({
+            enrollmentId: 'enrollment-race',
+            excludedReason: 'RACE_SECTION',
+          }),
+        ],
+      });
+
+      const refusal = await service
+        .capturePass(
+          USER_ID,
+          EVENT_ID,
+          capturePassDto({
+            kind: 'TILE',
+            startNumber: undefined,
+            enrollmentId: 'enrollment-race',
+            deviceSequence: 4,
+          }),
+          'key-4',
+        )
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.EXCLUDED_PARTICIPANT,
+        details: {
+          enrollmentId: 'enrollment-race',
+          excludedReason: 'RACE_SECTION',
+        },
+      });
+      expect(repository.createMark).not.toHaveBeenCalled();
+      expect(repository.createReceipt).not.toHaveBeenCalled();
+      const [, rejectedInput] = callArguments<
+        [unknown, CreateRejectedReceiptInput]
+      >(repository.createRejectedReceipt);
+      expect(rejectedInput).toEqual({
+        attemptId: ATTEMPT_ID,
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 4,
+        reason: TimingErrorCode.EXCLUDED_PARTICIPANT,
       });
     });
 
@@ -2483,6 +2644,15 @@ describe('TimingService', () => {
       expect(repository.updateMark).not.toHaveBeenCalled();
       expect(repository.createReceipt).not.toHaveBeenCalled();
       expect(repository.insertAudit).not.toHaveBeenCalled();
+      const [, rejectedInput] = callArguments<
+        [unknown, CreateRejectedReceiptInput]
+      >(repository.createRejectedReceipt);
+      expect(rejectedInput).toEqual({
+        attemptId: ATTEMPT_ID,
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 5,
+        reason: TimingErrorCode.NOT_FOUND,
+      });
     });
 
     it('refuses an excluded target and keeps the pending finish', async () => {
@@ -2513,6 +2683,15 @@ describe('TimingService', () => {
       });
       expect(repository.updateMark).not.toHaveBeenCalled();
       expect(repository.createReceipt).not.toHaveBeenCalled();
+      const [, rejectedInput] = callArguments<
+        [unknown, CreateRejectedReceiptInput]
+      >(repository.createRejectedReceipt);
+      expect(rejectedInput).toEqual({
+        attemptId: ATTEMPT_ID,
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 5,
+        reason: TimingErrorCode.EXCLUDED_PARTICIPANT,
+      });
     });
 
     it('refuses a target that already holds N passes and keeps the pending finish', async () => {
@@ -2546,6 +2725,15 @@ describe('TimingService', () => {
       });
       expect(repository.updateMark).not.toHaveBeenCalled();
       expect(repository.createReceipt).not.toHaveBeenCalled();
+      const [, rejectedInput] = callArguments<
+        [unknown, CreateRejectedReceiptInput]
+      >(repository.createRejectedReceipt);
+      expect(rejectedInput).toEqual({
+        attemptId: ATTEMPT_ID,
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 5,
+        reason: TimingErrorCode.ALREADY_N_PASSES,
+      });
     });
 
     it('refuses a bind sequence that already has a receipt', async () => {
@@ -2962,6 +3150,84 @@ describe('TimingService', () => {
       });
     });
 
+    it('retires the last anonymous split creation without a participant renumber', async () => {
+      arrangeUndo({
+        marks: [
+          markRow({
+            id: 'mark-pass-1',
+            lapNumber: 2,
+            deviceSequence: 3,
+            officialElapsedMs: 30_000,
+            officialAt: new Date(NOW.getTime() + 30_000),
+          }),
+          markRow({
+            id: 'mark-split-1',
+            kind: 'ANONYMOUS_SPLIT',
+            status: 'PENDING',
+            enrollmentId: null,
+            registrationId: null,
+            startNumber: null,
+            lapNumber: null,
+            deviceSequence: 14,
+            officialElapsedMs: 40_000,
+            officialAt: new Date(NOW.getTime() + 40_000),
+          }),
+        ],
+        audit: [
+          auditRow({ auditId: 'audit-1', targetId: 'mark-pass-1' }),
+          auditRow({
+            auditId: 'audit-2',
+            action: 'ANONYMOUS_SPLIT_CAPTURE',
+            targetType: 'ANONYMOUS_SPLIT',
+            targetId: 'mark-split-1',
+            newValues: {
+              workstationInstanceId: WORKSTATION,
+              deviceSequence: 14,
+            },
+          }),
+        ],
+      });
+
+      const pass = await service.quickUndo(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        undoDto({ deviceSequence: 15 }),
+        'key-15',
+      );
+
+      // Only the split is retired; the pass and its lap number stay untouched,
+      // because a split has no participant to renumber.
+      expect(repository.updateMark.mock.calls).toEqual([
+        [TX, 'mark-split-1', { status: 'CANCELLED', lapNumber: null }],
+      ]);
+      expect(pass).toEqual({
+        passId: 'mark-split-1',
+        attemptId: ATTEMPT_ID,
+        enrollmentId: null,
+        lapNumber: null,
+        rawCapturedAt: NOW.toISOString(),
+        officialAt: new Date(NOW.getTime() + 40_000).toISOString(),
+        officialElapsedMs: 40_000,
+        status: 'CANCELLED',
+      });
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        action: 'QUICK_UNDO',
+        targetType: 'ANONYMOUS_SPLIT',
+        targetId: 'mark-split-1',
+        oldValues: {
+          kind: 'ANONYMOUS_SPLIT',
+          status: 'PENDING',
+          enrollmentId: null,
+          deviceSequence: 14,
+        },
+        newValues: { status: 'CANCELLED', deviceSequence: 15 },
+      });
+    });
+
     it('refuses an undo when this workstation created no pass', async () => {
       arrangeUndo({
         marks: [
@@ -2999,6 +3265,16 @@ describe('TimingService', () => {
       expect(repository.updateMark).not.toHaveBeenCalled();
       expect(repository.createReceipt).not.toHaveBeenCalled();
       expect(repository.insertAudit).not.toHaveBeenCalled();
+      // AD-18: the refused undo sequence is resolved, not left unconfirmed.
+      const [, rejectedInput] = callArguments<
+        [unknown, CreateRejectedReceiptInput]
+      >(repository.createRejectedReceipt);
+      expect(rejectedInput).toEqual({
+        attemptId: ATTEMPT_ID,
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 13,
+        reason: TimingErrorCode.INVALID_STATE,
+      });
     });
 
     it('refuses an undo sequence that already has a receipt', async () => {
@@ -4121,18 +4397,119 @@ describe('TimingService', () => {
         )
         .catch((error: unknown) => error);
 
+      // AD-18: the cursor 4 is above the attempt's highest known sequence (3),
+      // so it is a foreign value and is not expanded into a phantom sequence 4.
+      // The real gap 2 inside the attempt still blocks.
       expect(refusal).toMatchObject({
         code: TimingErrorCode.UNCONFIRMED_MUTATIONS,
         details: {
           attemptId: ATTEMPT_ID,
-          missingSequences: [2, 4],
+          missingSequences: [2],
           workstations: [
-            { workstationInstanceId: WORKSTATION, missingSequences: [2, 4] },
+            { workstationInstanceId: WORKSTATION, missingSequences: [2] },
           ],
         },
       });
       expect(repository.publishResult).not.toHaveBeenCalled();
       expect(repository.updateAttemptStatus).not.toHaveBeenCalled();
+    });
+
+    it('ignores a foreign cursor above the attempt high while a real gap still blocks', async () => {
+      arrangeClosure({
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        marks: passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+        receipts: receiptRows([1, 2, 3]),
+      });
+
+      const record = await service.completeAttempt(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        completeAttemptDto({ lastIssuedSequence: 9 }),
+      );
+
+      expect(record.state).toBe('COMPLETED');
+      expect(repository.publishResult).toHaveBeenCalledTimes(1);
+    });
+
+    it('closes a capture-less attempt on the participant gate and publishes nothing', async () => {
+      arrangeClosure({ participants: [] });
+
+      const record = await service.completeAttempt(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        completeAttemptDto({ lastIssuedSequence: 7 }),
+      );
+
+      expect(record.state).toBe('COMPLETED');
+      expect(repository.publishResult).not.toHaveBeenCalled();
+      expect(repository.replaceResultSplits).not.toHaveBeenCalled();
+      const [, , updateInput] = callArguments<
+        [unknown, string, UpdateAttemptStatusInput]
+      >(repository.updateAttemptStatus);
+      expect(updateInput.closureReport).toEqual({
+        publishedEnrollmentIds: [],
+        unpublishedEnrollmentIds: [],
+        conflictEnrollmentIds: [],
+      });
+    });
+
+    it('closes an all-excluded attempt and publishes nothing', async () => {
+      arrangeClosure({
+        participants: [
+          participantRow({
+            enrollmentId: 'enrollment-excluded',
+            excludedReason: 'RACE_SECTION',
+          }),
+        ],
+      });
+
+      const record = await service.completeAttempt(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        completeAttemptDto({ lastIssuedSequence: 5 }),
+      );
+
+      expect(record.state).toBe('COMPLETED');
+      expect(repository.publishResult).not.toHaveBeenCalled();
+      const [, , updateInput] = callArguments<
+        [unknown, string, UpdateAttemptStatusInput]
+      >(repository.updateAttemptStatus);
+      expect(updateInput.closureReport).toEqual({
+        publishedEnrollmentIds: [],
+        unpublishedEnrollmentIds: ['enrollment-excluded'],
+        conflictEnrollmentIds: [],
+      });
+    });
+
+    it('does not let a REJECTED receipt block the closing attempt', async () => {
+      arrangeClosure({
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        marks: passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+        receipts: [
+          ...receiptRows([1, 2, 3]),
+          {
+            attemptId: ATTEMPT_ID,
+            workstationInstanceId: WORKSTATION,
+            deviceSequence: 4,
+            status: 'REJECTED',
+            reason: TimingErrorCode.EXCLUDED_PARTICIPANT,
+            createdAt: NOW,
+          },
+        ],
+      });
+
+      const record = await service.completeAttempt(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        completeAttemptDto({ lastIssuedSequence: 4 }),
+      );
+
+      expect(record.state).toBe('COMPLETED');
+      expect(repository.publishResult).toHaveBeenCalledTimes(1);
     });
 
     it('refuses ordinary completion while a non-excluded participant is below N', async () => {

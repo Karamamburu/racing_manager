@@ -58,12 +58,13 @@ import type {
   TransferCaptureDto,
 } from './timing.dto';
 import {
+  TimingDomainError,
   TimingErrorCode,
   timingError,
-  type TimingDomainError,
 } from './timing.errors';
 import {
   TimingRepository,
+  type CreateRejectedReceiptInput,
   type TimingAgeCategoryRow,
   type TimingAgeSectionRow,
   type TimingAttemptRow,
@@ -111,13 +112,15 @@ import type {
  * creates nothing, so there is no "prepared" attempt.
  *
  * AD-3 receipt semantics (fixed by the capture wave and kept here): a receipt
- * exists only for a mutation that was applied. A refused capture, bind or undo
- * writes neither a mark, a receipt nor an audit row, so its `deviceSequence`
- * stays unconsumed and the client's outbox may retry the same sequence with a
- * corrected payload. A receipt row, once written, is final; a second request on
- * a used sequence is a `CONFLICT`, never a second mutation. An administrator
- * correction, a pass cancellation and a pass rebind write no receipt at all:
- * they are record corrections, not workstation captures.
+ * exists for every issued mutation, applied or refused. A capture, bind or undo
+ * that the product definitively refuses after the attempt, lock and epoch
+ * checks writes a final `REJECTED` receipt in its own short transaction
+ * (AD-18), so a refusal never leaves an unconfirmed sequence that blocks
+ * closure; a request that never held capture or addressed a closed/foreign
+ * attempt writes nothing. A receipt row, once written, is final; a second
+ * request on a used sequence is a `CONFLICT`, never a second mutation. An
+ * administrator correction, a pass cancellation and a pass rebind write no
+ * receipt at all: they are record corrections, not workstation captures.
  *
  * Closure is the one indivisible action of this module: the state change, every
  * eligible result with its split set, the closure report, the capture-lock
@@ -931,106 +934,170 @@ export class TimingService {
     const rawCapturedAt = new Date(dto.clientCapturedAt);
     const key = normalizeIdempotencyKey(idempotencyKey);
 
-    return this.repository.withTransaction(async (tx) => {
-      // AD-3: the receipt table is the authority. A retry with the same
-      // `Idempotency-Key` never reaches the service; a new key on a used
-      // sequence is a client bug, so refuse instead of writing a second mark.
-      const receipt = await this.repository.findReceipt(
-        tx,
-        dto.attemptId,
-        dto.workstationInstanceId,
-        dto.deviceSequence,
-      );
-      if (receipt !== null) {
-        throw timingError(
-          TimingErrorCode.CONFLICT,
-          'This device sequence already has a receipt on the attempt.',
-          {
+    try {
+      return await this.repository.withTransaction(async (tx) => {
+        // AD-3: the receipt table is the authority. A retry with the same
+        // `Idempotency-Key` never reaches the service; a new key on a used
+        // sequence is a client bug, so refuse instead of writing a second mark.
+        const receipt = await this.repository.findReceipt(
+          tx,
+          dto.attemptId,
+          dto.workstationInstanceId,
+          dto.deviceSequence,
+        );
+        if (receipt !== null) {
+          throw timingError(
+            TimingErrorCode.CONFLICT,
+            'This device sequence already has a receipt on the attempt.',
+            {
+              attemptId: dto.attemptId,
+              workstationInstanceId: dto.workstationInstanceId,
+              deviceSequence: dto.deviceSequence,
+              receiptStatus: receipt.status,
+              receiptReason: receipt.reason,
+            },
+          );
+        }
+
+        const rawElapsedMs =
+          epoch.officialElapsedAnchorMs + dto.clientElapsedMs;
+        const officialAt = new Date(
+          attempt.officialStartedAt.getTime() + rawElapsedMs,
+        );
+        assertWithinBounds(attempt.officialStartedAt, officialAt);
+        const officialElapsedMs = resolveElapsedMs(
+          officialAt,
+          attempt.officialStartedAt,
+        );
+
+        // AD-17: an anonymous split shares the clock, sequence and receipt
+        // rules of a capture but has no participant, no lap and no routing. It
+        // stays `PENDING` for the queue until assignment or cancellation.
+        if (dto.kind === 'ANONYMOUS_SPLIT') {
+          const created = await this.repository.createAnonymousSplit(tx, {
+            attemptId: dto.attemptId,
+            clockEpochId: epoch.id,
+            rawCapturedAt,
+            rawElapsedMs,
+            officialAt,
+            officialElapsedMs,
+            workstationInstanceId: dto.workstationInstanceId,
+            deviceSequence: dto.deviceSequence,
+            idempotencyKey: key,
+          });
+          await this.repository.createReceipt(tx, {
             attemptId: dto.attemptId,
             workstationInstanceId: dto.workstationInstanceId,
             deviceSequence: dto.deviceSequence,
-            receiptStatus: receipt.status,
-            receiptReason: receipt.reason,
-          },
-        );
-      }
+            status: 'APPLIED',
+            reason: null,
+          });
+          await this.repository.insertAudit(tx, {
+            attemptId: dto.attemptId,
+            actorUserId,
+            action: 'ANONYMOUS_SPLIT_CAPTURE',
+            targetType: 'ANONYMOUS_SPLIT',
+            targetId: created.id,
+            oldValues: null,
+            newValues: {
+              kind: dto.kind,
+              enrollmentId: null,
+              startNumber: null,
+              lapNumber: null,
+              rawCapturedAt: rawCapturedAt.toISOString(),
+              rawElapsedMs,
+              officialAt: officialAt.toISOString(),
+              officialElapsedMs,
+              clockEpochId: epoch.id,
+              workstationInstanceId: dto.workstationInstanceId,
+              deviceSequence: dto.deviceSequence,
+              idempotencyKey: key,
+            },
+            reason: null,
+          });
+          return toPassView(created);
+        }
 
-      const marks = await this.repository.listMarks(dto.attemptId, tx);
-      const target = await this.resolveCaptureTarget(eventId, dto, marks, tx);
-      const rawElapsedMs = epoch.officialElapsedAnchorMs + dto.clientElapsedMs;
-      const officialAt = new Date(
-        attempt.officialStartedAt.getTime() + rawElapsedMs,
-      );
-      assertWithinBounds(attempt.officialStartedAt, officialAt);
-      const officialElapsedMs = resolveElapsedMs(
-        officialAt,
-        attempt.officialStartedAt,
-      );
+        const marks = await this.repository.listMarks(dto.attemptId, tx);
+        const target = await this.resolveCaptureTarget(eventId, dto, marks, tx);
 
-      const created = await this.repository.createMark(tx, {
-        attemptId: dto.attemptId,
-        clockEpochId: epoch.id,
-        enrollmentId: target.enrollmentId,
-        registrationId: target.registrationId,
-        startNumber: target.startNumber,
-        kind: dto.kind === 'PENDING_FINISH' ? 'PENDING_FINISH' : 'PASS',
-        rawCapturedAt,
-        rawElapsedMs,
-        officialAt,
-        officialElapsedMs,
-        lapNumber: null,
-        status: dto.kind === 'PENDING_FINISH' ? 'PENDING' : 'BOUND',
-        workstationInstanceId: dto.workstationInstanceId,
-        deviceSequence: dto.deviceSequence,
-        idempotencyKey: key,
-      });
-      await this.repository.createReceipt(tx, {
-        attemptId: dto.attemptId,
-        workstationInstanceId: dto.workstationInstanceId,
-        deviceSequence: dto.deviceSequence,
-        status: 'APPLIED',
-        reason: null,
-      });
-      // U-14: laps follow official instant, never capture order, so a capture
-      // whose instant lands before an existing pass renumbers both.
-      const applied =
-        target.enrollmentId === null
-          ? created
-          : await this.reindexLaps(
-              tx,
-              dto.attemptId,
-              target.enrollmentId,
-              marks,
-              created,
-            );
-      await this.repository.insertAudit(tx, {
-        attemptId: dto.attemptId,
-        actorUserId,
-        action:
-          dto.kind === 'PENDING_FINISH'
-            ? 'PENDING_FINISH_CAPTURE'
-            : 'PASS_CAPTURE',
-        targetType: 'PASS',
-        targetId: applied.id,
-        oldValues: null,
-        newValues: {
-          kind: dto.kind,
-          enrollmentId: target.enrollmentId,
-          startNumber: target.startNumber,
-          lapNumber: applied.lapNumber,
-          rawCapturedAt: rawCapturedAt.toISOString(),
-          rawElapsedMs,
-          officialAt: officialAt.toISOString(),
-          officialElapsedMs,
+        const created = await this.repository.createMark(tx, {
+          attemptId: dto.attemptId,
           clockEpochId: epoch.id,
+          enrollmentId: target.enrollmentId,
+          registrationId: target.registrationId,
+          startNumber: target.startNumber,
+          kind: dto.kind === 'PENDING_FINISH' ? 'PENDING_FINISH' : 'PASS',
+          rawCapturedAt,
+          rawElapsedMs,
+          officialAt,
+          officialElapsedMs,
+          lapNumber: null,
+          status: dto.kind === 'PENDING_FINISH' ? 'PENDING' : 'BOUND',
           workstationInstanceId: dto.workstationInstanceId,
           deviceSequence: dto.deviceSequence,
           idempotencyKey: key,
-        },
-        reason: null,
+        });
+        await this.repository.createReceipt(tx, {
+          attemptId: dto.attemptId,
+          workstationInstanceId: dto.workstationInstanceId,
+          deviceSequence: dto.deviceSequence,
+          status: 'APPLIED',
+          reason: null,
+        });
+        // U-14: laps follow official instant, never capture order, so a capture
+        // whose instant lands before an existing pass renumbers both.
+        const applied =
+          target.enrollmentId === null
+            ? created
+            : await this.reindexLaps(
+                tx,
+                dto.attemptId,
+                target.enrollmentId,
+                marks,
+                created,
+              );
+        await this.repository.insertAudit(tx, {
+          attemptId: dto.attemptId,
+          actorUserId,
+          action:
+            dto.kind === 'PENDING_FINISH'
+              ? 'PENDING_FINISH_CAPTURE'
+              : 'PASS_CAPTURE',
+          targetType: 'PASS',
+          targetId: applied.id,
+          oldValues: null,
+          newValues: {
+            kind: dto.kind,
+            enrollmentId: target.enrollmentId,
+            startNumber: target.startNumber,
+            lapNumber: applied.lapNumber,
+            rawCapturedAt: rawCapturedAt.toISOString(),
+            rawElapsedMs,
+            officialAt: officialAt.toISOString(),
+            officialElapsedMs,
+            clockEpochId: epoch.id,
+            workstationInstanceId: dto.workstationInstanceId,
+            deviceSequence: dto.deviceSequence,
+            idempotencyKey: key,
+          },
+          reason: null,
+        });
+        return toPassView(applied);
       });
-      return toPassView(applied);
-    });
+    } catch (error) {
+      // AD-18: a definitively refused capture is resolved by its own final
+      // receipt, so it never stays an unconfirmed mutation that blocks closure.
+      if (isRefusedCaptureSideAction(error)) {
+        await this.recordRejectedReceipt({
+          attemptId: dto.attemptId,
+          workstationInstanceId: dto.workstationInstanceId,
+          deviceSequence: dto.deviceSequence,
+          reason: error.code,
+        });
+      }
+      throw error;
+    }
   }
 
   /**
@@ -1079,98 +1146,112 @@ export class TimingService {
 
     const actorUserId = await this.requireUserId(authentikId);
     const key = normalizeIdempotencyKey(idempotencyKey);
-    return this.repository.withTransaction(async (tx) => {
-      // AD-3: a bind is a capture mutation, so its sequence is receipted once.
-      const receipt = await this.repository.findReceipt(
-        tx,
-        pending.attempt.id,
-        dto.workstationInstanceId,
-        dto.deviceSequence,
-      );
-      if (receipt !== null) {
-        throw timingError(
-          TimingErrorCode.CONFLICT,
-          'This device sequence already has a receipt on the attempt.',
-          {
-            attemptId: pending.attempt.id,
-            workstationInstanceId: dto.workstationInstanceId,
-            deviceSequence: dto.deviceSequence,
-            receiptStatus: receipt.status,
-            receiptReason: receipt.reason,
-          },
+    try {
+      return await this.repository.withTransaction(async (tx) => {
+        // AD-3: a bind is a capture mutation, so its sequence is receipted once.
+        const receipt = await this.repository.findReceipt(
+          tx,
+          pending.attempt.id,
+          dto.workstationInstanceId,
+          dto.deviceSequence,
         );
-      }
-      // Re-read under the transaction: another bind of the same mark, or a
-      // cancellation, must not be overwritten by this one.
-      const current = await this.loadPendingFinish(
-        pendingFinishId,
-        eventId,
-        tx,
-      );
-      const marks = await this.repository.listMarks(current.attempt.id, tx);
-      const participant = await this.resolveBindTarget(
-        current.attempt.id,
-        dto,
-        tx,
-      );
-      assertCaptureEligible(
-        participant,
-        boundPassCount(marks, participant.enrollmentId),
-      );
+        if (receipt !== null) {
+          throw timingError(
+            TimingErrorCode.CONFLICT,
+            'This device sequence already has a receipt on the attempt.',
+            {
+              attemptId: pending.attempt.id,
+              workstationInstanceId: dto.workstationInstanceId,
+              deviceSequence: dto.deviceSequence,
+              receiptStatus: receipt.status,
+              receiptReason: receipt.reason,
+            },
+          );
+        }
+        // Re-read under the transaction: another bind of the same mark, or a
+        // cancellation, must not be overwritten by this one.
+        const current = await this.loadPendingFinish(
+          pendingFinishId,
+          eventId,
+          tx,
+        );
+        const marks = await this.repository.listMarks(current.attempt.id, tx);
+        const participant = await this.resolveBindTarget(
+          current.attempt.id,
+          dto,
+          tx,
+        );
+        assertCaptureEligible(
+          participant,
+          boundPassCount(marks, participant.enrollmentId),
+        );
 
-      const bound = await this.repository.updateMark(tx, current.mark.id, {
-        enrollmentId: participant.enrollmentId,
-        registrationId: participant.registrationId,
-        startNumber: participant.startNumber,
-        kind: 'PASS',
-        status: 'BOUND',
-      });
-      const applied = await this.reindexLaps(
-        tx,
-        current.attempt.id,
-        participant.enrollmentId,
-        marks,
-        bound,
-      );
-      await this.repository.createReceipt(tx, {
-        attemptId: current.attempt.id,
-        workstationInstanceId: dto.workstationInstanceId,
-        deviceSequence: dto.deviceSequence,
-        status: 'APPLIED',
-        reason: null,
-      });
-      await this.repository.insertAudit(tx, {
-        attemptId: current.attempt.id,
-        actorUserId,
-        action: 'PENDING_BIND',
-        targetType: 'PASS',
-        targetId: applied.id,
-        oldValues: {
-          kind: current.mark.kind,
-          status: current.mark.status,
-          enrollmentId: current.mark.enrollmentId,
-          registrationId: current.mark.registrationId,
-          startNumber: current.mark.startNumber,
-          lapNumber: current.mark.lapNumber,
-        },
-        newValues: {
-          kind: 'PASS',
-          status: 'BOUND',
+        const bound = await this.repository.updateMark(tx, current.mark.id, {
           enrollmentId: participant.enrollmentId,
           registrationId: participant.registrationId,
           startNumber: participant.startNumber,
-          lapNumber: applied.lapNumber,
-          officialAt: applied.officialAt.toISOString(),
-          officialElapsedMs: applied.officialElapsedMs,
+          kind: 'PASS',
+          status: 'BOUND',
+        });
+        const applied = await this.reindexLaps(
+          tx,
+          current.attempt.id,
+          participant.enrollmentId,
+          marks,
+          bound,
+        );
+        await this.repository.createReceipt(tx, {
+          attemptId: current.attempt.id,
           workstationInstanceId: dto.workstationInstanceId,
           deviceSequence: dto.deviceSequence,
-          bindOfSequence: current.mark.deviceSequence,
-          idempotencyKey: key,
-        },
-        reason: null,
+          status: 'APPLIED',
+          reason: null,
+        });
+        await this.repository.insertAudit(tx, {
+          attemptId: current.attempt.id,
+          actorUserId,
+          action: 'PENDING_BIND',
+          targetType: 'PASS',
+          targetId: applied.id,
+          oldValues: {
+            kind: current.mark.kind,
+            status: current.mark.status,
+            enrollmentId: current.mark.enrollmentId,
+            registrationId: current.mark.registrationId,
+            startNumber: current.mark.startNumber,
+            lapNumber: current.mark.lapNumber,
+          },
+          newValues: {
+            kind: 'PASS',
+            status: 'BOUND',
+            enrollmentId: participant.enrollmentId,
+            registrationId: participant.registrationId,
+            startNumber: participant.startNumber,
+            lapNumber: applied.lapNumber,
+            officialAt: applied.officialAt.toISOString(),
+            officialElapsedMs: applied.officialElapsedMs,
+            workstationInstanceId: dto.workstationInstanceId,
+            deviceSequence: dto.deviceSequence,
+            bindOfSequence: current.mark.deviceSequence,
+            idempotencyKey: key,
+          },
+          reason: null,
+        });
+        return toPassView(applied);
       });
-      return toPassView(applied);
-    });
+    } catch (error) {
+      // AD-18: a refused bind is resolved by its own final receipt, so the
+      // attempt can still close once the reason is gone.
+      if (isRefusedCaptureSideAction(error)) {
+        await this.recordRejectedReceipt({
+          attemptId: pending.attempt.id,
+          workstationInstanceId: dto.workstationInstanceId,
+          deviceSequence: dto.deviceSequence,
+          reason: error.code,
+        });
+      }
+      throw error;
+    }
   }
 
   /**
@@ -1228,13 +1309,15 @@ export class TimingService {
 
   /**
    * `POST /events/:eventId/timing/attempts/:attemptId/undo`: withdraw the last
-   * pass this workstation created in the attempt, with no reason (E-11).
+   * capture this workstation created in the attempt, with no reason (E-07,
+   * E-11): a bound pass or a pending anonymous split.
    *
    * AD-3 keeps a mark's creation sequence when a bind gives it a participant, so
    * `kind`, `status` and `deviceSequence` alone cannot tell a creation from a
-   * bind; the `PASS_CAPTURE` audit row written in the same transaction can.
-   * The undone pass is soft-cancelled and its participant's remaining passes are
-   * renumbered by official instant.
+   * bind; the `PASS_CAPTURE` or `ANONYMOUS_SPLIT_CAPTURE` audit row written in
+   * the creation transaction can. The undone pass is soft-cancelled and its
+   * participant's remaining passes are renumbered by official instant; an
+   * anonymous split has no participant to renumber.
    */
   async quickUndo(
     authentikId: string | undefined,
@@ -1276,82 +1359,106 @@ export class TimingService {
 
     const actorUserId = await this.requireUserId(authentikId);
     const key = normalizeIdempotencyKey(idempotencyKey);
-    return this.repository.withTransaction(async (tx) => {
-      const receipt = await this.repository.findReceipt(
-        tx,
-        attemptId,
-        dto.workstationInstanceId,
-        dto.deviceSequence,
-      );
-      if (receipt !== null) {
-        throw timingError(
-          TimingErrorCode.CONFLICT,
-          'This device sequence already has a receipt on the attempt.',
-          {
-            attemptId,
-            workstationInstanceId: dto.workstationInstanceId,
-            deviceSequence: dto.deviceSequence,
-            receiptStatus: receipt.status,
-            receiptReason: receipt.reason,
-          },
+    try {
+      return await this.repository.withTransaction(async (tx) => {
+        const receipt = await this.repository.findReceipt(
+          tx,
+          attemptId,
+          dto.workstationInstanceId,
+          dto.deviceSequence,
         );
-      }
-      const marks = await this.repository.listMarks(attemptId, tx);
-      const audit = await this.repository.listAudit(attemptId, tx);
-      const target = lastPassCreation(marks, audit, dto.workstationInstanceId);
-      if (target === null || target.enrollmentId === null) {
-        throw timingError(
-          TimingErrorCode.INVALID_STATE,
-          'This workstation has no pass creation to undo in the attempt.',
-          {
-            attemptId,
-            workstationInstanceId: dto.workstationInstanceId,
-          },
+        if (receipt !== null) {
+          throw timingError(
+            TimingErrorCode.CONFLICT,
+            'This device sequence already has a receipt on the attempt.',
+            {
+              attemptId,
+              workstationInstanceId: dto.workstationInstanceId,
+              deviceSequence: dto.deviceSequence,
+              receiptStatus: receipt.status,
+              receiptReason: receipt.reason,
+            },
+          );
+        }
+        const marks = await this.repository.listMarks(attemptId, tx);
+        const audit = await this.repository.listAudit(attemptId, tx);
+        const target = lastCaptureCreation(
+          marks,
+          audit,
+          dto.workstationInstanceId,
         );
-      }
+        if (target === null) {
+          throw timingError(
+            TimingErrorCode.INVALID_STATE,
+            'This workstation has no pass or split creation to undo in the attempt.',
+            {
+              attemptId,
+              workstationInstanceId: dto.workstationInstanceId,
+            },
+          );
+        }
 
-      const cancelled = await this.repository.updateMark(tx, target.id, {
-        status: 'CANCELLED',
-        lapNumber: null,
-      });
-      await this.renumberPasses(
-        tx,
-        target.enrollmentId,
-        marks.filter((mark) => mark.id !== target.id),
-      );
-      await this.repository.createReceipt(tx, {
-        attemptId,
-        workstationInstanceId: dto.workstationInstanceId,
-        deviceSequence: dto.deviceSequence,
-        status: 'APPLIED',
-        reason: null,
-      });
-      await this.repository.insertAudit(tx, {
-        attemptId,
-        actorUserId,
-        action: 'QUICK_UNDO',
-        targetType: 'PASS',
-        targetId: target.id,
-        oldValues: {
-          status: target.status,
-          enrollmentId: target.enrollmentId,
-          lapNumber: target.lapNumber,
-          officialAt: target.officialAt.toISOString(),
-          officialElapsedMs: target.officialElapsedMs,
-          workstationInstanceId: target.workstationInstanceId,
-          deviceSequence: target.deviceSequence,
-        },
-        newValues: {
+        // AD-17: an anonymous split is retired as it was captured, with no
+        // participant to renumber; a pass keeps the existing lap renumbering.
+        const isAnonymousSplit = target.kind === 'ANONYMOUS_SPLIT';
+        const cancelled = await this.repository.updateMark(tx, target.id, {
           status: 'CANCELLED',
           lapNumber: null,
+        });
+        if (target.enrollmentId !== null) {
+          await this.renumberPasses(
+            tx,
+            target.enrollmentId,
+            marks.filter((mark) => mark.id !== target.id),
+          );
+        }
+        await this.repository.createReceipt(tx, {
+          attemptId,
           workstationInstanceId: dto.workstationInstanceId,
           deviceSequence: dto.deviceSequence,
-          idempotencyKey: key,
-        },
-        reason: null,
+          status: 'APPLIED',
+          reason: null,
+        });
+        await this.repository.insertAudit(tx, {
+          attemptId,
+          actorUserId,
+          action: 'QUICK_UNDO',
+          targetType: isAnonymousSplit ? 'ANONYMOUS_SPLIT' : 'PASS',
+          targetId: target.id,
+          oldValues: {
+            kind: target.kind,
+            status: target.status,
+            enrollmentId: target.enrollmentId,
+            lapNumber: target.lapNumber,
+            officialAt: target.officialAt.toISOString(),
+            officialElapsedMs: target.officialElapsedMs,
+            workstationInstanceId: target.workstationInstanceId,
+            deviceSequence: target.deviceSequence,
+          },
+          newValues: {
+            status: 'CANCELLED',
+            lapNumber: null,
+            workstationInstanceId: dto.workstationInstanceId,
+            deviceSequence: dto.deviceSequence,
+            idempotencyKey: key,
+          },
+          reason: null,
+        });
+        return toPassView(cancelled);
       });
-      return toPassView(cancelled);
-    });
+    } catch (error) {
+      // AD-18: a refused undo is resolved by its own final receipt, so its
+      // issued sequence never blocks the closure of this attempt.
+      if (isRefusedCaptureSideAction(error)) {
+        await this.recordRejectedReceipt({
+          attemptId,
+          workstationInstanceId: dto.workstationInstanceId,
+          deviceSequence: dto.deviceSequence,
+          reason: error.code,
+        });
+      }
+      throw error;
+    }
   }
 
   /**
@@ -3069,6 +3176,30 @@ export class TimingService {
     return timingError(code, message);
   }
 
+  /**
+   * Closes an issued capture-side sequence that was definitively refused with
+   * its final `REJECTED` receipt (AD-18, FR-54). The refusal already rolled the
+   * capture transaction back, so this runs in its own short transaction and
+   * writes no mark and no audit row. A sequence that already has a receipt is
+   * left as it stands: it is already resolved.
+   */
+  private async recordRejectedReceipt(
+    input: CreateRejectedReceiptInput,
+  ): Promise<void> {
+    await this.repository.withTransaction(async (tx) => {
+      const existing = await this.repository.findReceipt(
+        tx,
+        input.attemptId,
+        input.workstationInstanceId,
+        input.deviceSequence,
+      );
+      if (existing !== null) {
+        return;
+      }
+      await this.repository.createRejectedReceipt(tx, input);
+    });
+  }
+
   private toOrderedPassViews(
     marks: readonly TimingMarkRow[],
   ): TimingPassView[] {
@@ -3351,10 +3482,15 @@ function participantPublication(
 }
 
 /**
- * The sequences of one workstation that have no final receipt. The ceiling is
- * the higher of the caller's `lastIssuedSequence` and the highest sequence the
- * shared record already holds, so a stale or dishonest client count can never
- * hide an issued mutation (AD-3).
+ * The sequences of one workstation that have no final receipt.
+ *
+ * AD-18: the ceiling is what this attempt's own record knows for the
+ * workstation — every mark sequence and every receipt sequence. A client
+ * `lastIssuedSequence` above that ceiling is a stale or foreign cursor (another
+ * attempt's counter) and is never expanded into sequences this attempt did not
+ * issue. An attempt with no record at all is capture-less: its cursor is
+ * ignored, because it issued nothing to confirm. Every mark the record does
+ * hold stays gated, so a real gap inside the same attempt is never weakened.
  */
 function missingReceiptSequences(
   marks: readonly TimingMarkRow[],
@@ -3369,15 +3505,32 @@ function missingReceiptSequences(
       )
       .map((receipt) => receipt.deviceSequence),
   );
-  let highest = Math.max(0, lastIssuedSequence);
+  let highestKnown = 0;
+  let highestMark = 0;
   for (const mark of marks) {
     if (mark.workstationInstanceId !== workstationInstanceId) continue;
-    if (mark.deviceSequence !== null && mark.deviceSequence > highest) {
-      highest = mark.deviceSequence;
-    }
+    if (mark.deviceSequence === null) continue;
+    highestMark = Math.max(highestMark, mark.deviceSequence);
   }
+  for (const receipt of receipts) {
+    if (receipt.workstationInstanceId !== workstationInstanceId) continue;
+    highestKnown = Math.max(highestKnown, receipt.deviceSequence);
+  }
+  highestKnown = Math.max(highestKnown, highestMark);
+  // Capture-less: no mark and no receipt, so the client cursor names nothing
+  // this attempt issued.
+  if (highestKnown === 0) {
+    return [];
+  }
+  // A cursor above the known high is clamped; a cursor at or below it may name
+  // an issued sequence whose mark never landed. The highest mark always counts,
+  // so a cursor lower than a known mark cannot hide that mark's gap.
+  const ceiling = Math.max(
+    highestMark,
+    Math.min(Math.max(0, lastIssuedSequence), highestKnown),
+  );
   const missing: number[] = [];
-  for (let sequence = 1; sequence <= highest; sequence += 1) {
+  for (let sequence = 1; sequence <= ceiling; sequence += 1) {
     if (!covered.has(sequence)) {
       missing.push(sequence);
     }
@@ -3389,13 +3542,16 @@ function missingReceiptSequences(
  * The receipted sequence coverage of a closure. Ordinary completion checks the
  * completing workstation only; an administrative closure checks every
  * workstation that captured in the attempt. Every contiguous run from 1 to the
- * highest issued sequence must have a receipt.
+ * attempt-known ceiling must have a receipt. The gate only reads the marks and
+ * receipts of the closing attempt, so another attempt's queue is invisible.
+ * A capture-less attempt has no cursor to confirm and contributes no gap.
  */
 function closureReceiptCoverage(
   marks: readonly TimingMarkRow[],
   receipts: readonly TimingReceiptRow[],
   input: Pick<ClosureInput, 'workstationInstanceId' | 'lastIssuedSequence'>,
 ): { missingSequences: number[]; workstations: WorkstationReceiptGap[] } {
+  const attemptHasRecord = marks.length > 0 || receipts.length > 0;
   const workstations =
     input.workstationInstanceId === null
       ? [
@@ -3407,13 +3563,15 @@ function closureReceiptCoverage(
       : [input.workstationInstanceId];
   const gaps: WorkstationReceiptGap[] = [];
   for (const workstationInstanceId of workstations) {
+    const clientCursor =
+      attemptHasRecord && workstationInstanceId === input.workstationInstanceId
+        ? (input.lastIssuedSequence ?? 0)
+        : 0;
     const missingSequences = missingReceiptSequences(
       marks,
       receipts,
       workstationInstanceId,
-      workstationInstanceId === input.workstationInstanceId
-        ? (input.lastIssuedSequence ?? 0)
-        : 0,
+      clientCursor,
     );
     if (missingSequences.length > 0) {
       gaps.push({ workstationInstanceId, missingSequences });
@@ -3426,35 +3584,52 @@ function closureReceiptCoverage(
 }
 
 /**
- * E-11: the last pass this workstation *created* in the attempt.
+ * E-07, E-11: the last capture this workstation *created* in the attempt — a
+ * bound pass or an anonymous split.
  *
  * A bind gives an existing pending-finish mark a participant while AD-3 keeps
  * that mark's capture sequence, so `kind: PASS`, `status: BOUND` and the highest
  * `deviceSequence` also match a freshly bound finish. The audit row a capture
- * writes in its own transaction is the only creation proof on the record, so
- * only a mark named by this workstation's `PASS_CAPTURE` is a candidate. A
- * correction, a rebind or another workstation's capture is never named.
+ * writes in its own transaction is the only creation proof on the record: a
+ * `PASS_CAPTURE` names a pass, an `ANONYMOUS_SPLIT_CAPTURE` names a split. A
+ * correction, an assignment, a rebind, a cancellation and another workstation's
+ * mark are never named.
  */
-function lastPassCreation(
+function lastCaptureCreation(
   marks: readonly TimingMarkRow[],
   audit: readonly TimingAuditRow[],
   workstationInstanceId: string,
 ): TimingMarkRow | null {
-  const created = new Set<string>();
+  const passCreations = new Set<string>();
+  const splitCreations = new Set<string>();
   for (const row of audit) {
-    if (row.action !== 'PASS_CAPTURE') continue;
     if (row.newValues?.workstationInstanceId !== workstationInstanceId) {
       continue;
     }
-    created.add(row.targetId);
+    if (row.action === 'PASS_CAPTURE') {
+      passCreations.add(row.targetId);
+    }
+    if (row.action === 'ANONYMOUS_SPLIT_CAPTURE') {
+      splitCreations.add(row.targetId);
+    }
   }
-  const candidates = marks.filter(
-    (mark) =>
-      created.has(mark.id) &&
+  const candidates = marks.filter((mark) => {
+    if (mark.workstationInstanceId !== workstationInstanceId) {
+      return false;
+    }
+    if (
       mark.kind === 'PASS' &&
       mark.status === 'BOUND' &&
-      mark.workstationInstanceId === workstationInstanceId,
-  );
+      passCreations.has(mark.id)
+    ) {
+      return true;
+    }
+    return (
+      mark.kind === 'ANONYMOUS_SPLIT' &&
+      mark.status === 'PENDING' &&
+      splitCreations.has(mark.id)
+    );
+  });
   candidates.sort((left, right) => {
     const sequence = (right.deviceSequence ?? -1) - (left.deviceSequence ?? -1);
     if (sequence !== 0) return sequence;
@@ -3464,6 +3639,16 @@ function lastPassCreation(
     return left.id < right.id ? 1 : -1;
   });
   return candidates[0] ?? null;
+}
+
+/** Whether a failed capture-side action still owes its issued sequence a receipt. */
+function isRefusedCaptureSideAction(
+  error: unknown,
+): error is TimingDomainError {
+  return (
+    error instanceof TimingDomainError &&
+    error.code !== TimingErrorCode.CONFLICT
+  );
 }
 
 /** The routing facts of one candidate row; the attempt status is always running. */
