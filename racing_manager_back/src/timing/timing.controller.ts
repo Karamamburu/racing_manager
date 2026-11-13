@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Post,
   Req,
+  UseFilters,
   UseGuards,
   UsePipes,
   ValidationPipe,
@@ -18,6 +19,7 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
 import { OpenClockEpochDto, StartTimingAttemptDto } from './timing.dto';
+import { TimingExceptionFilter } from './timing.exception.filter';
 import { TimingService } from './timing.service';
 import type {
   ClockEpochView,
@@ -29,13 +31,14 @@ import type {
 /**
  * MANUAL-TIMING routes of one event, all guarded by the timing operator roles.
  *
- * The controller only parses the boundary and calls the service. The domain
- * error filter that maps `TimingDomainError` to an HTTP status arrives with the
- * module wiring; these handlers add no catch of their own.
+ * The controller only parses the boundary and calls the service. Every
+ * `TimingDomainError` the service throws becomes the filtered status and body;
+ * these handlers add no catch of their own.
  */
 @Controller('events/:eventId/timing')
 @UseGuards(SessionAuthGuard, RolesGuard)
 @Roles(...TIMING_OPERATE_ROLE_CODES)
+@UseFilters(TimingExceptionFilter)
 @UsePipes(
   new ValidationPipe({
     whitelist: true,
