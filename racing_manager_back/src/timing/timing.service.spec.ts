@@ -3180,7 +3180,18 @@ describe('TimingService', () => {
           holderWorkstationInstanceId: 'workstation-b',
         },
       });
-      expect(repository.findReceipt).not.toHaveBeenCalled();
+      // AD-18: the refused capture still leaves a final receipt for its issued
+      // sequence, so it cannot become an unconfirmed gap at closure.
+      const rejectedInput = callArguments<
+        [unknown, CreateRejectedReceiptInput]
+      >(repository.createRejectedReceipt)[1];
+      expect(rejectedInput).toEqual({
+        attemptId: ATTEMPT_ID,
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 1,
+        reason: TimingErrorCode.CAPTURE_NOT_HELD,
+      });
+      expect(repository.createMark).not.toHaveBeenCalled();
     });
 
     it('refuses a capture without an open epoch on this workstation', async () => {
@@ -3190,6 +3201,13 @@ describe('TimingService', () => {
         service.capturePass(USER_ID, EVENT_ID, capturePassDto(), 'key-1'),
       ).rejects.toMatchObject({ code: TimingErrorCode.CAPTURE_NOT_HELD });
       expect(repository.createMark).not.toHaveBeenCalled();
+      const rejectedInput = callArguments<
+        [unknown, CreateRejectedReceiptInput]
+      >(repository.createRejectedReceipt)[1];
+      expect(rejectedInput).toMatchObject({
+        deviceSequence: 1,
+        reason: TimingErrorCode.CAPTURE_NOT_HELD,
+      });
     });
 
     it('refuses a clock epoch that is not the open one', async () => {
@@ -5378,17 +5396,13 @@ describe('TimingService', () => {
         closedByUserId: USER_ID,
         closureReport: expectedReport,
       });
-      // U-20: the publication, the state change, the lock release and the audit
-      // commit on one transaction.
+      // U-20: the publication, the state change and the audit commit on one
+      // transaction; the capture hold survives the closure.
       expect(transactionOf(repository.publishResult)).toBe(TX);
       expect(transactionOf(repository.replaceResultSplits)).toBe(TX);
       expect(transactionOf(repository.updateAttemptStatus)).toBe(TX);
-      expect(transactionOf(repository.releaseCaptureLock)).toBe(TX);
       expect(transactionOf(repository.insertAudit)).toBe(TX);
-      expect(repository.releaseCaptureLock).toHaveBeenCalledWith(TX, {
-        eventId: EVENT_ID,
-        lockToken: 'lock-token',
-      });
+      expect(repository.releaseCaptureLock).not.toHaveBeenCalled();
       expect(auditInputs).toEqual([
         expect.objectContaining({
           attemptId: ATTEMPT_ID,
@@ -5719,10 +5733,7 @@ describe('TimingService', () => {
           conflictEnrollmentIds: [],
         },
       });
-      expect(repository.releaseCaptureLock).toHaveBeenCalledWith(TX, {
-        eventId: EVENT_ID,
-        lockToken: 'lock-token',
-      });
+      expect(repository.releaseCaptureLock).not.toHaveBeenCalled();
       expect(auditInputs[0]).toMatchObject({
         action: 'FORCE_COMPLETE',
         reason: 'Дождь',
@@ -6212,7 +6223,7 @@ describe('TimingService', () => {
           conflictRegistrationIds: [],
         });
         expect(transactionOf(repository.updateAttemptStatus)).toBe(TX);
-        expect(transactionOf(repository.releaseCaptureLock)).toBe(TX);
+        expect(repository.releaseCaptureLock).not.toHaveBeenCalled();
         expect(transactionOf(repository.insertAudit)).toBe(TX);
         expect(auditInputs[0]).toMatchObject({
           action: 'COMPLETE',

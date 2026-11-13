@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type {
   EnrollmentStatus,
@@ -420,6 +420,8 @@ type CaptureReceiptGap = {
 
 @Injectable()
 export class TimingService {
+  private readonly logger = new Logger(TimingService.name);
+
   constructor(
     private readonly repository: TimingRepository,
     private readonly rolesService: RolesService,
@@ -1217,39 +1219,22 @@ export class TimingService {
         { attemptId: attempt.id, status: attempt.status },
       );
     }
-    const lock = await this.repository.getCaptureLock(eventId);
-    if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
-      throw timingError(
-        TimingErrorCode.CAPTURE_NOT_HELD,
-        'This workstation does not hold capture.',
-        {
-          workstationInstanceId: dto.workstationInstanceId,
-          holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
-        },
-      );
-    }
-    // AD-2: a mark is measured from the open epoch of the active workstation.
-    // Without one the clock has no anchor, so the capture counts as not held.
-    const epoch = await this.repository.findOpenEpoch(
-      dto.attemptId,
-      dto.workstationInstanceId,
-    );
-    if (epoch === null) {
-      throw timingError(
-        TimingErrorCode.CAPTURE_NOT_HELD,
-        'This workstation has no open clock epoch on the attempt.',
-        {
+    let epoch: TimingClockEpochRow;
+    try {
+      epoch = await this.requireCaptureEpoch(eventId, dto);
+    } catch (error) {
+      if (error instanceof TimingDomainError) {
+        // A refused capture still consumes the client's sequence. Keep a final
+        // receipt so the pre-transaction lock/epoch refusal cannot leave a gap
+        // that blocks a later closure (AD-18).
+        await this.safeRejectedReceipt({
           attemptId: dto.attemptId,
           workstationInstanceId: dto.workstationInstanceId,
-        },
-      );
-    }
-    if (epoch.id !== dto.clockEpochId) {
-      throw timingError(
-        TimingErrorCode.INVALID_STATE,
-        'The clock epoch is not the open epoch of this workstation.',
-        { clockEpochId: dto.clockEpochId, openEpochId: epoch.id },
-      );
+          deviceSequence: dto.deviceSequence,
+          reason: error.code,
+        });
+      }
+      throw error;
     }
 
     const actorUserId = await this.requireUserId(authentikId);
@@ -2721,7 +2706,7 @@ export class TimingService {
         closedByUserId: input.actorUserId,
         closureReport: report,
       });
-      await this.releaseClosureLock(tx, input);
+      await this.assertClosureLock(tx, input);
       await this.repository.insertAudit(tx, {
         attemptId: current.id,
         actorUserId: input.actorUserId,
@@ -2785,7 +2770,7 @@ export class TimingService {
       // refused and names every queued split.
       throw timingError(
         TimingErrorCode.PENDING_REMAINS,
-        'An unassigned anonymous split still blocks closure.',
+        'В попытке есть неразмеченный сплит: назначьте ему номер или отмените его.',
         { attemptId: attempt.id, anonymousSplitIds },
       );
     }
@@ -2810,7 +2795,7 @@ export class TimingService {
     if (refusal === TimingErrorCode.PENDING_REMAINS) {
       throw timingError(
         TimingErrorCode.PENDING_REMAINS,
-        'An unbound pending finish still blocks closure.',
+        'В попытке есть непривязанный финиш: привяжите его к участнику или отмените.',
         {
           attemptId: attempt.id,
           pendingFinishIds: pendingFinishes.map((mark) => mark.id),
@@ -2820,7 +2805,7 @@ export class TimingService {
     if (refusal === TimingErrorCode.UNCONFIRMED_MUTATIONS) {
       throw timingError(
         TimingErrorCode.UNCONFIRMED_MUTATIONS,
-        'Unconfirmed workstation mutations block closure.',
+        'Есть отметки рабочей станции без подтверждения: обновите страницу и повторите завершение.',
         {
           attemptId: attempt.id,
           missingSequences: coverage.missingSequences,
@@ -2830,7 +2815,7 @@ export class TimingService {
     }
     throw timingError(
       TimingErrorCode.PARTICIPANTS_BELOW_LAPS,
-      'Every participant must hold N passes to complete.',
+      'Не у всех участников есть нужное число отметок: завершение невозможно.',
       {
         attemptId: attempt.id,
         participants: below.map((participant) => ({
@@ -2993,11 +2978,16 @@ export class TimingService {
   }
 
   /**
-   * Releases the one event-wide capture hold inside the closure transaction.
-   * Ordinary completion releases only the hold the completing workstation still
-   * owns; an administrative closure releases whatever hold exists.
+   * Verifies the one event-wide capture hold inside the closure transaction.
+   *
+   * A closure never releases the hold: the workstation that timed a category
+   * keeps capture for the next one, so a capture issued right after a category
+   * completion is not refused with `CAPTURE_NOT_HELD` (MANUAL-TIMING-2 fix).
+   * Ordinary completion still requires the completing workstation to own the
+   * hold; an administrative closure accepts whatever hold exists. Releasing is
+   * an explicit action of its own (`releaseCapture`).
    */
-  private async releaseClosureLock(
+  private async assertClosureLock(
     tx: TimingTx,
     input: ClosureInput,
   ): Promise<void> {
@@ -3011,17 +3001,13 @@ export class TimingService {
     ) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'This workstation does not hold capture.',
+        'Захват хронометража удерживает другая рабочая станция.',
         {
           workstationInstanceId: input.workstationInstanceId,
           holderWorkstationInstanceId: lock.workstationInstanceId,
         },
       );
     }
-    await this.repository.releaseCaptureLock(tx, {
-      eventId: input.eventId,
-      lockToken: lock.lockToken,
-    });
   }
 
   /** Rewrites one participant's bound lap numbers in official-instant order. */
@@ -3921,6 +3907,69 @@ export class TimingService {
    * writes no mark and no audit row. A sequence that already has a receipt is
    * left as it stands: it is already resolved.
    */
+  /**
+   * The event capture lock and the open epoch of one capture. A refusal here
+   * happens before the mark transaction, so `capturePass` writes a final
+   * rejected receipt for the issued sequence.
+   */
+  private async requireCaptureEpoch(
+    eventId: string,
+    dto: CaptureTimingPassDto,
+  ): Promise<TimingClockEpochRow> {
+    const lock = await this.repository.getCaptureLock(eventId);
+    if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
+      throw timingError(
+        TimingErrorCode.CAPTURE_NOT_HELD,
+        'This workstation does not hold capture.',
+        {
+          workstationInstanceId: dto.workstationInstanceId,
+          holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
+        },
+      );
+    }
+    // AD-2: a mark is measured from the open epoch of the active workstation.
+    // Without one the clock has no anchor, so the capture counts as not held.
+    const epoch = await this.repository.findOpenEpoch(
+      dto.attemptId,
+      dto.workstationInstanceId,
+    );
+    if (epoch === null) {
+      throw timingError(
+        TimingErrorCode.CAPTURE_NOT_HELD,
+        'This workstation has no open clock epoch on the attempt.',
+        {
+          attemptId: dto.attemptId,
+          workstationInstanceId: dto.workstationInstanceId,
+        },
+      );
+    }
+    if (epoch.id !== dto.clockEpochId) {
+      throw timingError(
+        TimingErrorCode.INVALID_STATE,
+        'The clock epoch is not the open epoch of this workstation.',
+        { clockEpochId: dto.clockEpochId, openEpochId: epoch.id },
+      );
+    }
+    return epoch;
+  }
+
+  /**
+   * A refused capture must not mask the original domain error when the receipt
+   * itself cannot be written. The next closure would still report the gap; the
+   * log names the sequence.
+   */
+  private async safeRejectedReceipt(
+    input: CreateRejectedReceiptInput,
+  ): Promise<void> {
+    try {
+      await this.recordRejectedReceipt(input);
+    } catch (error) {
+      this.logger.warn(
+        `timing: could not record a rejected receipt for sequence ${input.deviceSequence}: ${String(error)}`,
+      );
+    }
+  }
+
   private async recordRejectedReceipt(
     input: CreateRejectedReceiptInput,
   ): Promise<void> {

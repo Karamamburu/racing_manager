@@ -1801,8 +1801,8 @@ describe('timing API integration: heat closure', () => {
     expect(repository.audits.map((audit) => audit.row.action)).toContain(
       'COMPLETE',
     );
-    // The ordinary closure releases the event-wide capture hold.
-    expect(repository.captureLock).toBeNull();
+    // The closure keeps the event-wide capture hold for the next category.
+    expect(repository.captureLock).not.toBeNull();
 
     const surface = await getSurface(server);
     const closed = surface.categories.find(
@@ -1834,8 +1834,9 @@ describe('timing API integration: heat closure', () => {
     expect(repository.heatTimes).toEqual([]);
     expect(repository.results).toEqual([]);
 
-    // An administrative closure releases the hold too, so a new one is taken.
-    expect(repository.captureLock).toBeNull();
+    // An administrative closure keeps the hold as well, so a new one is taken
+    // only explicitly.
+    expect(repository.captureLock).not.toBeNull();
     repository.takeLock(WORKSTATION, REFEREE_USER_ID);
 
     const cancelled = await startSeededHeat(server, 3);
