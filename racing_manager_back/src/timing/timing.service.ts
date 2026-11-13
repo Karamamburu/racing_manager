@@ -2606,7 +2606,7 @@ export class TimingService {
   /**
    * One closure, in one transaction: the resolution gates, the publication of
    * every eligible result with its split set, the state change, the closure
-   * report, the capture-lock release and the audit row.
+   * report, the capture-lock check and the audit row.
    *
    * A `HEAT` attempt publishes `ClassHeatTime` rows only — one total and `OK`
    * per frozen participant at N — and writes no ordinary result, no split and
