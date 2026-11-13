@@ -2759,20 +2759,26 @@ export class TimingService {
     statuses: ReadonlyMap<string, EnrollmentStatus>,
     input: ClosureInput,
   ): Promise<void> {
-    const anonymousSplitIds = (
+    const pendingSplits = (
       await this.repository.listAnonymousSplits(attempt.eventId, tx)
-    )
-      .filter((split) => split.attemptId === attempt.id)
-      .map((split) => split.splitId);
-    if (anonymousSplitIds.length > 0) {
+    ).filter((split) => split.attemptId === attempt.id);
+    if (pendingSplits.length > 0) {
       // FR-14: only assignment, cancellation or quick undo clears a split; a
       // completion, force-completion or cancellation of the attempt itself is
-      // refused and names every queued split.
-      throw timingError(
-        TimingErrorCode.PENDING_REMAINS,
-        'В попытке есть неразмеченный сплит: назначьте ему номер или отмените его.',
-        { attemptId: attempt.id, anonymousSplitIds },
-      );
+      // refused and names every queued split. The message names the capture
+      // instants so the operator can find the entry in the top queue.
+      const anonymousSplitIds = pendingSplits.map((split) => split.splitId);
+      const instants = pendingSplits
+        .map((split) => formatQueueElapsed(split.officialElapsedMs))
+        .join(', ');
+      const message =
+        pendingSplits.length === 1
+          ? `В попытке есть неразмеченный сплит (${instants}): назначьте его или отмените в очереди неразмеченных сплитов.`
+          : `В попытке есть неразмеченные сплиты (${instants}): назначьте их или отмените в очереди неразмеченных сплитов.`;
+      throw timingError(TimingErrorCode.PENDING_REMAINS, message, {
+        attemptId: attempt.id,
+        anonymousSplitIds,
+      });
     }
     const receipts = await this.repository.listAttemptReceipts(attempt.id, tx);
     const coverage = closureReceiptCoverage(marks, receipts, input);
@@ -4586,6 +4592,21 @@ function heatAttemptTarget(attempt: TimingAttemptRow): {
  * ignored, because it issued nothing to confirm. Every mark the record does
  * hold stays gated, so a real gap inside the same attempt is never weakened.
  */
+/** `mm:ss.mmm` of one queued split, used only to name it in a refusal. */
+function formatQueueElapsed(elapsedMs: number): string {
+  const safe = Math.max(0, Math.trunc(elapsedMs));
+  const milliseconds = safe % 1000;
+  const totalSeconds = Math.floor(safe / 1000);
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  const pad = (value: number, width = 2): string =>
+    String(value).padStart(width, '0');
+  const base = `${pad(minutes)}:${pad(seconds)}.${pad(milliseconds, 3)}`;
+  return hours > 0 ? `${hours}:${base}` : base;
+}
+
 function missingReceiptSequences(
   marks: readonly TimingMarkRow[],
   receipts: readonly TimingReceiptRow[],

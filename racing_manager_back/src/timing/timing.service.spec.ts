@@ -5483,6 +5483,9 @@ describe('TimingService', () => {
             anonymousSplitIds: ['split-1'],
           },
         });
+        expect((refusal as { message?: string }).message).toContain(
+          'В попытке есть неразмеченный сплит (00:20.000)',
+        );
       }
       expect(repository.updateAttemptStatus).not.toHaveBeenCalled();
       expect(repository.insertAudit).not.toHaveBeenCalled();
