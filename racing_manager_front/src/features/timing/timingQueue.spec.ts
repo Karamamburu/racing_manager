@@ -48,6 +48,35 @@ describe('timingQueue sequences', () => {
       second.nextSequence('attempt-seq-reload', 'ws-1'),
     ).resolves.toBe(issued + 1);
   });
+
+  it('reports zero before any sequence and the issued cursor after', async () => {
+    const queue = await openTimingQueue();
+    const attemptId = 'attempt-seq-last';
+
+    await expect(queue.lastSequence(attemptId, 'ws-1')).resolves.toBe(0);
+
+    await queue.nextSequence(attemptId, 'ws-1');
+    await queue.nextSequence(attemptId, 'ws-1');
+
+    await expect(queue.lastSequence(attemptId, 'ws-1')).resolves.toBe(2);
+    await expect(queue.lastSequence(attemptId, 'ws-2')).resolves.toBe(0);
+    await expect(queue.lastSequence('attempt-seq-other', 'ws-1')).resolves.toBe(
+      0,
+    );
+  });
+
+  it('keeps the cursor when the outbox is cleared', async () => {
+    const queue = await openTimingQueue();
+    const attemptId = 'attempt-seq-clear';
+    await queue.enqueue(queueItem('key-seq-clear', attemptId));
+    await queue.nextSequence(attemptId, 'ws-1');
+
+    await queue.clear();
+
+    await expect(queue.lastSequence(attemptId, 'ws-1')).resolves.toBe(1);
+    await expect(queue.nextSequence(attemptId, 'ws-1')).resolves.toBe(2);
+    await expect(queue.list()).resolves.toEqual([]);
+  });
 });
 
 describe('timingQueue outbox', () => {

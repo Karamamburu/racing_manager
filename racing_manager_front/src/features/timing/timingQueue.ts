@@ -54,6 +54,11 @@ export interface TimingQueueItem {
 export interface TimingQueue {
   /** Allocates the next sequence of one attempt and workstation, from 1. */
   nextSequence(attemptId: string, workstationInstanceId: string): Promise<number>;
+  /**
+   * The highest sequence this workstation issued for the attempt, or zero when
+   * it issued none. Completion reports it and the API refuses a gap.
+   */
+  lastSequence(attemptId: string, workstationInstanceId: string): Promise<number>;
   /** Stores the item before the caller sends it. */
   enqueue(item: TimingQueueItem): Promise<void>;
   /** Every item, or every item of one attempt, in capture order. */
@@ -68,7 +73,10 @@ export interface TimingQueue {
   remove(id: string): Promise<void>;
   /** How many items of the attempt still need the server. */
   pendingCount(attemptId?: string): Promise<number>;
-  /** Empties the outbox. Sequence cursors are kept on purpose. */
+  /**
+   * Empties the outbox. Sequence cursors are kept on purpose: `lastSequence`
+   * still reports what was issued and `nextSequence` continues from there.
+   */
   clear(): Promise<void>;
 }
 
@@ -102,6 +110,7 @@ export function newTimingMutationKey(): string {
 /** The persistence port; two implementations, one contract. */
 interface TimingQueueStorage {
   nextSequence(attemptId: string, workstationInstanceId: string): Promise<number>;
+  lastSequence(attemptId: string, workstationInstanceId: string): Promise<number>;
   put(item: TimingQueueItem): Promise<void>;
   all(): Promise<TimingQueueItem[]>;
   get(id: string): Promise<TimingQueueItem | undefined>;
@@ -127,6 +136,13 @@ class MemoryTimingQueueStorage implements TimingQueueStorage {
     const next = (this.cursors.get(key) ?? 0) + 1;
     this.cursors.set(key, next);
     return next;
+  }
+
+  public async lastSequence(
+    attemptId: string,
+    workstationInstanceId: string,
+  ): Promise<number> {
+    return this.cursors.get(cursorKey(attemptId, workstationInstanceId)) ?? 0;
   }
 
   public async put(item: TimingQueueItem): Promise<void> {
@@ -208,6 +224,20 @@ class IndexedDbTimingQueueStorage implements TimingQueueStorage {
     return next;
   }
 
+  public async lastSequence(
+    attemptId: string,
+    workstationInstanceId: string,
+  ): Promise<number> {
+    const key = cursorKey(attemptId, workstationInstanceId);
+    const transaction = this.database.transaction(CURSORS_STORE, 'readonly');
+    const store = transaction.objectStore(CURSORS_STORE);
+    const current = await requestResult<number | undefined>(
+      store.get(key) as IDBRequest<number | undefined>,
+    );
+    await transactionDone(transaction);
+    return typeof current === 'number' ? current : 0;
+  }
+
   public async put(item: TimingQueueItem): Promise<void> {
     const transaction = this.database.transaction(MUTATIONS_STORE, 'readwrite');
     transaction.objectStore(MUTATIONS_STORE).put(item);
@@ -286,6 +316,13 @@ class TimingOutbox implements TimingQueue {
     workstationInstanceId: string,
   ): Promise<number> {
     return this.storage.nextSequence(attemptId, workstationInstanceId);
+  }
+
+  public async lastSequence(
+    attemptId: string,
+    workstationInstanceId: string,
+  ): Promise<number> {
+    return this.storage.lastSequence(attemptId, workstationInstanceId);
   }
 
   public async enqueue(item: TimingQueueItem): Promise<void> {
