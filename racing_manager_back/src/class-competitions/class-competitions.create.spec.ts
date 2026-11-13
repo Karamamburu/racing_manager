@@ -1,6 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import { RolesService } from '../auth/roles.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { TimingAttemptsReadService } from '../timing/timing-attempts-read.service';
 import { CmsClient } from './cms.client';
 import { ClassCompetitionsService } from './class-competitions.service';
 
@@ -173,10 +174,19 @@ function makeHarness(options: HarnessOptions = {}) {
     deleteCompetition: jest.fn(() => Promise.resolve(undefined)),
   };
 
+  const timingAttempts = {
+    hasRunningHeat: jest.fn(() => Promise.resolve(false)),
+    hasRunningHeatForStage: jest.fn(() => Promise.resolve(false)),
+    hasRunningAttemptForCategory: jest.fn(() => Promise.resolve(false)),
+    hasRunningAttemptForRace: jest.fn(() => Promise.resolve(false)),
+    hasRunningAttemptForParticipant: jest.fn(() => Promise.resolve(false)),
+  };
+
   const service = new ClassCompetitionsService(
     prisma as unknown as PrismaService,
     roles as unknown as RolesService,
     cms as unknown as CmsClient,
+    timingAttempts as unknown as TimingAttemptsReadService,
   );
 
   return { service, state, prisma, cms };

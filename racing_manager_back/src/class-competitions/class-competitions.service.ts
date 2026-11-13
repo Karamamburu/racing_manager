@@ -29,12 +29,14 @@ import {
 } from '../registrations/registration-status';
 import { competitionPlaces } from '../ranking/competition-places';
 import { categoryIsFinished } from '../events/category-finish';
+import { TimingAttemptsReadService } from '../timing/timing-attempts-read.service';
 import { classifyBracket, lastOkTimes } from './classify-bracket';
 import { CmsClient } from './cms.client';
 import { outcomeForHeat } from './qualify-heat';
 import { CmsCompetition, CmsStageSpec } from './cms.types';
 import {
   ParsedHeatTimes,
+  ParsedPlanChange,
   parseCreateClassCompetitionBody,
   parseHeatAssignmentBody,
   parseHeatTimesBody,
@@ -111,6 +113,20 @@ type StoredClassCompetition = {
   event: StoredEvent;
   heatTimes: StoredHeatTime[];
 };
+
+/**
+ * F-15: a manual heat-time write is refused only for the heat whose timing
+ * attempt runs; the other heats of the stage stay editable.
+ */
+const RUNNING_HEAT_MESSAGE =
+  'Нельзя записать время заезда, пока идёт его попытка хронометража.';
+
+/**
+ * F-16: seeding, heat reassignment/add/delete, stage removal and stage
+ * commitment span every heat of the stage, so any running heat of it refuses.
+ */
+const RUNNING_STAGE_HEAT_MESSAGE =
+  'Нельзя изменить этап, пока идёт попытка хронометража одного из его заездов.';
 
 const classCompetitionInclude = {
   event: {
@@ -200,6 +216,7 @@ export class ClassCompetitionsService {
     private readonly prisma: PrismaService,
     private readonly rolesService: RolesService,
     private readonly cms: CmsClient,
+    private readonly timingAttempts: TimingAttemptsReadService,
   ) {}
 
   async list(eventId: string): Promise<ClassCompetitionView[]> {
@@ -607,6 +624,7 @@ export class ClassCompetitionsService {
     const parsed = parsePlanChangeBody(body);
     const row = await this.requireOwned(eventId, classCompetitionId);
     this.assertMutableEvent(row.event);
+    await this.assertPlanStagesNotRunning(row.id, parsed);
     const current = await this.cms.getCompetition(row.cmsCompetitionId);
     const next = await this.cms.updatePlan(
       row.cmsCompetitionId,
@@ -646,6 +664,7 @@ export class ClassCompetitionsService {
     await this.rolesService.assertHasAnyRole(authentikId, ADMIN_ROLE_CODES);
     const row = await this.requireOwned(eventId, classCompetitionId);
     this.assertMutableEvent(row.event);
+    await this.assertStageNotRunning(row.id, stageId);
     const cms = await this.cms.getCompetition(row.cmsCompetitionId);
     const registrations = await this.loadRegistrations(eventId);
     const frozen = await this.freezeMissingQualifications(
@@ -695,6 +714,7 @@ export class ClassCompetitionsService {
     const parsed = parseHeatAssignmentBody(body);
     const row = await this.requireOwned(eventId, classCompetitionId);
     this.assertMutableEvent(row.event);
+    await this.assertStageNotRunning(row.id, stageId);
     const next = await this.cms.reassignHeats(
       row.cmsCompetitionId,
       stageId,
@@ -732,6 +752,7 @@ export class ClassCompetitionsService {
     const parsed = parseHeatTimesBody(body);
     const row = await this.requireOwned(eventId, classCompetitionId);
     this.assertMutableEvent(row.event);
+    await this.assertHeatTimesNotRunning(row.id, stageId, parsed);
     let current = await this.cms.getCompetition(row.cmsCompetitionId);
     let stage = current.stages.find((item) => item.stageId === stageId);
     if (!stage) {
@@ -1026,6 +1047,71 @@ export class ClassCompetitionsService {
           'Участник не состоит в указанном заезде.',
         );
       }
+    }
+  }
+
+  /**
+   * F-16 guard: a stage-scoped action is refused while a heat of the stage has
+   * a running timing attempt. The caller invokes it before its first write and
+   * before its first CMS call.
+   */
+  private async assertStageNotRunning(
+    classCompetitionId: string,
+    stageId: string,
+  ): Promise<void> {
+    const running = await this.timingAttempts.hasRunningHeatForStage(
+      classCompetitionId,
+      stageId,
+    );
+    if (running) {
+      throw new ConflictException(RUNNING_STAGE_HEAT_MESSAGE);
+    }
+  }
+
+  /**
+   * F-15/F-16 guard for the manual form. `commit: false` is heat-scoped: only
+   * the heats named in the body are checked, so the other heats of the stage
+   * stay editable. `commit: true` commits the whole stage, so any running heat
+   * of it refuses before the commitment and before any CMS call.
+   */
+  private async assertHeatTimesNotRunning(
+    classCompetitionId: string,
+    stageId: string,
+    parsed: ParsedHeatTimes,
+  ): Promise<void> {
+    if (parsed.commit) {
+      await this.assertStageNotRunning(classCompetitionId, stageId);
+      return;
+    }
+    const heatNumbers = new Set(
+      parsed.entries.map((entry) => entry.heatNumber),
+    );
+    for (const heatNumber of heatNumbers) {
+      const running = await this.timingAttempts.hasRunningHeat(
+        classCompetitionId,
+        stageId,
+        heatNumber,
+      );
+      if (running) {
+        throw new ConflictException(RUNNING_HEAT_MESSAGE);
+      }
+    }
+  }
+
+  /**
+   * F-16 guard for the plan route. Removing a stage touches exactly the stages
+   * named in the body, so only a running heat of one of them refuses and a plan
+   * that touches another stage stays allowed. Adding a stage creates a new,
+   * empty stage with no heat, and F-16 does not list stage addition, so a
+   * running heat elsewhere does not block it.
+   */
+  private async assertPlanStagesNotRunning(
+    classCompetitionId: string,
+    parsed: ParsedPlanChange,
+  ): Promise<void> {
+    if (!('removeStageIds' in parsed)) return;
+    for (const stageId of parsed.removeStageIds) {
+      await this.assertStageNotRunning(classCompetitionId, stageId);
     }
   }
 
