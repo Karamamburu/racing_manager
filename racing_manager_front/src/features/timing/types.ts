@@ -4,9 +4,10 @@ import type { ResultResponse } from '../../shared/types/event';
  * Front mirror of the MANUAL-TIMING HTTP contract.
  *
  * Source of truth: `racing_manager_back/src/timing/timing.views.ts` and
- * `timing.dto.ts`, described by `Tasks/MANUAL-TIMING/ARCHITECTURE.md` §6. Dates
- * are ISO-8601 strings and durations are integer milliseconds. No Prisma and no
- * backend runtime types reach this module: only the shapes cross the boundary.
+ * `timing.dto.ts`, described by `Tasks/MANUAL-TIMING/ARCHITECTURE.md` §6 and
+ * `Tasks/MANUAL-TIMING-2/ARCHITECTURE.md` §6. Dates are ISO-8601 strings and
+ * durations are integer milliseconds. No Prisma and no backend runtime types
+ * reach this module: only the shapes cross the boundary.
  */
 
 /** The two protocol genders one attempt covers. */
@@ -52,14 +53,28 @@ export const TIMING_PASS_STATUSES = ['BOUND', 'PENDING', 'CANCELLED'] as const;
 
 export type TimingPassStatus = (typeof TIMING_PASS_STATUSES)[number];
 
-/** How a capture identified its participant. */
+/** How a capture identified its participant; an anonymous split has none yet. */
 export const TIMING_CAPTURE_KINDS = [
   'NUMBER',
   'TILE',
   'PENDING_FINISH',
+  'ANONYMOUS_SPLIT',
 ] as const;
 
 export type TimingCaptureKind = (typeof TIMING_CAPTURE_KINDS)[number];
+
+/** Which lifecycle an attempt follows: a protocol category or one heat. */
+export const TIMING_ATTEMPT_KINDS = ['CATEGORY', 'HEAT'] as const;
+
+export type TimingAttemptKind = (typeof TIMING_ATTEMPT_KINDS)[number];
+
+/**
+ * Stage state as the surface reports it; a stage whose heats are not formed is
+ * `PENDING`.
+ */
+export const TIMING_STAGE_STATES = ['PENDING', 'SEEDED', 'COMPLETED'] as const;
+
+export type TimingStageState = (typeof TIMING_STAGE_STATES)[number];
 
 /** What an official-time correction moves: the attempt start or one pass. */
 export type TimingOfficialTimeTarget = 'START' | 'PASS';
@@ -79,6 +94,53 @@ export interface TimingCategoryBlockView {
   participants: TimingParticipantTileView[];
   pendingFinishes: TimingPassView[];
   lastAttempts: TimingAttemptRef[];
+  /**
+   * Which lifecycle the block follows; a block without the field is a category
+   * block. A heat block adds the heat fields below.
+   */
+  kind?: TimingAttemptKind;
+  /** Stable collapse identity of the block: category + section + race (AD-20). */
+  blockKey?: string;
+  /** The multi-stage race a heat block belongs to. */
+  classCompetitionId?: string;
+  /** The CMS stage a heat block belongs to. */
+  stageId?: string;
+  /** Human-readable stage name, for example the round of a seeded stage. */
+  stageLabel?: string;
+  stageState?: TimingStageState;
+  /** The heat number inside the stage, ascending in render order. */
+  heatNumber?: number;
+  /** Human-readable heat name. */
+  heatLabel?: string;
+}
+
+/** One stage header grouping the heat blocks of a multi-stage race. */
+export interface TimingStageGroupView {
+  /** Stable collapse identity of the stage header (AD-20). */
+  blockKey: string;
+  /** The multi-stage race; `classCompetitionId` in the CMS view. */
+  raceId: string;
+  raceTitle: string;
+  stageId: string;
+  stageLabel: string;
+  stageState: TimingStageState;
+  /** `blockKey` of every heat block this header groups, in render order. */
+  heatBlockKeys: string[];
+  blockReason: string | null;
+}
+
+/** One queued anonymous split of the event, oldest capture first. */
+export interface TimingAnonymousSplitView {
+  splitId: string;
+  attemptId: string;
+  /** `blockKey` of the attempt's block, so the queue can name it. */
+  blockKey: string;
+  attemptLabel: string;
+  /** The press instant, ISO-8601. */
+  capturedAt: string;
+  /** Elapsed value since the attempt's own official start, integer milliseconds. */
+  officialElapsedMs: number;
+  status: 'QUEUED';
 }
 
 /** The whole surface of one event: every protocol category plus the lock holder. */
@@ -86,6 +148,10 @@ export interface TimingSurfaceView {
   eventId: string;
   captureWorkstationInstanceId: string | null;
   categories: TimingCategoryBlockView[];
+  /** Stage headers of every multi-stage race; absent on a category-only surface. */
+  stageGroups?: TimingStageGroupView[];
+  /** The anonymous split queue; absent on a surface read that predates it. */
+  anonymousSplits?: TimingAnonymousSplitView[];
 }
 
 /** One participant tile: the frozen roster facts and the live capture state. */
@@ -126,6 +192,10 @@ export interface TimingClosureReportView {
   publishedEnrollmentIds: string[];
   unpublishedEnrollmentIds: string[];
   conflictEnrollmentIds: string[];
+  /** Heat closure: registrations that received a heat time. */
+  publishedRegistrationIds?: string[];
+  /** Heat closure: registrations that already gained a heat time elsewhere. */
+  conflictRegistrationIds?: string[];
 }
 
 /** One append-only audit row of the attempt. */
@@ -198,18 +268,35 @@ export interface StartTimingAttemptRequest {
   clientStartedAt: string;
 }
 
+/** `POST /events/:eventId/timing/heat-attempts` — the Start press of one heat. */
+export interface StartHeatAttemptRequest {
+  /** The multi-stage race whose stage heat is timed. */
+  classCompetitionId: string;
+  /** The CMS stage the heat belongs to; only a `SEEDED` stage starts. */
+  stageId: string;
+  heatNumber: number;
+  /** The workstation that pressed Start and must hold the capture lock. */
+  workstationInstanceId: string;
+  /** Client wall clock of the press, ISO-8601. */
+  clientStartedAt: string;
+}
+
 /** `POST /events/:eventId/timing/attempts/:attemptId/clock-epochs`. */
 export interface OpenClockEpochRequest {
   workstationInstanceId: string;
 }
 
-/** `POST /events/:eventId/timing/passes` — one number, tile or unbound finish. */
+/** `POST /events/:eventId/timing/passes` — one number, tile, unbound finish or anonymous split. */
 export interface CaptureTimingPassRequest {
   attemptId: string;
+  /**
+   * `ANONYMOUS_SPLIT` sends no participant: `startNumber` and `enrollmentId`
+   * stay absent, and the split waits in the queue until it is assigned.
+   */
   kind: TimingCaptureKind;
-  /** Required for `NUMBER`; absent for `TILE` and `PENDING_FINISH`. */
+  /** Required for `NUMBER`; absent for `TILE`, `PENDING_FINISH` and `ANONYMOUS_SPLIT`. */
   startNumber?: number;
-  /** Required for `TILE`; absent for `NUMBER` and `PENDING_FINISH`. */
+  /** Required for `TILE`; absent for `NUMBER`, `PENDING_FINISH` and `ANONYMOUS_SPLIT`. */
   enrollmentId?: string;
   /** Client wall clock of the capture, ISO-8601. */
   clientCapturedAt: string;
@@ -233,6 +320,21 @@ export interface BindPendingFinishRequest {
 
 /** `POST /events/:eventId/timing/pending-finishes/:pendingFinishId/cancel`. */
 export interface CancelPendingFinishRequest {
+  reason: string;
+}
+
+/** `POST /events/:eventId/timing/splits/:splitId/assign` — bind a queued split. */
+export interface AssignAnonymousSplitRequest {
+  /** Exactly one of `startNumber` and `enrollmentId` is required. */
+  startNumber?: number;
+  enrollmentId?: string;
+  /** The workstation assigning the split; it must hold the capture lock. */
+  workstationInstanceId: string;
+  deviceSequence: number;
+}
+
+/** `POST /events/:eventId/timing/splits/:splitId/cancel`. */
+export interface CancelAnonymousSplitRequest {
   reason: string;
 }
 
