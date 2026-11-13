@@ -21,6 +21,12 @@ const NewsEditorPage = lazy(() =>
   })),
 );
 
+const TimingPage = lazy(() =>
+  import('./pages/TimingPage/index').then((module) => ({
+    default: module.TimingPage,
+  })),
+);
+
 function NewsEditorRoute() {
   return (
     <Suspense
@@ -31,6 +37,20 @@ function NewsEditorRoute() {
       }
     >
       <NewsEditorPage />
+    </Suspense>
+  );
+}
+
+function TimingPageRoute() {
+  return (
+    <Suspense
+      fallback={
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}>
+          <Spin size="large" />
+        </div>
+      }
+    >
+      <TimingPage />
     </Suspense>
   );
 }
@@ -50,6 +70,7 @@ export default function App() {
         <Route path="/news/:id/edit" element={<NewsEditorRoute />} />
         <Route path="/news/:id" element={<NewsArticlePage />} />
         <Route path="/events/:id" element={<EventPage />} />
+        <Route path="/events/:id/timing" element={<TimingPageRoute />} />
         <Route path="/policy" element={<PolicyPage />} />
         <Route path="/policy/:slug" element={<PolicyDocumentPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
