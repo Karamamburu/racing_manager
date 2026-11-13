@@ -1,9 +1,13 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
 import { RoleCode } from '../auth/role-codes';
 import type { RolesService } from '../auth/roles.service';
 import type { SetRefereeRoleDto } from '../timing/timing.dto';
 import type { UserRolesView } from '../timing/timing.views';
-import type { RefereeRoleRepository } from './referee-role.repository';
+import { AdminController } from './admin.controller';
+import { AdminModule } from './admin.module';
+import { RefereeRoleController } from './referee-role.controller';
+import { RefereeRoleRepository } from './referee-role.repository';
 import { RefereeRoleService } from './referee-role.service';
 
 /**
@@ -202,5 +206,40 @@ describe('RefereeRoleService', () => {
       expect(view.userId).toBe(USER_ID);
       expect(view.roles.every((code) => typeof code === 'string')).toBe(true);
     });
+  });
+});
+
+/**
+ * Nest reads controller, provider and import metadata when it builds the
+ * module graph; an unregistered route is absent from HTTP even when its
+ * controller and service exist. These assertions guard that wiring.
+ */
+describe('AdminModule wiring', () => {
+  it('registers the REFEREE grant controller beside the admin route', () => {
+    const controllers = Reflect.getMetadata(
+      'controllers',
+      AdminModule,
+    ) as unknown[];
+
+    expect(controllers).toEqual(
+      expect.arrayContaining([AdminController, RefereeRoleController]),
+    );
+  });
+
+  it('provides the REFEREE grant service and its repository', () => {
+    const providers = Reflect.getMetadata(
+      'providers',
+      AdminModule,
+    ) as unknown[];
+
+    expect(providers).toEqual(
+      expect.arrayContaining([RefereeRoleService, RefereeRoleRepository]),
+    );
+  });
+
+  it('imports AuthModule for RolesService and the guards', () => {
+    const imports = Reflect.getMetadata('imports', AdminModule) as unknown[];
+
+    expect(imports).toContain(AuthModule);
   });
 });

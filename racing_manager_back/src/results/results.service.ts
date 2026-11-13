@@ -33,6 +33,18 @@ import {
 import { logEvent } from '../logging/log-event';
 import type { Prisma } from '../../generated/prisma';
 
+/**
+ * One published timing split returned with a manual result write.
+ *
+ * A manual write clears the stored splits, so this list is empty for every
+ * result the route writes; the field stays additive beside the existing keys.
+ */
+export type ResultLapSplit = {
+  lapNumber: number;
+  lapTimeMs: number;
+  cumulativeMs: number;
+};
+
 export type ResultResponse = {
   id: string;
   enrollmentId: string;
@@ -41,6 +53,7 @@ export type ResultResponse = {
   timeMilliseconds: number | null;
   recordedAt: string;
   updatedAt: string;
+  laps?: ResultLapSplit[];
 };
 
 type EventForResult = {
@@ -62,6 +75,7 @@ type StoredResult = {
   registrationId: string;
   recordedAt: Date;
   updatedAt: Date;
+  splits: ResultLapSplit[];
 };
 
 @Injectable()
@@ -224,6 +238,14 @@ export class ResultsService {
           registrationId: true,
           recordedAt: true,
           updatedAt: true,
+          splits: {
+            select: {
+              lapNumber: true,
+              lapTimeMs: true,
+              cumulativeMs: true,
+            },
+            orderBy: { lapNumber: 'asc' },
+          },
         },
       });
       if (!row) {
@@ -243,6 +265,15 @@ export class ResultsService {
     return this.toResponse(saved, enrollment.id, parsed);
   }
 
+  /**
+   * Writes the enrollment's authoritative result and clears its timing splits.
+   *
+   * A manual entry owns the total, not the split detail, so every written or
+   * adopted result loses its stale `result_splits` rows in the same
+   * transaction (AD-4). The three paths mirror the existing upsert semantics:
+   * the enrollment's own row, a legacy registration-only row adopted for the
+   * enrollment, or a new row.
+   */
   private async writeEnrollmentResult(
     tx: Prisma.TransactionClient,
     input: {
@@ -252,6 +283,21 @@ export class ResultsService {
       timeMilliseconds: number | null;
     },
   ): Promise<void> {
+    const resultId = await this.upsertResultRow(tx, input);
+    await tx.$executeRaw`
+      DELETE FROM result_splits WHERE result_id = ${resultId}::uuid
+    `;
+  }
+
+  private async upsertResultRow(
+    tx: Prisma.TransactionClient,
+    input: {
+      enrollmentId: string;
+      registrationId: string;
+      outcome: ResultOutcomeCode;
+      timeMilliseconds: number | null;
+    },
+  ): Promise<string> {
     const existing = await tx.result.findUnique({
       where: { enrollmentId: input.enrollmentId },
       select: { id: true },
@@ -265,7 +311,7 @@ export class ResultsService {
           updated_at = now()
         WHERE id = ${existing.id}::uuid
       `;
-      return;
+      return existing.id;
     }
 
     const legacy = await tx.result.findFirst({
@@ -285,10 +331,10 @@ export class ResultsService {
           updated_at = now()
         WHERE id = ${legacy.id}::uuid
       `;
-      return;
+      return legacy.id;
     }
 
-    await tx.$executeRaw`
+    const inserted = await tx.$queryRaw<{ id: string }[]>`
       INSERT INTO results (
         registration_id,
         enrollment_id,
@@ -303,7 +349,13 @@ export class ResultsService {
         ${input.timeMilliseconds},
         NULL
       )
+      RETURNING id
     `;
+    const created = inserted[0];
+    if (!created) {
+      throw new Error('New result row was not inserted.');
+    }
+    return created.id;
   }
 
   private assertRecordableRegistration(registration: RegistrationForResult) {
@@ -357,6 +409,11 @@ export class ResultsService {
       timeMilliseconds: parsed.timeMilliseconds,
       recordedAt: row.recordedAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
+      laps: row.splits.map((split) => ({
+        lapNumber: split.lapNumber,
+        lapTimeMs: split.lapTimeMs,
+        cumulativeMs: split.cumulativeMs,
+      })),
     };
   }
 }
