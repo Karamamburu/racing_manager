@@ -136,6 +136,37 @@ enum PersonalConsentSource {
   @@map("personal_consent_source")
 }
 
+enum TimingSessionStatus {
+  RUNNING
+  COMPLETED
+  INCOMPLETE
+  CANCELLED
+
+  @@map("timing_session_status")
+}
+
+enum TimingMarkKind {
+  PASS
+  PENDING_FINISH
+
+  @@map("timing_mark_kind")
+}
+
+enum TimingMarkStatus {
+  BOUND
+  PENDING
+  CANCELLED
+
+  @@map("timing_mark_status")
+}
+
+enum TimingReceiptStatus {
+  APPLIED
+  REJECTED
+
+  @@map("timing_receipt_status")
+}
+
 model User {
   id            String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   authentikId   String                 @unique @map("authentik_id")
@@ -155,6 +186,12 @@ model User {
   createdNews   News[]
   registrations Registration[]
   consentEvents PersonalConsentEvent[]
+
+  timingSessionsStarted   TimingSession[]     @relation("TimingSessionStartedBy")
+  timingSessionsClosed    TimingSession[]     @relation("TimingSessionClosedBy")
+  timingClockEpochsOpened TimingClockEpoch[]
+  timingCaptureLocksHeld  TimingCaptureLock[]
+  timingAuditEntries      TimingAudit[]
 
   @@map("users")
 }
@@ -220,6 +257,8 @@ model Event {
   categoryFinishes   CategoryFinish[]
   ageSplitSections   AgeSplitSection[]
   ageSplitCategories AgeSplitCategory[]
+  timingSessions     TimingSession[]
+  timingCaptureLock  TimingCaptureLock?
 
   @@index([trackId], map: "idx_events_track_id")
   @@index([eventDate], map: "idx_events_date")
@@ -241,6 +280,7 @@ model ParticipationFormat {
   categoryFinishes   CategoryFinish[]
   ageSplitSections   AgeSplitSection[]
   ageSplitCategories AgeSplitCategory[]
+  timingSessions     TimingSession[]
 
   @@unique([sport, code])
   @@index([sport], map: "idx_participation_formats_sport")
@@ -281,6 +321,9 @@ model Registration {
   result       Result?
   enrollments  Enrollment[]
   heatTimes    ClassHeatTime[]
+
+  timingSessionParticipants TimingSessionParticipant[]
+  timingMarks               TimingMark[]
 
   @@unique([id, eventId], map: "uq_registrations_id_event")
   @@index([eventId], map: "idx_registrations_event_id")
@@ -325,6 +368,7 @@ model Start {
   ageSplitSections         AgeSplitSection[]
   ageSplitCategories       AgeSplitCategory[]
   classCompetitions        ClassCompetition[]
+  timingSessions           TimingSession[]
 
   @@unique([id, eventId], map: "uq_starts_id_event")
   @@unique([eventId, sortOrder], map: "uq_starts_event_sort_order")
@@ -355,6 +399,9 @@ model Enrollment {
   createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
   result         Result?
+
+  timingSessionParticipants TimingSessionParticipant[]
+  timingMarks               TimingMark[]
 
   @@unique([registrationId, startId], map: "uq_enrollments_registration_start")
   @@index([eventId], map: "idx_enrollments_event_id")
@@ -501,8 +548,12 @@ model Result {
   place            Int?
   recordedAt       DateTime       @default(now()) @map("recorded_at") @db.Timestamptz(6)
   updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  timingSessionId  String?        @map("timing_session_id") @db.Uuid
+  timingSession    TimingSession? @relation(fields: [timingSessionId], references: [id], onDelete: SetNull)
   laps             ResultLap[]
+  splits           ResultSplit[]
 
+  @@index([timingSessionId], map: "idx_results_timing_session_id")
   @@map("results")
 }
 
@@ -520,6 +571,169 @@ model ResultLap {
   @@index([resultId], map: "idx_result_laps_result_id")
   @@index([eventLapId], map: "idx_result_laps_event_lap_id")
   @@map("result_laps")
+}
+
+model ResultSplit {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  resultId     String   @map("result_id") @db.Uuid
+  result       Result   @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  lapNumber    Int      @map("lap_number")
+  lapTimeMs    Int      @map("lap_time_ms")
+  cumulativeMs Int      @map("cumulative_ms")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([resultId, lapNumber], map: "uq_result_splits_result_lap")
+  @@index([resultId], map: "idx_result_splits_result_id")
+  @@map("result_splits")
+}
+
+model TimingSession {
+  id                String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  eventId           String                     @map("event_id") @db.Uuid
+  event             Event                      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  startId           String                     @map("start_id") @db.Uuid
+  start             Start                      @relation(fields: [startId], references: [id], onDelete: Cascade)
+  formatId          Int                        @map("format_id")
+  format            ParticipationFormat        @relation(fields: [formatId], references: [id])
+  gender            GenderType
+  attemptNumber     Int                        @map("attempt_number")
+  status            TimingSessionStatus        @default(RUNNING)
+  officialStartedAt DateTime                   @map("official_started_at") @db.Timestamptz(6)
+  clientStartedAt   DateTime                   @map("client_started_at") @db.Timestamptz(6)
+  startedByUserId   String?                    @map("started_by_user_id") @db.Uuid
+  startedBy         User?                      @relation("TimingSessionStartedBy", fields: [startedByUserId], references: [id], onDelete: SetNull)
+  closedAt          DateTime?                  @map("closed_at") @db.Timestamptz(6)
+  closedByUserId    String?                    @map("closed_by_user_id") @db.Uuid
+  closedBy          User?                      @relation("TimingSessionClosedBy", fields: [closedByUserId], references: [id], onDelete: SetNull)
+  closureReport     Json?                      @map("closure_report")
+  createdAt         DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  participants      TimingSessionParticipant[]
+  clockEpochs       TimingClockEpoch[]
+  marks             TimingMark[]
+  receipts          TimingCaptureReceipt[]
+  auditEntries      TimingAudit[]
+  results           Result[]
+
+  // The SQL migration also adds composite foreign keys to
+  // starts(id, event_id) and start_formats(start_id, format_id). Prisma
+  // cannot carry both those and the single-column relations above over the
+  // same fields, so they stay SQL-only.
+  @@unique([eventId, startId, formatId, gender, attemptNumber], map: "uq_timing_sessions_category_attempt")
+  // Partial unique index, SQL only:
+  // uq_timing_sessions_running_category ON (event_id, start_id, format_id, gender)
+  // WHERE status = 'RUNNING'.
+  @@index([eventId], map: "idx_timing_sessions_event_id")
+  @@map("timing_sessions")
+}
+
+model TimingSessionParticipant {
+  sessionId      String         @map("session_id") @db.Uuid
+  session        TimingSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  enrollmentId   String         @map("enrollment_id") @db.Uuid
+  enrollment     Enrollment     @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  registrationId String         @map("registration_id") @db.Uuid
+  registration   Registration   @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  startNumber    Int?           @map("start_number")
+  sectionId      String?        @map("section_id")
+  requiredLaps   Int            @map("required_laps")
+  initialOutcome ResultOutcome? @map("initial_outcome")
+  excludedReason String?        @map("excluded_reason")
+
+  @@id([sessionId, enrollmentId])
+  @@index([enrollmentId], map: "idx_timing_session_participants_enrollment_id")
+  @@map("timing_session_participants")
+}
+
+model TimingClockEpoch {
+  id                      String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sessionId               String        @map("session_id") @db.Uuid
+  session                 TimingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  workstationInstanceId   String        @map("workstation_instance_id")
+  officialElapsedAnchorMs Int           @map("official_elapsed_anchor_ms")
+  openedAt                DateTime      @default(now()) @map("opened_at") @db.Timestamptz(6)
+  closedAt                DateTime?     @map("closed_at") @db.Timestamptz(6)
+  openedByUserId          String?       @map("opened_by_user_id") @db.Uuid
+  openedBy                User?         @relation(fields: [openedByUserId], references: [id], onDelete: SetNull)
+  marks                   TimingMark[]
+
+  @@index([sessionId, workstationInstanceId], map: "idx_timing_clock_epochs_session_workstation")
+  @@map("timing_clock_epochs")
+}
+
+model TimingMark {
+  id                    String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sessionId             String           @map("session_id") @db.Uuid
+  session               TimingSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  clockEpochId          String           @map("clock_epoch_id") @db.Uuid
+  clockEpoch            TimingClockEpoch @relation(fields: [clockEpochId], references: [id], onDelete: Cascade)
+  enrollmentId          String?          @map("enrollment_id") @db.Uuid
+  enrollment            Enrollment?      @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  registrationId        String?          @map("registration_id") @db.Uuid
+  registration          Registration?    @relation(fields: [registrationId], references: [id], onDelete: SetNull)
+  startNumber           Int?             @map("start_number")
+  kind                  TimingMarkKind
+  rawCapturedAt         DateTime         @map("raw_captured_at") @db.Timestamptz(6)
+  rawElapsedMs          Int              @map("raw_elapsed_ms")
+  officialAt            DateTime         @map("official_at") @db.Timestamptz(6)
+  officialElapsedMs     Int              @map("official_elapsed_ms")
+  lapNumber             Int?             @map("lap_number")
+  status                TimingMarkStatus
+  workstationInstanceId String           @map("workstation_instance_id")
+  deviceSequence        Int?             @map("device_sequence")
+  idempotencyKey        String           @map("idempotency_key")
+  createdAt             DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([sessionId, status], map: "idx_timing_marks_session_status")
+  @@index([sessionId, enrollmentId, officialElapsedMs], map: "idx_timing_marks_session_enrollment_elapsed")
+  @@index([sessionId, workstationInstanceId, deviceSequence], map: "idx_timing_marks_session_workstation_sequence")
+  @@map("timing_marks")
+}
+
+model TimingCaptureReceipt {
+  sessionId             String              @map("session_id") @db.Uuid
+  session               TimingSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  workstationInstanceId String              @map("workstation_instance_id")
+  deviceSequence        Int                 @map("device_sequence")
+  status                TimingReceiptStatus
+  reason                String?
+  createdAt             DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([sessionId, workstationInstanceId, deviceSequence])
+  @@map("timing_capture_receipts")
+}
+
+model TimingCaptureLock {
+  eventId               String   @id @map("event_id") @db.Uuid
+  event                 Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  workstationInstanceId String   @map("workstation_instance_id")
+  lockToken             String   @map("lock_token")
+  heldByUserId          String   @map("held_by_user_id") @db.Uuid
+  heldBy                User     @relation(fields: [heldByUserId], references: [id], onDelete: Cascade)
+  acquiredAt            DateTime @default(now()) @map("acquired_at") @db.Timestamptz(6)
+  lastSeenAt            DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+
+  @@map("timing_capture_locks")
+}
+
+model TimingAudit {
+  id          String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sessionId   String        @map("session_id") @db.Uuid
+  session     TimingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  actorUserId String?       @map("actor_user_id") @db.Uuid
+  actor       User?         @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  action      String
+  targetType  String        @map("target_type")
+  targetId    String        @map("target_id")
+  oldValues   Json?         @map("old_values")
+  newValues   Json?         @map("new_values")
+  reason      String?
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([sessionId, createdAt], map: "idx_timing_audit_session_created_at")
+  @@map("timing_audit")
 }
 
 model PersonalConsentDocument {
