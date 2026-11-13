@@ -14,7 +14,10 @@ import type {
   TimingSurfaceView,
 } from '../../features/timing/types';
 import type { UseTimingCaptureResult } from '../../features/timing/useTimingCapture';
-import { useTimingCapture } from '../../features/timing/useTimingCapture';
+import {
+  timingSurfaceQueryKey,
+  useTimingCapture,
+} from '../../features/timing/useTimingCapture';
 import { formatDateTime } from '../../shared/formatDateTime';
 import type { EventDetails, StartResponse } from '../../shared/types/event';
 import { TimingPage } from './index';
@@ -47,6 +50,9 @@ vi.mock('../../features/timing/AttemptRecordDrawer', () => ({
         <p>Запись попытки {props.attemptId}</p>
         <button type="button" onClick={props.onClose}>
           Закрыть запись
+        </button>
+        <button type="button" onClick={props.onChanged}>
+          Исправить запись
         </button>
       </div>
     );
@@ -264,7 +270,7 @@ function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={['/events/event-1/timing']}>
         <Routes>
@@ -273,6 +279,9 @@ function renderPage() {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  // The client is returned so a test can read the options the page configured
+  // for the surface query, not only what it rendered.
+  return { ...view, client };
 }
 
 beforeAll(() => {
@@ -359,6 +368,81 @@ describe('TimingPage', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Обновить' }));
+    await waitFor(() => {
+      expect(getSurface).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('configures no periodic surface read for a running block clock', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+        ],
+      }),
+    );
+    mockCapture();
+
+    const { client } = renderPage();
+
+    expect(await screen.findByText('5 км · Мужчины')).not.toBeNull();
+    // One read on mount. The elapsed display ticks locally, so the surface
+    // query carries no `refetchInterval` even while a block runs (AD-19, F-21).
+    expect(getSurface).toHaveBeenCalledTimes(1);
+    const query = client
+      .getQueryCache()
+      .find({ queryKey: timingSurfaceQueryKey('event-1') });
+    expect(query).not.toBeUndefined();
+    expect(query?.observers[0]?.options.refetchInterval).toBeUndefined();
+  });
+
+  it('refetches the surface after a mutation of the attempt record', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+            lastAttempts: [
+              {
+                attemptId: 'attempt-1',
+                state: 'RUNNING',
+                officialStartedAt: '2026-11-13T09:00:00.000Z',
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+    mockCapture();
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Запись/ }));
+    expect(await screen.findByText('Запись попытки attempt-1')).not.toBeNull();
+    expect(getSurface).toHaveBeenCalledTimes(1);
+
+    // A correction in the record still invalidates the surface, so the read
+    // stays fresh after a write even without a clock poll.
+    fireEvent.click(screen.getByRole('button', { name: 'Исправить запись' }));
+
     await waitFor(() => {
       expect(getSurface).toHaveBeenCalledTimes(2);
     });

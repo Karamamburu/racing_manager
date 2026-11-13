@@ -50,9 +50,6 @@ import type { EventDetails } from '../../shared/types/event';
 /** Session key of the workstation instance that owns this browser tab. */
 const WORKSTATION_STORAGE_KEY = 'timing-workstation-instance';
 
-/** How often a surface with a running attempt is refreshed to advance clocks. */
-const RUNNING_SURFACE_REFRESH_MS = 5000;
-
 /** Why an empty Enter created nothing: no current block has a running attempt. */
 const NO_CURRENT_BLOCK_MESSAGE =
   'Не выбран текущий блок: Enter на пустом поле не создаёт сплит';
@@ -266,14 +263,13 @@ export function TimingPage() {
   const canAdminister = canAdministerTiming(roles);
 
   const surfaceQueryKey = timingSurfaceQueryKey(id);
+  // The surface is read on mount, on `Обновить` and after every mutation. A
+  // running block advances its clock locally, so no timer reads the surface for
+  // it (AD-19, FR-39): the old 5 s running poll is gone on purpose.
   const surfaceQuery = useQuery<TimingSurfaceView>({
     queryKey: surfaceQueryKey,
     queryFn: () => timingService.getSurface(id as string),
     enabled: Boolean(id) && canOperate,
-    refetchInterval: (query) =>
-      query.state.data?.categories.some((block) => block.state === 'RUNNING')
-        ? RUNNING_SURFACE_REFRESH_MS
-        : false,
   });
 
   // The capture hook is called before any early return: it owns the client

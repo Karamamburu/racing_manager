@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { TimingCategoryBlock, formatElapsed } from './TimingCategoryBlock';
 import type {
   TimingCategoryBlockView,
@@ -62,6 +62,23 @@ function block(
 
 const RUNNING_START = '2026-11-13T09:00:00.000Z';
 
+/**
+ * A pinned local monotonic clock with fake interval timers, so a running block's
+ * display advances only when the scenario says it does and no real 100 ms wait
+ * is needed. Only the interval is faked: React and antd keep their real timers.
+ */
+function withLocalClock() {
+  let monotonicNow = 1000;
+  vi.spyOn(performance, 'now').mockImplementation(() => monotonicNow);
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  return (ms: number) => {
+    act(() => {
+      monotonicNow += ms;
+      vi.advanceTimersByTime(ms);
+    });
+  };
+}
+
 beforeAll(() => {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
@@ -78,7 +95,10 @@ beforeAll(() => {
   });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe('formatElapsed', () => {
   it('formats mm:ss.mmm below one hour', () => {
@@ -133,6 +153,56 @@ describe('TimingCategoryBlock', () => {
     expect(screen.getByText('Идёт')).not.toBeNull();
     expect(screen.getByText(/^Старт: \d{2}:\d{2}:\d{2}\.\d{3}$/)).not.toBeNull();
     expect(screen.getByText('Время: 01:23.456')).not.toBeNull();
+  });
+
+  it('advances the elapsed display of a running block on the local tick', () => {
+    const advanceLocal = withLocalClock();
+    render(
+      <TimingCategoryBlock
+        block={block({
+          state: 'RUNNING',
+          attemptId: 'attempt-1',
+          officialStartedAt: RUNNING_START,
+          elapsedMs: 83_456,
+          startControlEnabled: false,
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    // The first paint is the surface value; every 100 ms adds the local delta
+    // without asking the API for it (FR-38, FR-39).
+    expect(screen.getByText('Время: 01:23.456')).not.toBeNull();
+
+    advanceLocal(300);
+    expect(screen.getByText('Время: 01:23.756')).not.toBeNull();
+  });
+
+  it('keeps a closed block on the surface elapsed value', () => {
+    const advanceLocal = withLocalClock();
+    render(
+      <TimingCategoryBlock
+        block={block({
+          state: 'COMPLETED',
+          attemptId: 'attempt-1',
+          officialStartedAt: RUNNING_START,
+          elapsedMs: 90_000,
+          startControlEnabled: false,
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Время: 01:30.000')).not.toBeNull();
+    // A closed attempt runs no interval and its value stays static (O-04).
+    expect(vi.getTimerCount()).toBe(0);
+
+    advanceLocal(5000);
+    expect(screen.getByText('Время: 01:30.000')).not.toBeNull();
   });
 
   it('keeps the start control disabled without capture or without an allowed start', () => {

@@ -10,6 +10,7 @@ import type {
   TimingCategoryState,
   TimingParticipantTileView,
 } from './types';
+import { useElapsedClock } from './useElapsedClock';
 
 const STATE_LABELS: Record<TimingCategoryState, string> = {
   NOT_STARTED: 'Не начат',
@@ -100,6 +101,13 @@ export function TimingCategoryBlock({
   const showsRecord = block.attemptId !== null && onOpenRecord !== undefined;
   const showsStart = showsStartControl(block);
   const isHeat = block.kind === 'HEAT';
+  // A running block advances locally from its official start; a closed or
+  // unstarted block keeps the surface value untouched (AD-19, O-04).
+  const displayedElapsedMs = useElapsedClock({
+    state: block.state,
+    officialStartedAt: block.officialStartedAt,
+    elapsedMs: block.elapsedMs,
+  });
 
   return (
     <Card
@@ -156,8 +164,10 @@ export function TimingCategoryBlock({
           <Typography.Text>
             Старт: {formatTimingClock(block.officialStartedAt)}
           </Typography.Text>
-          {block.elapsedMs === null ? null : (
-            <Typography.Text>Время: {formatElapsed(block.elapsedMs)}</Typography.Text>
+          {displayedElapsedMs === null ? null : (
+            <Typography.Text>
+              Время: {formatElapsed(displayedElapsedMs)}
+            </Typography.Text>
           )}
           <Typography.Text>Участники: {block.participants.length}</Typography.Text>
         </Space>
