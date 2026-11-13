@@ -7,6 +7,7 @@ import { useEventDetailsQuery } from '../../features/events/useEventDetailsQuery
 import type { AttemptRecordDrawerProps } from '../../features/timing/AttemptRecordDrawer';
 import { timingService } from '../../features/timing/timingService';
 import type {
+  TimingAnonymousSplitView,
   TimingCategoryBlockView,
   TimingPassView,
   TimingSurfaceView,
@@ -157,6 +158,21 @@ function surface(overrides: Partial<TimingSurfaceView> = {}): TimingSurfaceView 
     eventId: 'event-1',
     captureWorkstationInstanceId: null,
     categories: [block()],
+    ...overrides,
+  };
+}
+
+function anonymousSplit(
+  overrides: Partial<TimingAnonymousSplitView> = {},
+): TimingAnonymousSplitView {
+  return {
+    splitId: 'split-1',
+    attemptId: 'attempt-1',
+    blockKey: 'start-a:1:M',
+    attemptLabel: '5 км · Мужчины · Кубковая гонка — 10 км',
+    capturedAt: '2026-11-13T09:00:01.000Z',
+    officialElapsedMs: 1000,
+    status: 'QUEUED',
     ...overrides,
   };
 }
@@ -561,6 +577,9 @@ describe('TimingPage', () => {
     expect(screen.queryByRole('button', { name: /Запись/ })).toBeNull();
     expect(drawerProps.current).toHaveLength(0);
     expect(getSurface).not.toHaveBeenCalled();
+    // No split queue and no current block for a user without timing access.
+    expect(screen.queryByText('Неразмеченные сплиты')).toBeNull();
+    expect(screen.queryByText('Текущий блок')).toBeNull();
   });
 
   it('closes the attempt record when the referee closes it', async () => {
@@ -632,5 +651,230 @@ describe('TimingPage', () => {
     });
     expect(drawerProps.current.at(-1)?.open).toBe(false);
     expect(drawerProps.current.at(-1)?.attemptId).toBeNull();
+  });
+
+  it('shows the split queue above the number field for a referee', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+        ],
+        anonymousSplits: [anonymousSplit()],
+      }),
+    );
+    mockCapture();
+
+    const { container } = renderPage();
+
+    expect(await screen.findByText('Неразмеченные сплиты')).not.toBeNull();
+    expect(screen.getByText('В очереди: 1')).not.toBeNull();
+    expect(
+      screen.getByRole('button', { name: /^Сплит 1:/ }),
+    ).not.toBeNull();
+
+    // Pinned above the number field: the queue precedes the field in the page.
+    const text = container.textContent ?? '';
+    expect(text.indexOf('Неразмеченные сплиты')).toBeLessThan(
+      text.indexOf('Номер участника'),
+    );
+  });
+
+  it('states that an empty Enter creates no split while no block is current', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+        ],
+      }),
+    );
+    const capture = mockCapture();
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    renderPage();
+
+    expect(await screen.findByText(/Текущая попытка: не выбрана/)).not.toBeNull();
+
+    fireEvent.keyDown(screen.getByLabelText('Номер участника'), {
+      key: 'Enter',
+    });
+
+    expect(
+      await screen.findByText(
+        'Не выбран текущий блок: Enter на пустом поле не создаёт сплит',
+      ),
+    ).not.toBeNull();
+    expect(capture.captureAnonymous).not.toHaveBeenCalled();
+    consoleWarn.mockRestore();
+  });
+
+  it('routes an empty Enter to the block the referee chose as current', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-m',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+          block({
+            gender: 'F',
+            state: 'RUNNING',
+            attemptId: 'attempt-f',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+        ],
+      }),
+    );
+    const capture = mockCapture();
+
+    renderPage();
+
+    expect(await screen.findByText(/Текущая попытка: не выбрана/)).not.toBeNull();
+
+    fireEvent.mouseDown(screen.getByRole('combobox'));
+    fireEvent.click(
+      await screen.findByText('5 км · Женщины · Кубковая гонка — 10 км'),
+    );
+
+    expect(
+      await screen.findByText(/Текущая попытка: 5 км · Женщины/),
+    ).not.toBeNull();
+
+    fireEvent.keyDown(screen.getByLabelText('Номер участника'), {
+      key: 'Enter',
+    });
+
+    await waitFor(() =>
+      expect(capture.captureAnonymous).toHaveBeenCalledWith('attempt-f'),
+    );
+  });
+
+  it('assigns the selected queue entry through the number field and leaves the mode', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+        ],
+        anonymousSplits: [
+          anonymousSplit({ attemptLabel: '5 км · Мужчины' }),
+        ],
+      }),
+    );
+    const capture = mockCapture();
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Сплит 1:/ }));
+
+    expect(await screen.findByText('Назначение сплита')).not.toBeNull();
+    expect(
+      screen.getByText('Сплит будет назначен попытке: 5 км · Мужчины'),
+    ).not.toBeNull();
+
+    const field = screen.getByLabelText('Номер участника');
+    fireEvent.change(field, { target: { value: '17' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+
+    await waitFor(() =>
+      expect(capture.assignAnonymousSplit).toHaveBeenCalledWith('split-1', 17),
+    );
+    // The accepted assignment exits the mode and returns the field to capture.
+    await waitFor(() =>
+      expect(screen.queryByText('Назначение сплита')).toBeNull(),
+    );
+    expect(capture.captureAnonymous).not.toHaveBeenCalled();
+  });
+
+  it('cancels a queued split with the typed reason and drops it on the refetch', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    const runningBlock = block({
+      state: 'RUNNING',
+      attemptId: 'attempt-1',
+      officialStartedAt: '2026-11-13T09:00:00.000Z',
+      elapsedMs: 65_000,
+      startControlEnabled: false,
+    });
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [runningBlock],
+        anonymousSplits: [anonymousSplit()],
+      }),
+    );
+    const capture = mockCapture();
+
+    renderPage();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Отменить сплит 1' }),
+    );
+    fireEvent.change(screen.getByLabelText('Причина отмены сплита'), {
+      target: { value: 'Дубль нажатия' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Отменить сплит' }));
+
+    await waitFor(() =>
+      expect(capture.cancelAnonymousSplit).toHaveBeenCalledWith(
+        'split-1',
+        'Дубль нажатия',
+      ),
+    );
+
+    // The cancelled split is no longer queued: the next surface read drops it
+    // and the field is not left in assignment mode.
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [runningBlock],
+        anonymousSplits: [],
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /^Сплит 1:/ })).toBeNull(),
+    );
+    expect(screen.getByText('В очереди: 0')).not.toBeNull();
+    expect(screen.queryByText('Назначение сплита')).toBeNull();
   });
 });

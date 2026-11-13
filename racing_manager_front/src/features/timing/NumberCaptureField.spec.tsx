@@ -235,4 +235,132 @@ describe('NumberCaptureField', () => {
     fireEvent.keyDown(numberInput(), { key: 'Enter' });
     expect(onCommit).not.toHaveBeenCalled();
   });
+
+  it('records an anonymous split when Enter is pressed on the empty field', async () => {
+    const onAnonymousSplit = vi.fn().mockResolvedValue(undefined);
+    const onCommit = vi.fn();
+    render(
+      <NumberCaptureField
+        resolve={() => []}
+        onCommit={onCommit}
+        onAnonymousSplit={onAnonymousSplit}
+      />,
+    );
+
+    fireEvent.keyDown(numberInput(), { key: 'Enter' });
+
+    await waitFor(() => expect(onAnonymousSplit).toHaveBeenCalledTimes(1));
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(numberInput().value).toBe('');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('records nothing for Space on the empty field and states the rule', () => {
+    const onAnonymousSplit = vi.fn();
+    const onCommit = vi.fn();
+    render(
+      <NumberCaptureField
+        resolve={() => []}
+        onCommit={onCommit}
+        onAnonymousSplit={onAnonymousSplit}
+      />,
+    );
+
+    fireEvent.keyDown(numberInput(), { key: ' ' });
+
+    expect(onAnonymousSplit).not.toHaveBeenCalled();
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toBe(
+      'Пробел на пустом поле ничего не записывает: для сплита нажмите Enter',
+    );
+  });
+
+  it('names the entry attempt while the field assigns a queued split', () => {
+    render(
+      <NumberCaptureField
+        resolve={() => [candidate()]}
+        onCommit={vi.fn()}
+        assignment={{
+          splitId: 'split-1',
+          attemptLabel: '5 км · Мужчины · Кубковая гонка — 10 км',
+        }}
+        onAssign={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Назначение сплита')).not.toBeNull();
+    expect(
+      screen.getByText(
+        'Сплит будет назначен попытке: 5 км · Мужчины · Кубковая гонка — 10 км',
+      ),
+    ).not.toBeNull();
+    expect(numberInput().placeholder).toBe('Номер для назначения');
+  });
+
+  it('assigns a typed number in assignment mode without resolving a capture', async () => {
+    const resolve = vi.fn(() => []);
+    const onAssign = vi.fn().mockResolvedValue(undefined);
+    const onCommit = vi.fn();
+    render(
+      <NumberCaptureField
+        resolve={resolve}
+        onCommit={onCommit}
+        assignment={{ splitId: 'split-1', attemptLabel: '5 км · Мужчины' }}
+        onAssign={onAssign}
+      />,
+    );
+
+    fireEvent.change(numberInput(), { target: { value: '42' } });
+    fireEvent.keyDown(numberInput(), { key: 'Enter' });
+
+    await waitFor(() => expect(onAssign).toHaveBeenCalledWith(42));
+    expect(resolve).not.toHaveBeenCalled();
+    expect(onCommit).not.toHaveBeenCalled();
+    await waitFor(() => expect(numberInput().value).toBe(''));
+  });
+
+  it('refuses an empty assignment in either commit key and creates nothing', async () => {
+    const onAssign = vi.fn().mockResolvedValue(undefined);
+    render(
+      <NumberCaptureField
+        resolve={() => [candidate()]}
+        onCommit={vi.fn()}
+        assignment={{ splitId: 'split-1', attemptLabel: '5 км · Мужчины' }}
+        onAssign={onAssign}
+      />,
+    );
+
+    fireEvent.keyDown(numberInput(), { key: 'Enter' });
+    expect(onAssign).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toBe(
+      'Введите номер участника для назначения сплита',
+    );
+
+    fireEvent.keyDown(numberInput(), { key: ' ' });
+    await waitFor(() => expect(onAssign).not.toHaveBeenCalled());
+    expect(screen.getByRole('alert').textContent).toBe(
+      'Введите номер участника для назначения сплита',
+    );
+  });
+
+  it('returns to the empty field when assignment mode ends', () => {
+    const { rerender } = render(
+      <NumberCaptureField
+        resolve={() => [candidate()]}
+        onCommit={vi.fn()}
+        assignment={{ splitId: 'split-1', attemptLabel: '5 км · Мужчины' }}
+        onAssign={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(numberInput(), { target: { value: '42' } });
+    expect(numberInput().value).toBe('42');
+
+    rerender(
+      <NumberCaptureField resolve={() => [candidate()]} onCommit={vi.fn()} />,
+    );
+
+    expect(screen.getByText('Номер участника')).not.toBeNull();
+    expect(numberInput().value).toBe('');
+  });
 });

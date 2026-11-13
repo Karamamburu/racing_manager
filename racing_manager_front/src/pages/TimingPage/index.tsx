@@ -6,6 +6,7 @@ import {
   Card,
   Empty,
   Result,
+  Select,
   Skeleton,
   Space,
   Typography,
@@ -15,6 +16,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { useEventDetailsQuery } from '../../features/events/useEventDetailsQuery';
+import { AnonymousSplitQueue } from '../../features/timing/AnonymousSplitQueue';
 import { AttemptRecordDrawer } from '../../features/timing/AttemptRecordDrawer';
 import {
   canAdministerTiming,
@@ -26,6 +28,7 @@ import { PendingFinishBar } from '../../features/timing/PendingFinishBar';
 import { TimingCategoryBlock } from '../../features/timing/TimingCategoryBlock';
 import { timingService } from '../../features/timing/timingService';
 import type {
+  TimingAnonymousSplitView,
   TimingCaptureView,
   TimingCategoryBlockView,
   TimingSurfaceView,
@@ -43,6 +46,10 @@ const WORKSTATION_STORAGE_KEY = 'timing-workstation-instance';
 
 /** How often a surface with a running attempt is refreshed to advance clocks. */
 const RUNNING_SURFACE_REFRESH_MS = 5000;
+
+/** Why an empty Enter created nothing: no current block has a running attempt. */
+const NO_CURRENT_BLOCK_MESSAGE =
+  'Не выбран текущий блок: Enter на пустом поле не создаёт сплит';
 
 const GENDER_LABELS: Record<string, string> = {
   M: 'Мужчины',
@@ -97,6 +104,14 @@ function describeError(error: unknown): string {
 }
 
 /**
+ * The stable identity of one block on the surface. The API supplies `blockKey`;
+ * a surface that predates it keeps the identity the page already rendered by.
+ */
+function blockIdentity(block: TimingCategoryBlockView): string {
+  return block.blockKey ?? `${block.startId}:${block.formatId}:${block.gender}`;
+}
+
+/**
  * The human title and subtitle of one block, from the event starts and
  * participation formats. The backend order stays untouched: this only names a
  * block, and falls back to its ids when the event read model does not know it.
@@ -130,7 +145,7 @@ function surfaceHasAttempt(
 }
 
 /**
- * The event-wide timing surface (AD-9).
+ * The event-wide timing surface (AD-9, AD-17).
  *
  * One block per timeable protocol category in the backend order. The page only
  * renders: `useTimingCapture` owns the clock anchor, the capture outbox and
@@ -138,6 +153,11 @@ function surfaceHasAttempt(
  * talks to the API for a write itself. The attempt record drawer owns every
  * correction control (T13), so the page only decides which attempt it reads and
  * which block supplies the participant names (U-29).
+ *
+ * The page also owns the two client-only display states of the anonymous split
+ * workflow: the split the number field assigns (E-04) and the block whose
+ * running attempt receives the next empty Enter (E-01, U-02). Neither is ever
+ * written to the event, the attempt or a result.
  */
 export function TimingPage() {
   const { id } = useParams<{ id: string }>();
@@ -152,6 +172,11 @@ export function TimingPage() {
   const [recordParticipantNames, setRecordParticipantNames] = useState<
     Record<string, string>
   >({});
+  // The queued split in assignment mode and the block that is current; both
+  // are page-session display state (AD-17, E-02).
+  const [selectedSplitId, setSelectedSplitId] = useState<string | null>(null);
+  const [currentBlockKey, setCurrentBlockKey] = useState<string | null>(null);
+  const [anonymousNotice, setAnonymousNotice] = useState<string | null>(null);
 
   const roles = sessionQuery.data?.roles ?? [];
   const canOperate = canOperateTiming(roles);
@@ -189,6 +214,16 @@ export function TimingPage() {
     if (surfaceHasAttempt(surface, recordAttemptId)) return;
     setRecordAttemptId(null);
   }, [recordAttemptId, surfaceQuery.data]);
+
+  // A selected entry that another actor assigned, undid or cancelled leaves the
+  // number field in normal capture mode without a local click (E-09, F-05).
+  useEffect(() => {
+    if (selectedSplitId === null) return;
+    const splits = surfaceQuery.data?.anonymousSplits;
+    if (splits === undefined) return;
+    if (splits.some((entry) => entry.splitId === selectedSplitId)) return;
+    setSelectedSplitId(null);
+  }, [selectedSplitId, surfaceQuery.data]);
 
   /** Opens the record of the attempt the block currently shows (U-29). */
   const openRecord = (block: TimingCategoryBlockView) => {
@@ -308,6 +343,71 @@ export function TimingPage() {
     (block) => block.state === 'RUNNING',
   );
 
+  const anonymousSplits: TimingAnonymousSplitView[] =
+    surface.anonymousSplits ?? [];
+  const selectedSplit =
+    anonymousSplits.find((entry) => entry.splitId === selectedSplitId) ?? null;
+
+  // Only a running attempt accepts an anonymous split, so only those blocks are
+  // offered as the current one (E-01, F-01).
+  const runningBlocks = surface.categories.filter(
+    (block) => block.state === 'RUNNING' && block.attemptId !== null,
+  );
+  const blockOptions = runningBlocks.map((block) => {
+    const view = describeBlock(block, event);
+    return {
+      key: blockIdentity(block),
+      label: `${view.title} · ${view.subtitle}`,
+    };
+  });
+  const currentBlock =
+    runningBlocks.find((block) => blockIdentity(block) === currentBlockKey) ??
+    null;
+  const currentAttemptId = currentBlock?.attemptId ?? null;
+  const currentBlockLabel =
+    blockOptions.find((option) => option.key === currentBlockKey)?.label ?? null;
+
+  /**
+   * The Start press of one block also makes it current, so the first empty
+   * Enter after a start needs no second click (E-02). A refused start leaves
+   * the current block as it was and the hook reports the API message.
+   */
+  const startBlock = (block: TimingCategoryBlockView) => {
+    void capture.startAttempt(block).then(
+      () => {
+        setCurrentBlockKey(blockIdentity(block));
+        setAnonymousNotice(null);
+      },
+      (failure: unknown) => {
+        console.warn('timing: the Start press was refused', failure);
+      },
+    );
+  };
+
+  /** Enter on the empty field: one anonymous split of the current attempt. */
+  const captureAnonymousSplit = async () => {
+    if (currentAttemptId === null) {
+      setAnonymousNotice(NO_CURRENT_BLOCK_MESSAGE);
+      throw new Error(NO_CURRENT_BLOCK_MESSAGE);
+    }
+    await capture.captureAnonymous(currentAttemptId);
+    setAnonymousNotice(null);
+  };
+
+  /** A committed number in assignment mode belongs to the selected entry. */
+  const assignSelectedSplit = async (startNumber: number) => {
+    if (selectedSplit === null) return;
+    await capture.assignAnonymousSplit(selectedSplit.splitId, startNumber);
+    // Accepted: the entry leaves the queue and the field returns to capture.
+    setSelectedSplitId(null);
+  };
+
+  /** A cancelled entry leaves the queue at once; the page clears the mode. */
+  const cancelAnonymousSplit = async (splitId: string, reason: string) => {
+    await capture.cancelAnonymousSplit(splitId, reason);
+    setSelectedSplitId((current) => (current === splitId ? null : current));
+  };
+
   return (
     <AppShell title="Хронометраж" subtitle={subtitle}>
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -356,10 +456,54 @@ export function TimingPage() {
               onForceRelease={capture.forceRelease}
             />
 
+            <AnonymousSplitQueue
+              splits={anonymousSplits}
+              selectedSplitId={selectedSplitId}
+              onSelect={setSelectedSplitId}
+              onCancel={cancelAnonymousSplit}
+              canCancel={canOperate}
+              selectionDisabled={!isCaptureHolder}
+            />
+
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Typography.Text strong>Текущий блок</Typography.Text>
+              <Select
+                aria-label="Текущий блок"
+                placeholder="Блок не выбран"
+                allowClear
+                style={{ maxWidth: 420 }}
+                value={currentBlock === null ? undefined : currentBlockKey ?? undefined}
+                options={blockOptions.map((option) => ({
+                  value: option.key,
+                  label: option.label,
+                }))}
+                onChange={(value: string | undefined) => {
+                  setCurrentBlockKey(value ?? null);
+                  setAnonymousNotice(null);
+                }}
+              />
+              <Typography.Text type="secondary">
+                Текущая попытка: {currentBlockLabel ?? 'не выбрана'}
+              </Typography.Text>
+              {anonymousNotice === null ? null : (
+                <Alert type="warning" showIcon message={anonymousNotice} />
+              )}
+            </Space>
+
             <NumberCaptureField
               disabled={!hasRunningBlock || !isCaptureHolder}
               resolve={capture.resolveCandidates}
               onCommit={capture.commitNumber}
+              assignment={
+                selectedSplit === null
+                  ? null
+                  : {
+                      splitId: selectedSplit.splitId,
+                      attemptLabel: selectedSplit.attemptLabel,
+                    }
+              }
+              onAssign={assignSelectedSplit}
+              onAnonymousSplit={captureAnonymousSplit}
             />
           </Space>
         </Card>
@@ -387,9 +531,7 @@ export function TimingPage() {
                   title={view.title}
                   subtitle={view.subtitle}
                   isCaptureHolder={isCaptureHolder}
-                  onStart={() => {
-                    void capture.startAttempt(block);
-                  }}
+                  onStart={() => startBlock(block)}
                   // The block keeps its capture hand-over only while the lock
                   // is free; the global controls above own take, transfer and
                   // force-release in every other case (AD-5).
@@ -447,3 +589,4 @@ export function TimingPage() {
     </AppShell>
   );
 }
+

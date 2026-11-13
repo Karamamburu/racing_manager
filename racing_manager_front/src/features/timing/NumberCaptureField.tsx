@@ -1,5 +1,5 @@
 import { Button, Input, Modal, Space, Spin, Typography } from 'antd';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
 /**
@@ -11,6 +11,11 @@ import type { KeyboardEvent } from 'react';
  * moment of the click. The field resolves nothing itself: the page owns the
  * eligible candidates, the attempt lookup and the API message, and this
  * component only renders what it was told and reports what was typed.
+ *
+ * AD-17, U-03, U-04: on the empty field Enter is the anonymous-split key and
+ * Space records nothing; while a queued split is selected the same keys assign
+ * that split instead of capturing a pass, and an empty assignment is refused
+ * (E-04, S-02, F-04).
  */
 
 /** One enrollment the page resolved for a typed start number. */
@@ -33,12 +38,32 @@ export interface NumberCaptureCommitInput {
   monotonicMs: number;
 }
 
+/** The queued split the field assigns while it is in assignment mode (E-04). */
+export interface NumberCaptureAssignment {
+  /** The entry the next committed number belongs to. */
+  splitId: string;
+  /** The entry's own attempt, named on the field so the target is explicit. */
+  attemptLabel: string;
+}
+
 export interface NumberCaptureFieldProps {
   disabled?: boolean;
   /** Eligible enrollments of that number in the surface; empty means no pass. */
   resolve: (startNumber: number) => NumberCaptureCandidate[];
   /** Sends the mutation; the page computes the epoch elapsed from `monotonicMs`. */
   onCommit: (input: NumberCaptureCommitInput) => Promise<void>;
+  /**
+   * Set while a queued split is selected: the field names the entry's attempt
+   * and a committed number assigns that split instead of capturing a pass.
+   */
+  assignment?: NumberCaptureAssignment | null;
+  /** Sends the assignment of the selected split; used only in assignment mode. */
+  onAssign?: (startNumber: number) => Promise<void>;
+  /**
+   * Enter on the empty field in normal capture mode records one anonymous split
+   * of the page's current attempt. Absent keeps the old empty-field refusal.
+   */
+  onAnonymousSplit?: () => Promise<void>;
   /** Optional notice hook; the field also shows the message next to itself. */
   onError?: (message: string) => void;
 }
@@ -53,6 +78,13 @@ interface AmbiguousChoice {
 
 const EMPTY_NUMBER_MESSAGE = 'Введите номер участника цифрами';
 const NON_POSITIVE_NUMBER_MESSAGE = 'Номер участника должен быть больше нуля';
+const EMPTY_SPACE_MESSAGE =
+  'Пробел на пустом поле ничего не записывает: для сплита нажмите Enter';
+const EMPTY_ASSIGNMENT_MESSAGE = 'Введите номер участника для назначения сплита';
+const NO_ASSIGNMENT_TARGET_MESSAGE = 'Назначение недоступно: сплит не выбран';
+const COMMIT_BUSY_MESSAGE = 'Отправляем отметку…';
+const SPLIT_BUSY_MESSAGE = 'Отправляем сплит…';
+const ASSIGN_BUSY_MESSAGE = 'Назначаем сплит…';
 
 /** Digits only: a pasted `12 3` reads as `123`, never as a space or a sign. */
 function digitsOnly(value: string): string {
@@ -74,47 +106,60 @@ export function NumberCaptureField({
   disabled = false,
   resolve,
   onCommit,
+  assignment = null,
+  onAssign,
+  onAnonymousSplit,
   onError,
 }: NumberCaptureFieldProps) {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [choice, setChoice] = useState<AmbiguousChoice | null>(null);
   const submitting = useRef(false);
+  const assignmentId = assignment?.splitId ?? null;
+
+  // Entering, leaving or changing assignment mode starts from an empty field:
+  // a number typed for one entry must never reach the next one (E-06, E-09).
+  useEffect(() => {
+    setText('');
+    setError(null);
+  }, [assignmentId]);
 
   const refuse = (message: string) => {
     setError(message);
     onError?.(message);
   };
 
-  const runCommit = async (input: NumberCaptureCommitInput) => {
-    try {
-      await onCommit(input);
-      setText('');
-      setError(null);
-    } catch (failure) {
-      // The page owns HTTP errors: keep the typed number so the referee can
-      // retry, and leave the message to the surface that sent the mutation.
-      console.warn(
-        'timing: capture commit was refused; the page reports the API message',
-        failure,
-      );
-    } finally {
-      submitting.current = false;
-      setBusy(false);
-    }
-  };
-
-  const submit = (input: NumberCaptureCommitInput) => {
-    if (submitting.current) return;
-    submitting.current = true;
-    setBusy(true);
-    void runCommit(input);
-  };
-
-  const commit = () => {
+  /**
+   * One press, one mutation. The guard is set before the first await so a burst
+   * of keys keeps its order, and a refusal leaves the field as the page left it.
+   */
+  const start = (label: string, work: () => Promise<void>) => {
     if (disabled || submitting.current) return;
+    submitting.current = true;
+    setBusyLabel(label);
+    void (async () => {
+      try {
+        await work();
+      } catch (failure) {
+        // The page owns HTTP errors: keep the typed number so the referee can
+        // retry, and leave the message to the surface that sent the mutation.
+        console.warn(
+          'timing: the field commit was refused; the page reports the API message',
+          failure,
+        );
+      } finally {
+        submitting.current = false;
+        setBusyLabel(null);
+      }
+    })();
+  };
 
+  /**
+   * A typed number in normal capture mode: one candidate commits directly, a
+   * number shared by several running enrollments opens the picker.
+   */
+  const commitNumber = () => {
     const startNumber = parseStartNumber(text);
     if (startNumber === null) {
       refuse(text.trim() ? NON_POSITIVE_NUMBER_MESSAGE : EMPTY_NUMBER_MESSAGE);
@@ -137,11 +182,15 @@ export function NumberCaptureField({
 
     setError(null);
     if (candidates.length === 1) {
-      submit({
-        startNumber,
-        enrollmentId: candidates[0].enrollmentId,
-        capturedAt,
-        monotonicMs,
+      start(COMMIT_BUSY_MESSAGE, async () => {
+        await onCommit({
+          startNumber,
+          enrollmentId: candidates[0].enrollmentId,
+          capturedAt,
+          monotonicMs,
+        });
+        setText('');
+        setError(null);
       });
       return;
     }
@@ -149,16 +198,73 @@ export function NumberCaptureField({
     setChoice({ startNumber, capturedAt, monotonicMs, candidates });
   };
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
-      // Space is a commit key, never text: keep it out of the input.
-      event.preventDefault();
-      commit();
+  /**
+   * A typed number in assignment mode: it belongs to the selected entry's own
+   * attempt, so the field sends the number and never resolves a candidate
+   * (E-05, U-06). An empty field assigns nothing (F-04).
+   */
+  const commitAssignment = () => {
+    const startNumber = parseStartNumber(text);
+    if (startNumber === null) {
+      refuse(
+        text.trim() ? NON_POSITIVE_NUMBER_MESSAGE : EMPTY_ASSIGNMENT_MESSAGE,
+      );
+      return;
     }
+    if (onAssign === undefined) {
+      refuse(NO_ASSIGNMENT_TARGET_MESSAGE);
+      return;
+    }
+
+    setError(null);
+    start(ASSIGN_BUSY_MESSAGE, async () => {
+      await onAssign(startNumber);
+      setText('');
+      setError(null);
+    });
+  };
+
+  /** Enter on the empty field in normal capture mode records a split (U-03). */
+  const commitAnonymous = () => {
+    if (onAnonymousSplit === undefined) {
+      // No anonymous route on this surface: keep the old empty-field refusal.
+      refuse(EMPTY_NUMBER_MESSAGE);
+      return;
+    }
+    setError(null);
+    start(SPLIT_BUSY_MESSAGE, async () => {
+      await onAnonymousSplit();
+      setError(null);
+    });
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (
+      event.key !== 'Enter' &&
+      event.key !== ' ' &&
+      event.key !== 'Spacebar'
+    ) {
+      return;
+    }
+    // Enter and Space are commit keys, never text: keep them out of the input.
+    event.preventDefault();
+    if (disabled || submitting.current) return;
+
+    const isSpace = event.key !== 'Enter';
+    if (assignment !== null) {
+      commitAssignment();
+      return;
+    }
+    if (text.trim() === '') {
+      if (isSpace) refuse(EMPTY_SPACE_MESSAGE);
+      else commitAnonymous();
+      return;
+    }
+    commitNumber();
   };
 
   const choose = (candidate: NumberCaptureCandidate) => {
-    if (!choice || submitting.current) return;
+    if (choice === null || submitting.current) return;
     const picked: NumberCaptureCommitInput = {
       startNumber: choice.startNumber,
       enrollmentId: candidate.enrollmentId,
@@ -166,15 +272,30 @@ export function NumberCaptureField({
       monotonicMs: choice.monotonicMs,
     };
     setChoice(null);
-    submit(picked);
+    start(COMMIT_BUSY_MESSAGE, async () => {
+      await onCommit(picked);
+      setText('');
+      setError(null);
+    });
   };
 
   return (
     <Space direction="vertical" size={4} style={{ width: '100%' }}>
-      <Typography.Text strong>Номер участника</Typography.Text>
+      <Typography.Text strong>
+        {assignment === null ? 'Номер участника' : 'Назначение сплита'}
+      </Typography.Text>
+      {assignment === null ? (
+        <Typography.Text type="secondary">
+          Enter на пустом поле добавит неразмеченный сплит
+        </Typography.Text>
+      ) : (
+        <Typography.Text type="secondary">
+          Сплит будет назначен попытке: {assignment.attemptLabel}
+        </Typography.Text>
+      )}
       <Input
         aria-label="Номер участника"
-        placeholder="Номер"
+        placeholder={assignment === null ? 'Номер' : 'Номер для назначения'}
         inputMode="numeric"
         autoComplete="off"
         status={error ? 'error' : undefined}
@@ -187,12 +308,12 @@ export function NumberCaptureField({
         onKeyDown={handleKeyDown}
         style={{ maxWidth: 180 }}
       />
-      {busy ? (
+      {busyLabel === null ? null : (
         <Space size={6}>
           <Spin size="small" />
-          <Typography.Text type="secondary">Отправляем отметку…</Typography.Text>
+          <Typography.Text type="secondary">{busyLabel}</Typography.Text>
         </Space>
-      ) : null}
+      )}
       {error ? (
         <Typography.Text type="danger" role="alert">
           {error}
@@ -203,12 +324,12 @@ export function NumberCaptureField({
         open={choice !== null}
         title="Выберите участника"
         footer={null}
-        closable={!busy}
-        maskClosable={!busy}
-        keyboard={!busy}
+        closable={busyLabel === null}
+        maskClosable={busyLabel === null}
+        keyboard={busyLabel === null}
         onCancel={() => {
           // Abandoning the picker changes nothing: no pass, text untouched.
-          if (!busy) setChoice(null);
+          if (busyLabel === null) setChoice(null);
         }}
       >
         {choice === null ? null : (
@@ -220,7 +341,7 @@ export function NumberCaptureField({
               <Button
                 key={candidate.enrollmentId}
                 block
-                disabled={busy}
+                disabled={busyLabel !== null}
                 onClick={() => choose(candidate)}
               >
                 {candidate.label}
