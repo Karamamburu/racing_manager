@@ -68,6 +68,7 @@ import {
   racePlacementForRow,
   type RaceScopeRow,
 } from '../class-competitions/race-scope';
+import { TimingAttemptsReadService } from '../timing/timing-attempts-read.service';
 
 export type ParticipationFormatDto = {
   id: number;
@@ -755,6 +756,15 @@ function compareProtocolRows(left: ProtocolRow, right: ProtocolRow): number {
   );
 }
 
+/**
+ * F-17: a finish writes stored places and closes the category, so any category
+ * or heat attempt of it that still runs refuses the action. The heat kind is
+ * included because a heat carries its category's event, start, format and
+ * gender (AD-14, AD-21).
+ */
+const RUNNING_CATEGORY_ATTEMPT_MESSAGE =
+  'Нельзя завершить гонку, пока идёт попытка хронометража этой категории.';
+
 @Injectable()
 export class EventsService {
   private readonly logger = new Logger(EventsService.name);
@@ -765,6 +775,7 @@ export class EventsService {
     private readonly rolesService: RolesService,
     private readonly usersService: UsersService,
     private readonly eventStatusSync: EventStatusSyncService,
+    private readonly timingAttempts: TimingAttemptsReadService,
   ) {
     this.store = prisma as unknown as EventsStore;
   }
@@ -1298,6 +1309,17 @@ export class EventsService {
       throw new BadRequestException('formatId is required.');
     }
     const formatId = parsed.formatId;
+
+    if (
+      await this.timingAttempts.hasRunningAttemptForCategory(
+        eventId,
+        parsed.startId,
+        formatId,
+        parsed.gender,
+      )
+    ) {
+      throw new ConflictException(RUNNING_CATEGORY_ATTEMPT_MESSAGE);
+    }
 
     const bracket = (await this.readClassCompetitions(eventId)).filter(
       (row) =>
