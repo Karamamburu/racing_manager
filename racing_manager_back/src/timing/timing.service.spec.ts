@@ -30,6 +30,7 @@ import type {
   CreateAnonymousSplitInput,
   CreateAttemptInput,
   CreateClockEpochInput,
+  CreateHeatTimeInput,
   CreateMarkInput,
   CreateReceiptInput,
   CreateRejectedReceiptInput,
@@ -64,7 +65,10 @@ import type {
 } from './timing.repository';
 import { TimingRepository } from './timing.repository';
 import { TimingService } from './timing.service';
-import type { TimingAnonymousSplitView } from './timing.views';
+import type {
+  TimingAnonymousSplitView,
+  TimingClosureReportView,
+} from './timing.views';
 
 /**
  * Unit tests for the timing surface, the Start press, number/tile capture, the
@@ -175,6 +179,7 @@ function createRepositoryFake() {
     ),
     publishResult: jest.fn(),
     replaceResultSplits: jest.fn(),
+    createHeatTime: jest.fn(),
     updateAttemptStatus: jest.fn(),
     listEnrollmentStatuses: jest.fn(
       (
@@ -346,6 +351,20 @@ function attemptRow(
     updatedAt: NOW,
     ...overrides,
   };
+}
+
+/** One `HEAT` attempt of a race, stage and heat, ready to close (AD-14). */
+function heatAttemptRow(
+  overrides: Partial<TimingAttemptRow> = {},
+): TimingAttemptRow {
+  return attemptRow({
+    id: 'heat-attempt-1',
+    attemptKind: 'HEAT',
+    classCompetitionId: 'race-1',
+    stageId: 'stage-1',
+    heatNumber: 1,
+    ...overrides,
+  });
 }
 
 function rosterRow(
@@ -5006,6 +5025,108 @@ describe('TimingService', () => {
       expect(repository.withTransaction).not.toHaveBeenCalled();
       expect(repository.updateMark).not.toHaveBeenCalled();
     });
+
+    describe('heat corrections', () => {
+      it('refuses a pass-time and a start correction on a closed heat attempt', async () => {
+        const markStore = arrangeCorrection({
+          attempt: heatAttemptRow({ status: 'COMPLETED', closedAt: NOW }),
+          marks: threeLaps(),
+          participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        });
+
+        await expect(
+          service.correctOfficialTime(
+            USER_ID,
+            EVENT_ID,
+            'mark-1',
+            correctDto({ targetId: 'mark-1' }),
+          ),
+        ).rejects.toMatchObject({ code: TimingErrorCode.ATTEMPT_CLOSED });
+        await expect(
+          service.correctOfficialTime(
+            USER_ID,
+            EVENT_ID,
+            ATTEMPT_ID,
+            correctDto({ targetType: 'START', targetId: ATTEMPT_ID }),
+          ),
+        ).rejects.toMatchObject({ code: TimingErrorCode.ATTEMPT_CLOSED });
+
+        // F-22: the closed heat's record and its heat times stay untouched.
+        expect(markStore.get('mark-1')?.officialElapsedMs).toBe(30_000);
+        expect(repository.updateMark).not.toHaveBeenCalled();
+        expect(repository.updateAttemptOfficialStart).not.toHaveBeenCalled();
+        expect(repository.publishResult).not.toHaveBeenCalled();
+        expect(repository.insertAudit).not.toHaveBeenCalled();
+        expect(repository.createHeatTime).not.toHaveBeenCalled();
+      });
+
+      it('corrects a running heat pass time and publishes nothing before closure', async () => {
+        arrangeCorrection({
+          attempt: heatAttemptRow({ status: 'RUNNING' }),
+          marks: threeLaps(),
+          participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        });
+        const correctedAt = new Date(NOW.getTime() + 95_000);
+
+        const pass = await service.correctOfficialTime(
+          USER_ID,
+          EVENT_ID,
+          'mark-1',
+          correctDto({
+            targetId: 'mark-1',
+            officialAt: correctedAt.toISOString(),
+          }),
+        );
+
+        expect(pass).toMatchObject({ passId: 'mark-1', lapNumber: 3 });
+        expect(repository.updateMark).toHaveBeenCalledWith(TX, 'mark-1', {
+          officialAt: correctedAt,
+          officialElapsedMs: 95_000,
+        });
+        // T7: a correction rewrites the record only; no heat time, no result.
+        expect(repository.publishResult).not.toHaveBeenCalled();
+        expect(repository.replaceResultSplits).not.toHaveBeenCalled();
+        expect(repository.createHeatTime).not.toHaveBeenCalled();
+        const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+          repository.insertAudit,
+        );
+        expect(auditInput).toMatchObject({
+          action: 'OFFICIAL_TIME_CORRECT',
+          targetType: 'PASS',
+          newValues: { republished: false },
+        });
+      });
+
+      it('corrects a running heat start and republishes no result', async () => {
+        arrangeCorrection({
+          attempt: heatAttemptRow({ id: ATTEMPT_ID, status: 'RUNNING' }),
+          marks: threeLaps(),
+          participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+          result: resultRow({ id: 'result-manual', timingSessionId: null }),
+        });
+        const correctedAt = new Date(NOW.getTime() + 5_000);
+
+        await service.correctOfficialTime(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          correctDto({
+            targetType: 'START',
+            targetId: ATTEMPT_ID,
+            officialAt: correctedAt.toISOString(),
+          }),
+        );
+
+        expect(repository.updateAttemptOfficialStart).toHaveBeenCalledWith(
+          TX,
+          ATTEMPT_ID,
+          correctedAt,
+        );
+        expect(repository.publishResult).not.toHaveBeenCalled();
+        expect(repository.replaceResultSplits).not.toHaveBeenCalled();
+        expect(repository.createHeatTime).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('closure, publication and splits', () => {
@@ -5879,6 +6000,491 @@ describe('TimingService', () => {
         ),
       ).rejects.toMatchObject({ code: TimingErrorCode.REASON_REQUIRED });
       expect(repository.withTransaction).not.toHaveBeenCalled();
+    });
+
+    describe('heat closure', () => {
+      /**
+       * Wires the fake repository around one running heat attempt. The heat-time
+       * store mimics the closure transaction: a failed write empties it, so a
+       * test sees "no heat time" the way PostgreSQL would leave it.
+       */
+      function arrangeHeatClosure(
+        overrides: {
+          attempt?: TimingAttemptRow;
+          participants?: TimingParticipantRow[];
+          marks?: TimingMarkRow[];
+          receipts?: TimingReceiptRow[];
+          heatTimes?: TimingHeatTimeRow[];
+          withdrawn?: string[];
+          lock?: TimingCaptureLockRow | null;
+        } = {},
+      ): {
+        attempt: TimingAttemptRow;
+        written: CreateHeatTimeInput[];
+        auditInputs: InsertAuditInput[];
+      } {
+        const attempt = overrides.attempt ?? heatAttemptRow();
+        const participants = overrides.participants ?? [];
+        const written: CreateHeatTimeInput[] = [];
+        const auditInputs: InsertAuditInput[] = [];
+        const withdrawn = new Set(overrides.withdrawn ?? []);
+        repository.withTransaction.mockImplementation(
+          async (run: (tx: unknown) => Promise<unknown>) => {
+            try {
+              return await run(TX);
+            } catch (error) {
+              written.length = 0;
+              throw error;
+            }
+          },
+        );
+        repository.findAttempt.mockResolvedValue(attempt);
+        repository.listParticipants.mockResolvedValue(participants);
+        repository.listMarks.mockResolvedValue(overrides.marks ?? []);
+        repository.listAttemptReceipts.mockResolvedValue(
+          overrides.receipts ?? [],
+        );
+        repository.listHeatTimesForHeat.mockResolvedValue(
+          overrides.heatTimes ?? [],
+        );
+        repository.getCaptureLock.mockResolvedValue(
+          overrides.lock === undefined ? lockRow() : overrides.lock,
+        );
+        repository.listEnrollmentStatuses.mockImplementation(
+          (enrollmentIds: readonly string[]) =>
+            Promise.resolve(
+              new Map<string, EnrollmentStatus>(
+                enrollmentIds.map((enrollmentId) => [
+                  enrollmentId,
+                  withdrawn.has(enrollmentId) ? 'WITHDRAWN' : 'REGISTERED',
+                ]),
+              ),
+            ),
+        );
+        repository.createHeatTime.mockImplementation(
+          (_tx: unknown, input: CreateHeatTimeInput) => {
+            written.push(input);
+            return Promise.resolve(
+              heatTimeRow({
+                id: `heat-time-${input.registrationId}`,
+                classCompetitionId: input.classCompetitionId,
+                stageId: input.stageId,
+                heatNumber: input.heatNumber,
+                registrationId: input.registrationId,
+                timeMilliseconds: input.timeMilliseconds,
+                status: 'OK',
+              }),
+            );
+          },
+        );
+        repository.updateAttemptStatus.mockImplementation(
+          (_tx: unknown, _attemptId: string, input: UpdateAttemptStatusInput) =>
+            Promise.resolve({
+              ...attempt,
+              status: input.status,
+              closedAt: input.closedAt,
+              closedByUserId: input.closedByUserId,
+              closureReport: input.closureReport,
+            }),
+        );
+        repository.insertAudit.mockImplementation(
+          (_tx: unknown, input: InsertAuditInput) => {
+            auditInputs.push(input);
+            return Promise.resolve({
+              auditId: `audit-${auditInputs.length}`,
+              actorUserId: input.actorUserId,
+              action: input.action,
+              targetType: input.targetType,
+              targetId: input.targetId,
+              oldValues: null,
+              newValues: null,
+              reason: input.reason,
+              createdAt: NOW,
+            });
+          },
+        );
+        repository.listAudit.mockImplementation(() =>
+          Promise.resolve(
+            auditInputs.map((input, index) => ({
+              auditId: `audit-${index + 1}`,
+              actorUserId: input.actorUserId,
+              action: input.action,
+              targetType: input.targetType,
+              targetId: input.targetId,
+              oldValues: null,
+              newValues: null,
+              reason: input.reason,
+              createdAt: NOW,
+            })),
+          ),
+        );
+        return { attempt, written, auditInputs };
+      }
+
+      /** The closure report one closure froze on the attempt. */
+      function frozenReport(): TimingClosureReportView {
+        const [, , updateInput] = callArguments<
+          [unknown, string, UpdateAttemptStatusInput]
+        >(repository.updateAttemptStatus);
+        if (updateInput.closureReport === null) {
+          throw new Error('The closure froze no report.');
+        }
+        return updateInput.closureReport;
+      }
+
+      it('publishes one total and OK heat time per at-N participant and no ordinary result', async () => {
+        const { written, auditInputs } = arrangeHeatClosure({
+          participants: [
+            participantRow({ enrollmentId: 'enrollment-a', requiredLaps: 3 }),
+            participantRow({
+              enrollmentId: 'enrollment-b',
+              startNumber: 11,
+              requiredLaps: 3,
+            }),
+            participantRow({
+              enrollmentId: 'enrollment-excluded',
+              startNumber: 13,
+              requiredLaps: 3,
+              excludedReason: 'EXISTING_HEAT_TIME',
+            }),
+            participantRow({
+              enrollmentId: 'enrollment-withdrawn',
+              startNumber: 14,
+              requiredLaps: 3,
+            }),
+          ],
+          marks: [
+            ...passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+            ...passesOf('enrollment-b', [40_000, 80_000, 120_000], {
+              firstSequence: 4,
+              idPrefix: 'mark-b',
+            }),
+          ],
+          receipts: receiptRows([1, 2, 3, 4, 5, 6]),
+          heatTimes: [
+            heatTimeRow({ registrationId: 'registration-enrollment-excluded' }),
+          ],
+          withdrawn: ['enrollment-withdrawn'],
+        });
+
+        const record = await service.completeAttempt(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          completeAttemptDto({ lastIssuedSequence: 6 }),
+        );
+
+        // AD-16: one row per at-N participant, total and registration only.
+        expect(written).toEqual([
+          {
+            classCompetitionId: 'race-1',
+            stageId: 'stage-1',
+            heatNumber: 1,
+            registrationId: 'registration-enrollment-a',
+            timeMilliseconds: 90_000,
+          },
+          {
+            classCompetitionId: 'race-1',
+            stageId: 'stage-1',
+            heatNumber: 1,
+            registrationId: 'registration-enrollment-b',
+            timeMilliseconds: 120_000,
+          },
+        ]);
+        expect(transactionOf(repository.createHeatTime)).toBe(TX);
+        // U-18, U-16: no ordinary result, no split and no per-lap row.
+        expect(repository.publishResult).not.toHaveBeenCalled();
+        expect(repository.replaceResultSplits).not.toHaveBeenCalled();
+
+        expect(frozenReport()).toEqual({
+          publishedEnrollmentIds: [],
+          unpublishedEnrollmentIds: [
+            'enrollment-a',
+            'enrollment-b',
+            'enrollment-excluded',
+            'enrollment-withdrawn',
+          ],
+          conflictEnrollmentIds: [],
+          publishedRegistrationIds: [
+            'registration-enrollment-a',
+            'registration-enrollment-b',
+          ],
+          conflictRegistrationIds: [],
+        });
+        expect(transactionOf(repository.updateAttemptStatus)).toBe(TX);
+        expect(transactionOf(repository.releaseCaptureLock)).toBe(TX);
+        expect(transactionOf(repository.insertAudit)).toBe(TX);
+        expect(auditInputs[0]).toMatchObject({
+          action: 'COMPLETE',
+          newValues: { status: 'COMPLETED' },
+        });
+        expect(record.state).toBe('COMPLETED');
+        expect(record.publishedResults).toEqual([]);
+        expect(record.closureReport).toMatchObject({
+          publishedRegistrationIds: [
+            'registration-enrollment-a',
+            'registration-enrollment-b',
+          ],
+          conflictRegistrationIds: [],
+        });
+      });
+
+      it('publishes nothing for a heat with only below-N, withdrawn or excluded participants', async () => {
+        arrangeHeatClosure({
+          participants: [
+            participantRow({
+              enrollmentId: 'enrollment-short',
+              requiredLaps: 3,
+            }),
+            participantRow({
+              enrollmentId: 'enrollment-excluded',
+              startNumber: 11,
+              requiredLaps: 3,
+              excludedReason: 'EXISTING_HEAT_TIME',
+            }),
+            participantRow({
+              enrollmentId: 'enrollment-withdrawn',
+              startNumber: 12,
+              requiredLaps: 3,
+            }),
+          ],
+          marks: [
+            ...passesOf('enrollment-short', [30_000, 60_000]),
+            ...passesOf('enrollment-withdrawn', [30_000, 60_000, 90_000], {
+              firstSequence: 3,
+              idPrefix: 'mark-withdrawn',
+            }),
+          ],
+          receipts: receiptRows([1, 2, 3, 4, 5]),
+          heatTimes: [
+            heatTimeRow({ registrationId: 'registration-enrollment-excluded' }),
+          ],
+          withdrawn: ['enrollment-withdrawn'],
+        });
+
+        const record = await service.forceCompleteAttempt(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          forceCompleteDto(),
+        );
+
+        expect(record.state).toBe('INCOMPLETE');
+        // U-17: no synthetic DNS, DNF, DSQ or time for a short participant.
+        expect(repository.createHeatTime).not.toHaveBeenCalled();
+        expect(repository.publishResult).not.toHaveBeenCalled();
+        expect(frozenReport()).toEqual({
+          publishedEnrollmentIds: [],
+          unpublishedEnrollmentIds: [
+            'enrollment-short',
+            'enrollment-excluded',
+            'enrollment-withdrawn',
+          ],
+          conflictEnrollmentIds: [],
+          publishedRegistrationIds: [],
+          conflictRegistrationIds: [],
+        });
+      });
+
+      it('keeps a heat time that existed at the start out of the conflict list', async () => {
+        const { written } = arrangeHeatClosure({
+          participants: [
+            participantRow({ enrollmentId: 'enrollment-a', requiredLaps: 3 }),
+            participantRow({
+              enrollmentId: 'enrollment-excluded',
+              startNumber: 11,
+              requiredLaps: 3,
+              excludedReason: 'EXISTING_HEAT_TIME',
+            }),
+          ],
+          marks: passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+          receipts: receiptRows([1, 2, 3]),
+          heatTimes: [
+            heatTimeRow({ registrationId: 'registration-enrollment-excluded' }),
+          ],
+        });
+
+        await service.completeAttempt(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          completeAttemptDto(),
+        );
+
+        // F-14: excluded at the freeze is excluded, never a conflict.
+        expect(written.map((input) => input.registrationId)).toEqual([
+          'registration-enrollment-a',
+        ]);
+        expect(frozenReport().conflictRegistrationIds).toEqual([]);
+        expect(frozenReport().publishedRegistrationIds).toEqual([
+          'registration-enrollment-a',
+        ]);
+      });
+
+      it('reports a heat time that appeared during the attempt as a conflict and still closes', async () => {
+        const { written, auditInputs } = arrangeHeatClosure({
+          participants: [
+            participantRow({ enrollmentId: 'enrollment-a', requiredLaps: 3 }),
+            participantRow({
+              enrollmentId: 'enrollment-b',
+              startNumber: 11,
+              requiredLaps: 3,
+            }),
+          ],
+          marks: [
+            ...passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+            ...passesOf('enrollment-b', [40_000, 80_000, 120_000], {
+              firstSequence: 4,
+              idPrefix: 'mark-b',
+            }),
+          ],
+          receipts: receiptRows([1, 2, 3, 4, 5, 6]),
+          heatTimes: [
+            heatTimeRow({ registrationId: 'registration-enrollment-a' }),
+          ],
+        });
+
+        const record = await service.completeAttempt(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          completeAttemptDto({ lastIssuedSequence: 6 }),
+        );
+
+        expect(repository.listHeatTimesForHeat).toHaveBeenCalledWith(
+          'race-1',
+          'stage-1',
+          1,
+          TX,
+        );
+        // E-15: the hand-entered time is left untouched, the closure completes.
+        expect(written.map((input) => input.registrationId)).toEqual([
+          'registration-enrollment-b',
+        ]);
+        expect(frozenReport().conflictRegistrationIds).toEqual([
+          'registration-enrollment-a',
+        ]);
+        expect(frozenReport().conflictEnrollmentIds).toEqual([]);
+        expect(auditInputs).toHaveLength(1);
+        expect(record.state).toBe('COMPLETED');
+      });
+
+      it('force-completes a heat and publishes only the participants at N', async () => {
+        const { written } = arrangeHeatClosure({
+          participants: [
+            participantRow({ enrollmentId: 'enrollment-a', requiredLaps: 3 }),
+            participantRow({
+              enrollmentId: 'enrollment-b',
+              startNumber: 11,
+              requiredLaps: 3,
+            }),
+          ],
+          marks: [
+            ...passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+            ...passesOf('enrollment-b', [40_000, 80_000], {
+              firstSequence: 4,
+              idPrefix: 'mark-b',
+            }),
+          ],
+          receipts: receiptRows([1, 2, 3, 4, 5]),
+          lock: { ...lockRow(), workstationInstanceId: 'workstation-b' },
+        });
+
+        const record = await service.forceCompleteAttempt(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          forceCompleteDto({ reason: '  Дождь  ' }),
+        );
+
+        expect(record.state).toBe('INCOMPLETE');
+        expect(written.map((input) => input.registrationId)).toEqual([
+          'registration-enrollment-a',
+        ]);
+        expect(written[0].timeMilliseconds).toBe(90_000);
+        expect(frozenReport()).toMatchObject({
+          publishedRegistrationIds: ['registration-enrollment-a'],
+          conflictRegistrationIds: [],
+        });
+      });
+
+      it('cancels a heat without publishing a heat time', async () => {
+        const { auditInputs } = arrangeHeatClosure({
+          participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+          marks: passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+          receipts: receiptRows([1, 2, 3]),
+        });
+
+        const record = await service.cancelAttempt(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          cancelAttemptDto({ reason: 'Забег отменён' }),
+        );
+
+        expect(record.state).toBe('CANCELLED');
+        // E-21: a cancellation publishes nothing and reads no heat time.
+        expect(repository.listHeatTimesForHeat).not.toHaveBeenCalled();
+        expect(repository.createHeatTime).not.toHaveBeenCalled();
+        expect(repository.publishResult).not.toHaveBeenCalled();
+        expect(frozenReport()).toEqual({
+          publishedEnrollmentIds: [],
+          unpublishedEnrollmentIds: ['enrollment-a'],
+          conflictEnrollmentIds: [],
+          publishedRegistrationIds: [],
+          conflictRegistrationIds: [],
+        });
+        expect(auditInputs[0]).toMatchObject({
+          action: 'CANCEL_ATTEMPT',
+          reason: 'Забег отменён',
+        });
+      });
+
+      it('leaves the heat attempt running and writes no heat time when a publication fails', async () => {
+        const { written } = arrangeHeatClosure({
+          participants: [
+            participantRow({ enrollmentId: 'enrollment-a', requiredLaps: 3 }),
+            participantRow({
+              enrollmentId: 'enrollment-b',
+              startNumber: 11,
+              requiredLaps: 3,
+            }),
+          ],
+          marks: [
+            ...passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+            ...passesOf('enrollment-b', [40_000, 80_000, 120_000], {
+              firstSequence: 4,
+              idPrefix: 'mark-b',
+            }),
+          ],
+          receipts: receiptRows([1, 2, 3, 4, 5, 6]),
+        });
+        repository.createHeatTime
+          .mockImplementationOnce(
+            (_tx: unknown, input: CreateHeatTimeInput) => {
+              written.push(input);
+              return Promise.resolve(
+                heatTimeRow({ registrationId: input.registrationId }),
+              );
+            },
+          )
+          .mockRejectedValueOnce(new Error('Heat time insert failed.'));
+
+        await expect(
+          service.completeAttempt(
+            USER_ID,
+            EVENT_ID,
+            ATTEMPT_ID,
+            completeAttemptDto({ lastIssuedSequence: 6 }),
+          ),
+        ).rejects.toThrow('Heat time insert failed.');
+
+        // F-13: the whole closure rolled back, so no participant keeps a time.
+        expect(written).toEqual([]);
+        expect(repository.updateAttemptStatus).not.toHaveBeenCalled();
+        expect(repository.releaseCaptureLock).not.toHaveBeenCalled();
+        expect(repository.insertAudit).not.toHaveBeenCalled();
+      });
     });
   });
 

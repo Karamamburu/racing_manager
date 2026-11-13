@@ -81,7 +81,6 @@ import {
   type TimingCaptureLockRow,
   type TimingClassCompetitionRow,
   type TimingClockEpochRow,
-  type TimingClosureReportRecord,
   type TimingEnrollmentRow,
   type TimingEventRow,
   type TimingHeatRosterEnrollmentRow,
@@ -368,10 +367,43 @@ type ClosurePublication = {
   splits: TimingLapSplit[];
 };
 
+/**
+ * The closure report one closure freezes: the enrollment lists the record view
+ * already has plus the additive heat registration lists (E-14).
+ */
+type ClosureReport = {
+  publishedEnrollmentIds: string[];
+  unpublishedEnrollmentIds: string[];
+  conflictEnrollmentIds: string[];
+  publishedRegistrationIds?: string[];
+  conflictRegistrationIds?: string[];
+};
+
 /** What a closure publishes and what it reports for every other participant. */
 type ClosurePlan = {
   publications: ClosurePublication[];
-  report: TimingClosureReportRecord;
+  report: ClosureReport;
+};
+
+/** One heat time a heat closure publishes: registration and total only. */
+type HeatPublication = {
+  registrationId: string;
+  totalMs: number;
+};
+
+/** A heat closure's report: both registration lists are always present. */
+type HeatClosureReport = {
+  publishedEnrollmentIds: string[];
+  unpublishedEnrollmentIds: string[];
+  conflictEnrollmentIds: string[];
+  publishedRegistrationIds: string[];
+  conflictRegistrationIds: string[];
+};
+
+/** What a heat closure publishes and what it reports (AD-16, T7). */
+type HeatClosurePlan = {
+  publications: HeatPublication[];
+  report: HeatClosureReport;
 };
 
 /** One workstation whose issued sequences lack a final receipt. */
@@ -2262,14 +2294,27 @@ export class TimingService {
   }
 
   /**
-   * E-15, E-16, F-17: the category finish and the attempt state refuse a
-   * correction, a rebind or a cancellation before any write.
+   * E-15, E-16, F-17, U-30: the category finish and the attempt state refuse a
+   * correction, a rebind or a cancellation before any write. A heat attempt is
+   * stricter: its timing record is read-only once it closes, so an official
+   * start or pass-time correction needs a `RUNNING` heat (F-22).
    */
   private async assertTimingChangeAllowed(
     attempt: TimingAttemptRow,
     change: 'CORRECTION' | 'PASS_EDIT',
     tx?: TimingTx,
   ): Promise<void> {
+    const closedHeat =
+      attempt.attemptKind === 'HEAT' &&
+      change === 'CORRECTION' &&
+      (attempt.status === 'COMPLETED' || attempt.status === 'INCOMPLETE');
+    if (closedHeat) {
+      throw timingError(
+        TimingErrorCode.ATTEMPT_CLOSED,
+        'A closed heat attempt accepts no timing correction.',
+        { attemptId: attempt.id, status: attempt.status },
+      );
+    }
     const categoryFinished = await this.repository.isCategoryFinished(
       attempt.eventId,
       attempt.startId,
@@ -2578,9 +2623,13 @@ export class TimingService {
    * every eligible result with its split set, the state change, the closure
    * report, the capture-lock release and the audit row.
    *
+   * A `HEAT` attempt publishes `ClassHeatTime` rows only — one total and `OK`
+   * per frozen participant at N — and writes no ordinary result, no split and
+   * no per-lap row (AD-16). Everything else about the closure is shared.
+   *
    * A refusal or a failed write throws out of the transaction, so PostgreSQL
    * rolls back all of it: the attempt stays `RUNNING`, no participant gains a
-   * result or a split and the lock is still held (U-20, F-19).
+   * result, a split or a heat time and the lock is still held (U-20, F-19).
    */
   private async closeAttempt(
     input: ClosureInput,
@@ -2615,28 +2664,54 @@ export class TimingService {
         statuses,
         input,
       );
-      const plan = await this.planClosure(
-        tx,
-        current,
-        participants,
-        marks,
-        statuses,
-        input.status !== 'CANCELLED',
-      );
 
-      for (const publication of plan.publications) {
-        const published = await this.repository.publishResult(tx, {
-          enrollmentId: publication.enrollmentId,
-          registrationId: publication.registrationId,
-          outcome: 'FINISHED',
-          timeMilliseconds: publication.totalMs,
-          timingSessionId: current.id,
-        });
-        await this.repository.replaceResultSplits(
+      // The two publication branches differ in what they write, never in the
+      // gate above or in the state change below, so both freeze one report.
+      let report: ClosureReport;
+      if (current.attemptKind === 'HEAT') {
+        const heatPlan = await this.planHeatClosure(
           tx,
-          published.id,
-          publication.splits,
+          current,
+          participants,
+          marks,
+          statuses,
+          input.status !== 'CANCELLED',
         );
+        const heat = heatAttemptTarget(current);
+        for (const publication of heatPlan.publications) {
+          await this.repository.createHeatTime(tx, {
+            classCompetitionId: heat.classCompetitionId,
+            stageId: heat.stageId,
+            heatNumber: heat.heatNumber,
+            registrationId: publication.registrationId,
+            timeMilliseconds: publication.totalMs,
+          });
+        }
+        report = heatPlan.report;
+      } else {
+        const plan = await this.planClosure(
+          tx,
+          current,
+          participants,
+          marks,
+          statuses,
+          input.status !== 'CANCELLED',
+        );
+        for (const publication of plan.publications) {
+          const published = await this.repository.publishResult(tx, {
+            enrollmentId: publication.enrollmentId,
+            registrationId: publication.registrationId,
+            outcome: 'FINISHED',
+            timeMilliseconds: publication.totalMs,
+            timingSessionId: current.id,
+          });
+          await this.repository.replaceResultSplits(
+            tx,
+            published.id,
+            publication.splits,
+          );
+        }
+        report = plan.report;
       }
 
       const closedAt = new Date();
@@ -2644,7 +2719,7 @@ export class TimingService {
         status: input.status,
         closedAt,
         closedByUserId: input.actorUserId,
-        closureReport: plan.report,
+        closureReport: report,
       });
       await this.releaseClosureLock(tx, input);
       await this.repository.insertAudit(tx, {
@@ -2656,7 +2731,7 @@ export class TimingService {
         oldValues: { status: current.status },
         newValues: {
           status: input.status,
-          closureReport: plan.report,
+          closureReport: report,
         },
         reason: input.reason,
       });
@@ -2671,7 +2746,11 @@ export class TimingService {
         officialStartedAt: closed.officialStartedAt.toISOString(),
         passes: this.toOrderedPassViews(marks),
         pendingFinishes: pendingFinishes.map((mark) => toPassView(mark)),
-        closureReport: closed.closureReport,
+        // A heat report is the one this closure built: the persisted JSON
+        // keeps the registration lists, while the record read path rebuilds
+        // the enrollment lists only.
+        closureReport:
+          current.attemptKind === 'HEAT' ? report : closed.closureReport,
         publishedResults: publishedResults.map((row) =>
           toPublishedResultView(row),
         ),
@@ -2839,6 +2918,78 @@ export class TimingService {
         conflictEnrollmentIds,
       },
     };
+  }
+
+  /**
+   * The publication set of one heat closure (AD-16, E-14).
+   *
+   * A heat publishes `ClassHeatTime` rows only: one total and `OK` per frozen
+   * participant that was not excluded at the freeze, is still `REGISTERED`,
+   * holds exactly N passes and has no heat time of its own for this race,
+   * stage and heat. A registration that gained a heat time after the freeze is
+   * left untouched and reported as a conflict, so the closure still completes
+   * (E-15). A participant below N, withdrawn or excluded publishes nothing and
+   * gains no `DNS`, `DNF`, `DSQ` or synthetic time (U-17). A cancellation
+   * publishes nothing (E-21).
+   *
+   * The enrollment lists keep their meaning: a heat closure writes no ordinary
+   * result, so every participant stays unpublished at the enrollment level and
+   * the heat truth lives in the registration lists.
+   */
+  private async planHeatClosure(
+    tx: TimingTx,
+    attempt: TimingAttemptRow,
+    participants: readonly TimingParticipantRow[],
+    marks: readonly TimingMarkRow[],
+    statuses: ReadonlyMap<string, EnrollmentStatus>,
+    publish: boolean,
+  ): Promise<HeatClosurePlan> {
+    const publications: HeatPublication[] = [];
+    const publishedRegistrationIds: string[] = [];
+    const conflictRegistrationIds: string[] = [];
+    const report: HeatClosureReport = {
+      publishedEnrollmentIds: [],
+      unpublishedEnrollmentIds: participants.map(
+        (participant) => participant.enrollmentId,
+      ),
+      conflictEnrollmentIds: [],
+      publishedRegistrationIds,
+      conflictRegistrationIds,
+    };
+    if (!publish) {
+      return { publications, report };
+    }
+
+    const heat = heatAttemptTarget(attempt);
+    const existing = new Set(
+      (
+        await this.repository.listHeatTimesForHeat(
+          heat.classCompetitionId,
+          heat.stageId,
+          heat.heatNumber,
+          tx,
+        )
+      ).map((row) => row.registrationId),
+    );
+    for (const participant of participants) {
+      if (
+        !isGateParticipant(participant, statuses) ||
+        boundPassCount(marks, participant.enrollmentId) !==
+          participant.requiredLaps
+      ) {
+        continue;
+      }
+      if (existing.has(participant.registrationId)) {
+        conflictRegistrationIds.push(participant.registrationId);
+        continue;
+      }
+      publications.push({
+        registrationId: participant.registrationId,
+        totalMs: participantPublication(attempt, participant, marks).totalMs,
+      });
+      publishedRegistrationIds.push(participant.registrationId);
+    }
+    return { publications, report };
   }
 
   /**
@@ -4345,6 +4496,34 @@ function participantPublication(
     );
   }
   return { totalMs: splits[splits.length - 1].cumulativeMs, splits };
+}
+
+/**
+ * The race, stage and heat a `HEAT` attempt publishes into. A heat attempt
+ * always carries all three (AD-14); a missing one is a broken row and never a
+ * silent publication into another heat, so it refuses instead.
+ */
+function heatAttemptTarget(attempt: TimingAttemptRow): {
+  classCompetitionId: string;
+  stageId: string;
+  heatNumber: number;
+} {
+  if (
+    attempt.classCompetitionId === null ||
+    attempt.stageId === null ||
+    attempt.heatNumber === null
+  ) {
+    throw timingError(
+      TimingErrorCode.INVALID_STATE,
+      'A heat attempt must name its race, stage and heat.',
+      { attemptId: attempt.id, attemptKind: attempt.attemptKind },
+    );
+  }
+  return {
+    classCompetitionId: attempt.classCompetitionId,
+    stageId: attempt.stageId,
+    heatNumber: attempt.heatNumber,
+  };
 }
 
 /**
