@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import type { ResultOutcome } from '../../generated/prisma';
 import { TIMING_OPERATE_ROLE_CODES } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
@@ -16,14 +17,24 @@ import { CATEGORY_FINISHED_MESSAGE } from '../events/category-finish';
 import { isPastCompletedEvent } from '../events/event-status';
 import type { ResultResponse } from '../results/results.service';
 import {
+  assertCanAddPass,
+  assertWithinBounds,
+  assignLapNumbers,
   canStartAttempt,
   classifyParticipantState,
+  classifyRouting,
   nextAttemptNumber,
   orderByOfficialInstant,
   resolveElapsedMs,
   TIMING_MAX_TOTAL_MS,
+  type TimingRoutingCandidate,
+  type TimingRoutingNoneReason,
 } from './timing.domain';
-import type { OpenClockEpochDto, StartTimingAttemptDto } from './timing.dto';
+import type {
+  CaptureTimingPassDto,
+  OpenClockEpochDto,
+  StartTimingAttemptDto,
+} from './timing.dto';
 import {
   TimingErrorCode,
   timingError,
@@ -40,9 +51,12 @@ import {
   type TimingEventRow,
   type TimingMarkRow,
   type TimingParticipantInput,
+  type TimingParticipantRow,
   type TimingParticipantRosterRow,
   type TimingPublishedResultRow,
+  type TimingRoutingCandidateRow,
   type TimingStartRow,
+  type TimingTx,
 } from './timing.repository';
 import type {
   ClockEpochView,
@@ -61,14 +75,16 @@ import type {
 } from './timing.views';
 
 /**
- * MANUAL-TIMING read surface, Start press, attempt record and clock epoch.
+ * MANUAL-TIMING read surface, Start press, number/tile capture, attempt record
+ * and clock epoch.
  *
  * The service owns every refusal: it loads the event-wide facts the rules read,
  * asks the pure domain helpers, and only then writes. A refused Start press
- * creates nothing, so there is no "prepared" attempt.
+ * creates nothing, so there is no "prepared" attempt; a refused capture writes
+ * neither a mark nor a receipt.
  *
- * Capture, corrections, closure, the lock lifecycle and the role grant belong to
- * later waves and are not implemented here.
+ * Bind, cancel, undo, corrections, closure, the lock lifecycle and the role
+ * grant belong to later waves and are not implemented here.
  */
 
 /** Why a roster row is out of timing: displayed in a multi-stage race section. */
@@ -118,6 +134,23 @@ type PassStatistics = {
 };
 
 const NO_PASSES: PassStatistics = { passCount: 0, lastPassAt: null };
+
+/**
+ * The enrollment one bound capture writes to. An unbound pending finish has no
+ * identity yet, so every field is `null` and a bind supplies it later.
+ */
+type CaptureTarget = {
+  enrollmentId: string | null;
+  registrationId: string | null;
+  startNumber: number | null;
+};
+
+/** A pending finish: a captured instant that belongs to no participant yet. */
+const UNBOUND_TARGET: CaptureTarget = {
+  enrollmentId: null,
+  registrationId: null,
+  startNumber: null,
+};
 
 /**
  * A published result as the record returns it. `laps` is the additive field the
@@ -447,6 +480,389 @@ export class TimingService {
       return created;
     });
     return toClockEpochView(epoch, now);
+  }
+
+  /**
+   * `POST /events/:eventId/timing/passes`: one number, tile or unbound finish.
+   *
+   * The commit names an attempt and a workstation sequence; the server never
+   * picks a category. A `NUMBER` commit routes through the event-wide routing
+   * query, a `TILE` commit names its enrollment, and `PENDING_FINISH` names no
+   * participant at all. The mark, its receipt and its audit row commit together.
+   */
+  async capturePass(
+    authentikId: string | undefined,
+    eventId: string,
+    dto: CaptureTimingPassDto,
+    idempotencyKey?: string,
+  ): Promise<TimingPassView> {
+    await this.rolesService.assertHasAnyRole(
+      authentikId,
+      TIMING_OPERATE_ROLE_CODES,
+    );
+    const attempt = await this.repository.findAttempt(dto.attemptId);
+    if (attempt === null || attempt.eventId !== eventId) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'Timing attempt not found.',
+        { attemptId: dto.attemptId },
+      );
+    }
+    if (attempt.status !== 'RUNNING') {
+      throw timingError(
+        TimingErrorCode.ATTEMPT_CLOSED,
+        'Capture accepts only a running attempt.',
+        { attemptId: attempt.id, status: attempt.status },
+      );
+    }
+    const lock = await this.repository.getCaptureLock(eventId);
+    if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
+      throw timingError(
+        TimingErrorCode.CAPTURE_NOT_HELD,
+        'This workstation does not hold capture.',
+        {
+          workstationInstanceId: dto.workstationInstanceId,
+          holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
+        },
+      );
+    }
+    // AD-2: a mark is measured from the open epoch of the active workstation.
+    // Without one the clock has no anchor, so the capture counts as not held.
+    const epoch = await this.repository.findOpenEpoch(
+      dto.attemptId,
+      dto.workstationInstanceId,
+    );
+    if (epoch === null) {
+      throw timingError(
+        TimingErrorCode.CAPTURE_NOT_HELD,
+        'This workstation has no open clock epoch on the attempt.',
+        {
+          attemptId: dto.attemptId,
+          workstationInstanceId: dto.workstationInstanceId,
+        },
+      );
+    }
+    if (epoch.id !== dto.clockEpochId) {
+      throw timingError(
+        TimingErrorCode.INVALID_STATE,
+        'The clock epoch is not the open epoch of this workstation.',
+        { clockEpochId: dto.clockEpochId, openEpochId: epoch.id },
+      );
+    }
+
+    const actorUserId = await this.requireUserId(authentikId);
+    const rawCapturedAt = new Date(dto.clientCapturedAt);
+    const key = normalizeIdempotencyKey(idempotencyKey);
+
+    return this.repository.withTransaction(async (tx) => {
+      // AD-3: the receipt table is the authority. A retry with the same
+      // `Idempotency-Key` never reaches the service; a new key on a used
+      // sequence is a client bug, so refuse instead of writing a second mark.
+      const receipt = await this.repository.findReceipt(
+        tx,
+        dto.attemptId,
+        dto.workstationInstanceId,
+        dto.deviceSequence,
+      );
+      if (receipt !== null) {
+        throw timingError(
+          TimingErrorCode.CONFLICT,
+          'This device sequence already has a receipt on the attempt.',
+          {
+            attemptId: dto.attemptId,
+            workstationInstanceId: dto.workstationInstanceId,
+            deviceSequence: dto.deviceSequence,
+            receiptStatus: receipt.status,
+            receiptReason: receipt.reason,
+          },
+        );
+      }
+
+      const marks = await this.repository.listMarks(dto.attemptId, tx);
+      const target = await this.resolveCaptureTarget(eventId, dto, marks, tx);
+      const rawElapsedMs = epoch.officialElapsedAnchorMs + dto.clientElapsedMs;
+      const officialAt = new Date(
+        attempt.officialStartedAt.getTime() + rawElapsedMs,
+      );
+      assertWithinBounds(attempt.officialStartedAt, officialAt);
+      const officialElapsedMs = resolveElapsedMs(
+        officialAt,
+        attempt.officialStartedAt,
+      );
+
+      const created = await this.repository.createMark(tx, {
+        attemptId: dto.attemptId,
+        clockEpochId: epoch.id,
+        enrollmentId: target.enrollmentId,
+        registrationId: target.registrationId,
+        startNumber: target.startNumber,
+        kind: dto.kind === 'PENDING_FINISH' ? 'PENDING_FINISH' : 'PASS',
+        rawCapturedAt,
+        rawElapsedMs,
+        officialAt,
+        officialElapsedMs,
+        lapNumber: null,
+        status: dto.kind === 'PENDING_FINISH' ? 'PENDING' : 'BOUND',
+        workstationInstanceId: dto.workstationInstanceId,
+        deviceSequence: dto.deviceSequence,
+        idempotencyKey: key,
+      });
+      await this.repository.createReceipt(tx, {
+        attemptId: dto.attemptId,
+        workstationInstanceId: dto.workstationInstanceId,
+        deviceSequence: dto.deviceSequence,
+        status: 'APPLIED',
+        reason: null,
+      });
+      // U-14: laps follow official instant, never capture order, so a capture
+      // whose instant lands before an existing pass renumbers both.
+      const applied =
+        target.enrollmentId === null
+          ? created
+          : await this.reindexLaps(
+              tx,
+              dto.attemptId,
+              target.enrollmentId,
+              marks,
+              created,
+            );
+      await this.repository.insertAudit(tx, {
+        attemptId: dto.attemptId,
+        actorUserId,
+        action:
+          dto.kind === 'PENDING_FINISH'
+            ? 'PENDING_FINISH_CAPTURE'
+            : 'PASS_CAPTURE',
+        targetType: 'PASS',
+        targetId: applied.id,
+        oldValues: null,
+        newValues: {
+          kind: dto.kind,
+          enrollmentId: target.enrollmentId,
+          startNumber: target.startNumber,
+          lapNumber: applied.lapNumber,
+          rawCapturedAt: rawCapturedAt.toISOString(),
+          rawElapsedMs,
+          officialAt: officialAt.toISOString(),
+          officialElapsedMs,
+          clockEpochId: epoch.id,
+          workstationInstanceId: dto.workstationInstanceId,
+          deviceSequence: dto.deviceSequence,
+          idempotencyKey: key,
+        },
+        reason: null,
+      });
+      return toPassView(applied);
+    });
+  }
+
+  /**
+   * Resolves what one commit writes: a frozen participant of the addressed
+   * attempt, or nothing for an unbound finish. Exclusion and N are checked on
+   * the frozen row the capture actually targets, so a number that routed to an
+   * eligible candidate cannot slip past them.
+   */
+  private async resolveCaptureTarget(
+    eventId: string,
+    dto: CaptureTimingPassDto,
+    marks: readonly TimingMarkRow[],
+    tx: TimingTx,
+  ): Promise<CaptureTarget> {
+    if (dto.kind === 'PENDING_FINISH') {
+      return UNBOUND_TARGET;
+    }
+    const enrollmentId =
+      dto.kind === 'TILE'
+        ? this.tileTargetEnrollmentId(dto)
+        : await this.numberTargetEnrollmentId(eventId, dto, tx);
+    const participant = await this.repository.findParticipant(
+      dto.attemptId,
+      enrollmentId,
+      tx,
+    );
+    if (participant === null) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'The enrollment is not a frozen participant of this attempt.',
+        { attemptId: dto.attemptId, enrollmentId },
+      );
+    }
+    assertCaptureEligible(participant, boundPassCount(marks, enrollmentId));
+    return {
+      enrollmentId,
+      registrationId: participant.registrationId,
+      startNumber: participant.startNumber,
+    };
+  }
+
+  /** A tile names its enrollment, so it is never ambiguous. */
+  private tileTargetEnrollmentId(dto: CaptureTimingPassDto): string {
+    if (dto.enrollmentId === undefined) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'A tile capture names no enrollment.',
+        { attemptId: dto.attemptId },
+      );
+    }
+    return dto.enrollmentId;
+  }
+
+  /**
+   * A committed number routes through every running attempt of the event. One
+   * eligible enrollment lands silently; two ask for a choice; none names why.
+   */
+  private async numberTargetEnrollmentId(
+    eventId: string,
+    dto: CaptureTimingPassDto,
+    tx: TimingTx,
+  ): Promise<string> {
+    if (dto.startNumber === undefined) {
+      throw timingError(
+        TimingErrorCode.NUMBER_REQUIRED,
+        'A number capture requires a start number.',
+        { attemptId: dto.attemptId },
+      );
+    }
+    const candidates = await this.repository.findRoutingCandidates(
+      eventId,
+      { startNumber: dto.startNumber },
+      tx,
+    );
+    const routing = classifyRouting(candidates.map(toRoutingCandidate));
+    if (routing.kind === 'AMBIGUOUS') {
+      throw timingError(
+        TimingErrorCode.NUMBER_AMBIGUOUS,
+        'The number resolves to more than one eligible enrollment.',
+        {
+          startNumber: dto.startNumber,
+          enrollmentIds: routing.enrollmentIds,
+        },
+      );
+    }
+    if (routing.kind === 'NONE') {
+      throw await this.numberRefusal(
+        eventId,
+        dto.startNumber,
+        routing.reason,
+        tx,
+      );
+    }
+    const chosen = candidates.find(
+      (candidate) => candidate.enrollmentId === routing.enrollmentId,
+    );
+    if (chosen === undefined) {
+      throw timingError(
+        TimingErrorCode.INVALID_STATE,
+        'The routing decision named a candidate the query did not return.',
+        { startNumber: dto.startNumber, enrollmentId: routing.enrollmentId },
+      );
+    }
+    // The client resolves the number to the target attempt before posting. A
+    // different attempt means a stale surface: refuse rather than write into
+    // this attempt's epoch with another attempt's elapsed clock.
+    if (chosen.attemptId !== dto.attemptId) {
+      throw timingError(
+        TimingErrorCode.INVALID_STATE,
+        'The number routes to another attempt than the addressed one.',
+        {
+          attemptId: dto.attemptId,
+          routedAttemptId: chosen.attemptId,
+          enrollmentId: chosen.enrollmentId,
+          startNumber: dto.startNumber,
+        },
+      );
+    }
+    return chosen.enrollmentId;
+  }
+
+  /**
+   * The refusal of a number that resolves to no eligible enrollment. The
+   * routing query sees running attempts only, so an empty result still has to
+   * be told apart from a number the event does not know at all.
+   */
+  private async numberRefusal(
+    eventId: string,
+    startNumber: number,
+    reason: TimingRoutingNoneReason,
+    tx: TimingTx,
+  ): Promise<TimingDomainError> {
+    if (reason === 'UNKNOWN_NUMBER') {
+      const known = await this.repository.existsStartNumber(
+        eventId,
+        startNumber,
+        tx,
+      );
+      if (!known) {
+        return timingError(
+          TimingErrorCode.NUMBER_UNKNOWN,
+          'No enrollment of this event carries the committed number.',
+          { startNumber },
+        );
+      }
+      return timingError(
+        TimingErrorCode.ATTEMPT_CLOSED,
+        'The participant has no running attempt: it has not started or is closed.',
+        { startNumber, reason: 'NOT_RUNNING' },
+      );
+    }
+    if (reason === 'EXCLUDED') {
+      return timingError(
+        TimingErrorCode.EXCLUDED_PARTICIPANT,
+        'The participant is excluded from the running attempt.',
+        { startNumber, reason },
+      );
+    }
+    if (reason === 'ALREADY_N') {
+      return timingError(
+        TimingErrorCode.ALREADY_N_PASSES,
+        'The participant already holds N passes.',
+        { startNumber, reason },
+      );
+    }
+    return timingError(
+      TimingErrorCode.ATTEMPT_CLOSED,
+      'The participant has no running attempt: it has not started or is closed.',
+      { startNumber, reason },
+    );
+  }
+
+  /**
+   * U-14: renumbers one participant's bound passes 1..k in official-instant
+   * order and writes only the rows whose number changed, so the N-th pass is
+   * always the participant's total.
+   */
+  private async reindexLaps(
+    tx: TimingTx,
+    attemptId: string,
+    enrollmentId: string,
+    marks: readonly TimingMarkRow[],
+    created: TimingMarkRow,
+  ): Promise<TimingMarkRow> {
+    const passes = marks
+      .filter(
+        (mark) => mark.status === 'BOUND' && mark.enrollmentId === enrollmentId,
+      )
+      .map((mark) => ({ passId: mark.id, officialAt: mark.officialAt, mark }));
+    passes.push({
+      passId: created.id,
+      officialAt: created.officialAt,
+      mark: created,
+    });
+    const byId = new Map(passes.map((pass) => [pass.passId, pass.mark]));
+    let applied = created;
+    for (const lap of assignLapNumbers(passes)) {
+      const mark = byId.get(lap.passId);
+      if (mark === undefined || mark.lapNumber === lap.lapNumber) {
+        continue;
+      }
+      const updated = await this.repository.updateMark(tx, lap.passId, {
+        lapNumber: lap.lapNumber,
+      });
+      if (lap.passId === created.id) {
+        applied = updated;
+      }
+    }
+    return applied;
   }
 
   private async loadEventContext(
@@ -905,6 +1321,60 @@ function passStatistics(
     });
   }
   return statistics;
+}
+
+/**
+ * Refuses a capture on a frozen participant that is excluded or already holds N
+ * passes; `passCount` is the bound pass count of the addressed attempt.
+ */
+function assertCaptureEligible(
+  participant: TimingParticipantRow,
+  passCount: number,
+): void {
+  if (participant.excludedReason !== null) {
+    throw timingError(
+      TimingErrorCode.EXCLUDED_PARTICIPANT,
+      'The participant is excluded from this attempt.',
+      {
+        enrollmentId: participant.enrollmentId,
+        excludedReason: participant.excludedReason,
+      },
+    );
+  }
+  assertCanAddPass(passCount, participant.requiredLaps);
+}
+
+/** The bound passes one enrollment already holds in the attempt. */
+function boundPassCount(
+  marks: readonly TimingMarkRow[],
+  enrollmentId: string,
+): number {
+  return marks.filter(
+    (mark) => mark.status === 'BOUND' && mark.enrollmentId === enrollmentId,
+  ).length;
+}
+
+/** The routing facts of one candidate row; the attempt status is always running. */
+function toRoutingCandidate(
+  candidate: TimingRoutingCandidateRow,
+): TimingRoutingCandidate {
+  return {
+    enrollmentId: candidate.enrollmentId,
+    attemptStatus: candidate.attemptStatus,
+    passCount: candidate.passCount,
+    requiredLaps: candidate.requiredLaps,
+    excludedReason: candidate.excludedReason,
+  };
+}
+
+/**
+ * The key stored on a mark: the client header when it sent one, otherwise a
+ * fresh value. The global interceptor already replays a repeated header, so the
+ * service only has to never store an empty key.
+ */
+function normalizeIdempotencyKey(idempotencyKey: string | undefined): string {
+  const trimmed = idempotencyKey?.trim() ?? '';
+  return trimmed.length === 0 ? randomUUID() : trimmed;
 }
 
 function toAttemptRef(attempt: TimingAttemptRow): TimingAttemptRef {

@@ -167,6 +167,22 @@ export type TimingParticipantRosterRow = TimingParticipantRow & {
   lastName: string | null;
 };
 
+/**
+ * One enrollment a committed number can route to: the frozen participant, its
+ * attempt state and the bound passes the enrollment already holds in it.
+ */
+export type TimingRoutingCandidateRow = {
+  attemptId: string;
+  attemptStatus: TimingSessionStatus;
+  enrollmentId: string;
+  registrationId: string;
+  startNumber: number | null;
+  sectionId: string | null;
+  excludedReason: string | null;
+  requiredLaps: number;
+  passCount: number;
+};
+
 /** One participation format of the catalog; the surface orders blocks by it. */
 export type TimingFormatRow = {
   id: number;
@@ -787,6 +803,11 @@ function toParticipantRosterRow(
   };
 }
 
+/** The key a bound-pass count is stored under: one enrollment of one attempt. */
+function passCountKey(attemptId: string, enrollmentId: string): string {
+  return `${attemptId}:${enrollmentId}`;
+}
+
 function toEnrollmentRow(row: EnrollmentQueryRow): TimingEnrollmentRow {
   return {
     enrollmentId: row.id,
@@ -1161,6 +1182,118 @@ export class TimingRepository {
       orderBy: [{ officialAt: 'asc' }, { id: 'asc' }],
     });
     return rows.map(toMarkRow);
+  }
+
+  /**
+   * The routing candidates of one committed number: every frozen participant of
+   * every `RUNNING` attempt of the event, with the bound passes each enrollment
+   * already holds. A closed attempt is not routable and stays out, so the
+   * caller can neither capture into it nor write into its clock epoch.
+   *
+   * The number and enrollment filters are Prisma parameters, never interpolated
+   * SQL: the caller passes the value the referee typed.
+   */
+  async findRoutingCandidates(
+    eventId: string,
+    filter: { startNumber?: number; enrollmentId?: string },
+    tx?: TimingTx,
+  ): Promise<TimingRoutingCandidateRow[]> {
+    const rows = await this.db(tx).timingSessionParticipant.findMany({
+      where: {
+        session: { eventId, status: 'RUNNING' },
+        ...(filter.startNumber === undefined
+          ? {}
+          : { startNumber: filter.startNumber }),
+        ...(filter.enrollmentId === undefined
+          ? {}
+          : { enrollmentId: filter.enrollmentId }),
+      },
+      select: {
+        sessionId: true,
+        enrollmentId: true,
+        registrationId: true,
+        startNumber: true,
+        sectionId: true,
+        excludedReason: true,
+        requiredLaps: true,
+        session: { select: { status: true } },
+      },
+      orderBy: [
+        { sessionId: 'asc' },
+        { startNumber: { sort: 'asc', nulls: 'last' } },
+        { enrollmentId: 'asc' },
+      ],
+    });
+    if (rows.length === 0) {
+      return [];
+    }
+    const passCounts = await this.countBoundPassesByEnrollment(
+      rows.map((row) => row.sessionId),
+      rows.map((row) => row.enrollmentId),
+      tx,
+    );
+    return rows.map((row) => ({
+      attemptId: row.sessionId,
+      attemptStatus: row.session.status,
+      enrollmentId: row.enrollmentId,
+      registrationId: row.registrationId,
+      startNumber: row.startNumber,
+      sectionId: row.sectionId,
+      excludedReason: row.excludedReason,
+      requiredLaps: row.requiredLaps,
+      passCount:
+        passCounts.get(passCountKey(row.sessionId, row.enrollmentId)) ?? 0,
+    }));
+  }
+
+  /**
+   * Whether an active enrollment of the event carries this start number. The
+   * routing query reads only running attempts, so this tells an unknown number
+   * apart from one whose categories have not started or are already closed.
+   */
+  async existsStartNumber(
+    eventId: string,
+    startNumber: number,
+    tx?: TimingTx,
+  ): Promise<boolean> {
+    const row = await this.db(tx).enrollment.findFirst({
+      where: {
+        eventId,
+        status: 'REGISTERED',
+        registration: { startNumber },
+      },
+      select: { id: true },
+    });
+    return row !== null;
+  }
+
+  /**
+   * Bound passes per `(attempt, enrollment)` for the given candidates. One
+   * grouped read instead of one count per candidate row.
+   */
+  private async countBoundPassesByEnrollment(
+    attemptIds: string[],
+    enrollmentIds: string[],
+    tx?: TimingTx,
+  ): Promise<Map<string, number>> {
+    const rows = await this.db(tx).timingMark.groupBy({
+      by: ['sessionId', 'enrollmentId'],
+      where: {
+        sessionId: { in: [...new Set(attemptIds)] },
+        enrollmentId: { in: [...new Set(enrollmentIds)] },
+        status: 'BOUND',
+      },
+      _count: { _all: true },
+    });
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      if (row.enrollmentId === null) continue;
+      counts.set(
+        passCountKey(row.sessionId, row.enrollmentId),
+        row._count._all,
+      );
+    }
+    return counts;
   }
 
   async findMark(markId: string, tx?: TimingTx): Promise<TimingMarkRow | null> {

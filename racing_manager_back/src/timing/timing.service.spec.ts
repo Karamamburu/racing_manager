@@ -1,9 +1,13 @@
 import { TIMING_OPERATE_ROLE_CODES } from '../auth/role-codes';
 import type { RolesService } from '../auth/roles.service';
+import { TIMING_MAX_TOTAL_MS } from './timing.domain';
+import type { CaptureTimingPassDto } from './timing.dto';
 import { TimingErrorCode, TimingDomainError } from './timing.errors';
 import type {
   CreateAttemptInput,
   CreateClockEpochInput,
+  CreateMarkInput,
+  CreateReceiptInput,
   InsertAuditInput,
   TimingAgeCategoryRow,
   TimingAgeSectionRow,
@@ -17,16 +21,21 @@ import type {
   TimingFormatRow,
   TimingMarkRow,
   TimingParticipantRosterRow,
+  TimingParticipantRow,
   TimingPublishedResultRow,
+  TimingReceiptRow,
+  TimingRoutingCandidateRow,
   TimingStartRow,
+  UpdateMarkInput,
 } from './timing.repository';
 import { TimingRepository } from './timing.repository';
 import { TimingService } from './timing.service';
 
 /**
- * Unit tests for the timing surface, the Start press, the clock epoch and the
- * attempt record. Every repository call is a fake: no Prisma, no database, no
- * HTTP. The rules themselves stay in `timing.domain.ts` and are covered there.
+ * Unit tests for the timing surface, the Start press, number/tile capture, the
+ * clock epoch and the attempt record. Every repository call is a fake: no
+ * Prisma, no database, no HTTP. The rules themselves stay in `timing.domain.ts`
+ * and are covered there.
  */
 
 const EVENT_ID = 'event-a';
@@ -35,13 +44,16 @@ const START_B = 'start-b';
 const NOW = new Date('2026-06-01T10:00:00.000Z');
 const USER_ID = 'user-a';
 const WORKSTATION = 'workstation-a';
+const ATTEMPT_ID = 'attempt-1';
+/** The opaque transaction scope the fake hands to a write. */
+const TX = { transaction: 'tx' };
 
 type RepositoryFake = ReturnType<typeof createRepositoryFake>;
 
 function createRepositoryFake() {
   return {
     withTransaction: jest.fn(
-      (run: (tx: unknown) => Promise<unknown>): Promise<unknown> => run({}),
+      (run: (tx: unknown) => Promise<unknown>): Promise<unknown> => run(TX),
     ),
     lockCategory: jest.fn((): Promise<void> => Promise.resolve()),
     findEvent: jest.fn(
@@ -76,6 +88,14 @@ function createRepositoryFake() {
     listParticipantRoster: jest.fn(
       (): Promise<TimingParticipantRosterRow[]> => Promise.resolve([]),
     ),
+    findParticipant: jest.fn<
+      Promise<TimingParticipantRow | null>,
+      [string, string]
+    >(() => Promise.resolve(null)),
+    findRoutingCandidates: jest.fn(
+      (): Promise<TimingRoutingCandidateRow[]> => Promise.resolve([]),
+    ),
+    existsStartNumber: jest.fn((): Promise<boolean> => Promise.resolve(false)),
     listMarks: jest.fn((): Promise<TimingMarkRow[]> => Promise.resolve([])),
     listPendingFinishes: jest.fn(
       (): Promise<TimingMarkRow[]> => Promise.resolve([]),
@@ -88,7 +108,16 @@ function createRepositoryFake() {
       (): Promise<TimingCaptureLockRow | null> => Promise.resolve(null),
     ),
     createClockEpoch: jest.fn(),
+    findOpenEpoch: jest.fn(
+      (): Promise<TimingClockEpochRow | null> => Promise.resolve(null),
+    ),
     closeOpenEpochs: jest.fn((): Promise<number> => Promise.resolve(0)),
+    createMark: jest.fn(),
+    updateMark: jest.fn(),
+    findReceipt: jest.fn(
+      (): Promise<TimingReceiptRow | null> => Promise.resolve(null),
+    ),
+    createReceipt: jest.fn(),
     insertAudit: jest.fn(),
   };
 }
@@ -266,6 +295,65 @@ function lockRow(): TimingCaptureLockRow {
     heldByUserId: USER_ID,
     acquiredAt: NOW,
     lastSeenAt: NOW,
+  };
+}
+
+function participantRow(
+  overrides: Partial<TimingParticipantRow> &
+    Pick<TimingParticipantRow, 'enrollmentId'>,
+): TimingParticipantRow {
+  return {
+    registrationId: `registration-${overrides.enrollmentId}`,
+    startNumber: 10,
+    sectionId: 'CATEGORY',
+    requiredLaps: 3,
+    initialOutcome: null,
+    excludedReason: null,
+    ...overrides,
+  };
+}
+
+function candidateRow(
+  overrides: Partial<TimingRoutingCandidateRow> &
+    Pick<TimingRoutingCandidateRow, 'enrollmentId'>,
+): TimingRoutingCandidateRow {
+  return {
+    attemptId: ATTEMPT_ID,
+    attemptStatus: 'RUNNING',
+    registrationId: `registration-${overrides.enrollmentId}`,
+    startNumber: 10,
+    sectionId: 'CATEGORY',
+    excludedReason: null,
+    requiredLaps: 3,
+    passCount: 0,
+    ...overrides,
+  };
+}
+
+function receiptRow(): TimingReceiptRow {
+  return {
+    attemptId: ATTEMPT_ID,
+    workstationInstanceId: WORKSTATION,
+    deviceSequence: 1,
+    status: 'APPLIED',
+    reason: null,
+    createdAt: NOW,
+  };
+}
+
+function capturePassDto(
+  overrides: Partial<CaptureTimingPassDto> = {},
+): CaptureTimingPassDto {
+  return {
+    attemptId: ATTEMPT_ID,
+    kind: 'NUMBER',
+    startNumber: 10,
+    clientCapturedAt: NOW.toISOString(),
+    clientElapsedMs: 30_000,
+    clockEpochId: 'epoch-1',
+    workstationInstanceId: WORKSTATION,
+    deviceSequence: 1,
+    ...overrides,
   };
 }
 
@@ -1073,6 +1161,672 @@ describe('TimingService', () => {
         }),
       ).rejects.toMatchObject({ code: TimingErrorCode.CAPTURE_NOT_HELD });
       expect(repository.createClockEpoch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('capturePass', () => {
+    function arrangeCapture(
+      overrides: {
+        attempt?: TimingAttemptRow;
+        lock?: TimingCaptureLockRow | null;
+        epoch?: TimingClockEpochRow | null;
+        receipt?: TimingReceiptRow | null;
+        participants?: TimingParticipantRow[];
+        candidates?: TimingRoutingCandidateRow[];
+        knownNumber?: boolean;
+        marks?: TimingMarkRow[];
+      } = {},
+    ): void {
+      repository.findAttempt.mockResolvedValue(
+        overrides.attempt ?? attemptRow({ id: ATTEMPT_ID }),
+      );
+      repository.getCaptureLock.mockResolvedValue(
+        overrides.lock === undefined ? lockRow() : overrides.lock,
+      );
+      repository.findOpenEpoch.mockResolvedValue(
+        overrides.epoch === undefined
+          ? clockEpochRow({ id: 'epoch-1', attemptId: ATTEMPT_ID })
+          : overrides.epoch,
+      );
+      repository.findReceipt.mockResolvedValue(overrides.receipt ?? null);
+      const participants = overrides.participants ?? [
+        participantRow({ enrollmentId: 'enrollment-a' }),
+      ];
+      repository.findParticipant.mockImplementation(
+        (
+          _attemptId: string,
+          enrollmentId: string,
+        ): Promise<TimingParticipantRow | null> =>
+          Promise.resolve(
+            participants.find((row) => row.enrollmentId === enrollmentId) ??
+              null,
+          ),
+      );
+      repository.findRoutingCandidates.mockResolvedValue(
+        overrides.candidates ?? [],
+      );
+      repository.existsStartNumber.mockResolvedValue(
+        overrides.knownNumber ?? false,
+      );
+      repository.listMarks.mockResolvedValue(overrides.marks ?? []);
+      const written = new Map<string, TimingMarkRow>(
+        (overrides.marks ?? []).map((mark) => [mark.id, mark]),
+      );
+      repository.createMark.mockImplementation(
+        (_tx: unknown, input: CreateMarkInput) => {
+          const created = markRow({
+            id: 'mark-new',
+            attemptId: input.attemptId,
+            clockEpochId: input.clockEpochId,
+            enrollmentId: input.enrollmentId,
+            registrationId: input.registrationId,
+            startNumber: input.startNumber,
+            kind: input.kind,
+            rawCapturedAt: input.rawCapturedAt,
+            rawElapsedMs: input.rawElapsedMs,
+            officialAt: input.officialAt,
+            officialElapsedMs: input.officialElapsedMs,
+            lapNumber: input.lapNumber,
+            status: input.status,
+            workstationInstanceId: input.workstationInstanceId,
+            deviceSequence: input.deviceSequence,
+            idempotencyKey: input.idempotencyKey,
+          });
+          written.set(created.id, created);
+          return created;
+        },
+      );
+      repository.updateMark.mockImplementation(
+        (_tx: unknown, markId: string, input: UpdateMarkInput) => {
+          const updated = markRow({
+            ...(written.get(markId) ?? markRow({ id: markId })),
+            ...(input.lapNumber === undefined
+              ? {}
+              : { lapNumber: input.lapNumber }),
+            ...(input.status === undefined ? {} : { status: input.status }),
+          });
+          written.set(markId, updated);
+          return updated;
+        },
+      );
+      repository.createReceipt.mockImplementation(
+        (_tx: unknown, input: CreateReceiptInput): TimingReceiptRow => ({
+          attemptId: input.attemptId,
+          workstationInstanceId: input.workstationInstanceId,
+          deviceSequence: input.deviceSequence,
+          status: input.status,
+          reason: input.reason,
+          createdAt: NOW,
+        }),
+      );
+      repository.insertAudit.mockImplementation(
+        (_tx: unknown, input: InsertAuditInput) => ({
+          auditId: 'audit-1',
+          actorUserId: input.actorUserId,
+          action: input.action,
+          targetType: input.targetType,
+          targetId: input.targetId,
+          oldValues: null,
+          newValues: null,
+          reason: null,
+          createdAt: NOW,
+        }),
+      );
+    }
+
+    it('routes one committed number to the single eligible enrollment', async () => {
+      arrangeCapture({
+        candidates: [
+          candidateRow({ enrollmentId: 'enrollment-a', startNumber: 10 }),
+        ],
+        participants: [
+          participantRow({ enrollmentId: 'enrollment-a', startNumber: 10 }),
+        ],
+      });
+
+      const pass = await service.capturePass(
+        USER_ID,
+        EVENT_ID,
+        capturePassDto(),
+        'key-1',
+      );
+
+      expect(roles.assertHasAnyRole).toHaveBeenCalledWith(
+        USER_ID,
+        TIMING_OPERATE_ROLES,
+      );
+      expect(repository.findRoutingCandidates).toHaveBeenCalledWith(
+        EVENT_ID,
+        { startNumber: 10 },
+        TX,
+      );
+      expect(repository.findParticipant).toHaveBeenCalledWith(
+        ATTEMPT_ID,
+        'enrollment-a',
+        TX,
+      );
+      const [, markInput] = callArguments<[unknown, CreateMarkInput]>(
+        repository.createMark,
+      );
+      expect(markInput).toEqual({
+        attemptId: ATTEMPT_ID,
+        clockEpochId: 'epoch-1',
+        enrollmentId: 'enrollment-a',
+        registrationId: 'registration-enrollment-a',
+        startNumber: 10,
+        kind: 'PASS',
+        rawCapturedAt: NOW,
+        rawElapsedMs: 30_000,
+        officialAt: new Date(NOW.getTime() + 30_000),
+        officialElapsedMs: 30_000,
+        lapNumber: null,
+        status: 'BOUND',
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 1,
+        idempotencyKey: 'key-1',
+      });
+      const [, receiptInput] = callArguments<[unknown, CreateReceiptInput]>(
+        repository.createReceipt,
+      );
+      expect(receiptInput).toEqual({
+        attemptId: ATTEMPT_ID,
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 1,
+        status: 'APPLIED',
+        reason: null,
+      });
+      expect(repository.updateMark).toHaveBeenCalledWith(TX, 'mark-new', {
+        lapNumber: 1,
+      });
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        attemptId: ATTEMPT_ID,
+        actorUserId: USER_ID,
+        action: 'PASS_CAPTURE',
+        targetType: 'PASS',
+        targetId: 'mark-new',
+        reason: null,
+        newValues: {
+          kind: 'NUMBER',
+          enrollmentId: 'enrollment-a',
+          startNumber: 10,
+          lapNumber: 1,
+          rawCapturedAt: NOW.toISOString(),
+          rawElapsedMs: 30_000,
+          officialAt: new Date(NOW.getTime() + 30_000).toISOString(),
+          officialElapsedMs: 30_000,
+          clockEpochId: 'epoch-1',
+          workstationInstanceId: WORKSTATION,
+          deviceSequence: 1,
+          idempotencyKey: 'key-1',
+        },
+      });
+      expect(pass).toEqual({
+        passId: 'mark-new',
+        attemptId: ATTEMPT_ID,
+        enrollmentId: 'enrollment-a',
+        lapNumber: 1,
+        rawCapturedAt: NOW.toISOString(),
+        officialAt: new Date(NOW.getTime() + 30_000).toISOString(),
+        officialElapsedMs: 30_000,
+        status: 'BOUND',
+      });
+    });
+
+    it('captures a tile by enrollment without routing a number', async () => {
+      arrangeCapture({
+        participants: [
+          participantRow({ enrollmentId: 'enrollment-b', startNumber: 22 }),
+        ],
+      });
+
+      const pass = await service.capturePass(
+        USER_ID,
+        EVENT_ID,
+        capturePassDto({
+          kind: 'TILE',
+          startNumber: undefined,
+          enrollmentId: 'enrollment-b',
+          deviceSequence: 2,
+        }),
+        'key-2',
+      );
+
+      expect(repository.findRoutingCandidates).not.toHaveBeenCalled();
+      expect(repository.findParticipant).toHaveBeenCalledWith(
+        ATTEMPT_ID,
+        'enrollment-b',
+        TX,
+      );
+      const [, markInput] = callArguments<[unknown, CreateMarkInput]>(
+        repository.createMark,
+      );
+      expect(markInput).toMatchObject({
+        enrollmentId: 'enrollment-b',
+        registrationId: 'registration-enrollment-b',
+        startNumber: 22,
+        kind: 'PASS',
+        status: 'BOUND',
+        deviceSequence: 2,
+      });
+      expect(pass).toMatchObject({
+        enrollmentId: 'enrollment-b',
+        lapNumber: 1,
+        status: 'BOUND',
+      });
+    });
+
+    it('refuses a tile whose enrollment is not a frozen participant', async () => {
+      arrangeCapture({
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+      });
+
+      await expect(
+        service.capturePass(
+          USER_ID,
+          EVENT_ID,
+          capturePassDto({
+            kind: 'TILE',
+            startNumber: undefined,
+            enrollmentId: 'enrollment-elsewhere',
+            deviceSequence: 2,
+          }),
+          'key-2',
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.NOT_FOUND });
+      expect(repository.createMark).not.toHaveBeenCalled();
+    });
+
+    it('asks for a choice when the number resolves to two eligible enrollments', async () => {
+      arrangeCapture({
+        candidates: [
+          candidateRow({
+            enrollmentId: 'enrollment-a',
+            attemptId: 'attempt-a',
+          }),
+          candidateRow({
+            enrollmentId: 'enrollment-b',
+            attemptId: 'attempt-b',
+          }),
+        ],
+      });
+
+      const refusal = await service
+        .capturePass(USER_ID, EVENT_ID, capturePassDto(), 'key-1')
+        .catch((error: unknown) => error);
+
+      expect(refusal).toBeInstanceOf(TimingDomainError);
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.NUMBER_AMBIGUOUS,
+        details: {
+          startNumber: 10,
+          enrollmentIds: ['enrollment-a', 'enrollment-b'],
+        },
+      });
+      expect(repository.createMark).not.toHaveBeenCalled();
+      expect(repository.createReceipt).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('names an unknown number without creating a pass', async () => {
+      arrangeCapture({ candidates: [], knownNumber: false });
+
+      await expect(
+        service.capturePass(USER_ID, EVENT_ID, capturePassDto(), 'key-1'),
+      ).rejects.toMatchObject({
+        code: TimingErrorCode.NUMBER_UNKNOWN,
+        details: { startNumber: 10 },
+      });
+      expect(repository.existsStartNumber).toHaveBeenCalledWith(
+        EVENT_ID,
+        10,
+        TX,
+      );
+      expect(repository.createMark).not.toHaveBeenCalled();
+    });
+
+    it('names a number whose attempt has not started or is closed', async () => {
+      arrangeCapture({ candidates: [], knownNumber: true });
+
+      await expect(
+        service.capturePass(USER_ID, EVENT_ID, capturePassDto(), 'key-1'),
+      ).rejects.toMatchObject({ code: TimingErrorCode.ATTEMPT_CLOSED });
+      expect(repository.createMark).not.toHaveBeenCalled();
+    });
+
+    it('names an excluded participant', async () => {
+      arrangeCapture({
+        candidates: [
+          candidateRow({
+            enrollmentId: 'enrollment-race',
+            excludedReason: 'RACE_SECTION',
+          }),
+        ],
+      });
+
+      await expect(
+        service.capturePass(USER_ID, EVENT_ID, capturePassDto(), 'key-1'),
+      ).rejects.toMatchObject({
+        code: TimingErrorCode.EXCLUDED_PARTICIPANT,
+        details: { startNumber: 10, reason: 'EXCLUDED' },
+      });
+      expect(repository.createMark).not.toHaveBeenCalled();
+    });
+
+    it('names a participant that already holds N passes', async () => {
+      arrangeCapture({
+        candidates: [
+          candidateRow({
+            enrollmentId: 'enrollment-a',
+            passCount: 3,
+            requiredLaps: 3,
+          }),
+        ],
+      });
+
+      await expect(
+        service.capturePass(USER_ID, EVENT_ID, capturePassDto(), 'key-1'),
+      ).rejects.toMatchObject({ code: TimingErrorCode.ALREADY_N_PASSES });
+      expect(repository.createMark).not.toHaveBeenCalled();
+    });
+
+    it('refuses a number that routes to another attempt than the addressed one', async () => {
+      arrangeCapture({
+        candidates: [
+          candidateRow({
+            enrollmentId: 'enrollment-a',
+            attemptId: 'attempt-other',
+          }),
+        ],
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+      });
+
+      const refusal = await service
+        .capturePass(USER_ID, EVENT_ID, capturePassDto(), 'key-1')
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.INVALID_STATE,
+        details: {
+          attemptId: ATTEMPT_ID,
+          routedAttemptId: 'attempt-other',
+          enrollmentId: 'enrollment-a',
+        },
+      });
+      expect(repository.createMark).not.toHaveBeenCalled();
+      expect(repository.createReceipt).not.toHaveBeenCalled();
+    });
+
+    it('creates an unbound pending finish with no participant and no lap', async () => {
+      arrangeCapture();
+
+      const pass = await service.capturePass(
+        USER_ID,
+        EVENT_ID,
+        capturePassDto({
+          kind: 'PENDING_FINISH',
+          startNumber: undefined,
+          deviceSequence: 7,
+        }),
+        'key-7',
+      );
+
+      expect(repository.findRoutingCandidates).not.toHaveBeenCalled();
+      expect(repository.findParticipant).not.toHaveBeenCalled();
+      expect(repository.updateMark).not.toHaveBeenCalled();
+      const [, markInput] = callArguments<[unknown, CreateMarkInput]>(
+        repository.createMark,
+      );
+      expect(markInput).toMatchObject({
+        kind: 'PENDING_FINISH',
+        status: 'PENDING',
+        enrollmentId: null,
+        registrationId: null,
+        startNumber: null,
+        lapNumber: null,
+      });
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        action: 'PENDING_FINISH_CAPTURE',
+        targetType: 'PASS',
+        targetId: 'mark-new',
+      });
+      expect(pass).toMatchObject({
+        passId: 'mark-new',
+        enrollmentId: null,
+        lapNumber: null,
+        status: 'PENDING',
+      });
+    });
+
+    it('refuses a device sequence that already has a receipt', async () => {
+      arrangeCapture({ receipt: receiptRow() });
+
+      const refusal = await service
+        .capturePass(USER_ID, EVENT_ID, capturePassDto(), 'key-1')
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.CONFLICT,
+        details: {
+          attemptId: ATTEMPT_ID,
+          workstationInstanceId: WORKSTATION,
+          deviceSequence: 1,
+          receiptStatus: 'APPLIED',
+        },
+      });
+      expect(repository.findReceipt).toHaveBeenCalledWith(
+        TX,
+        ATTEMPT_ID,
+        WORKSTATION,
+        1,
+      );
+      expect(repository.createMark).not.toHaveBeenCalled();
+      expect(repository.createReceipt).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('refuses a tile pass beyond N and changes nothing', async () => {
+      arrangeCapture({
+        participants: [
+          participantRow({ enrollmentId: 'enrollment-a', requiredLaps: 2 }),
+        ],
+        marks: [
+          markRow({ id: 'mark-1', officialElapsedMs: 30_000 }),
+          markRow({
+            id: 'mark-2',
+            officialElapsedMs: 60_000,
+            officialAt: new Date(NOW.getTime() + 60_000),
+            lapNumber: 2,
+          }),
+        ],
+      });
+
+      await expect(
+        service.capturePass(
+          USER_ID,
+          EVENT_ID,
+          capturePassDto({
+            kind: 'TILE',
+            startNumber: undefined,
+            enrollmentId: 'enrollment-a',
+            deviceSequence: 3,
+          }),
+          'key-3',
+        ),
+      ).rejects.toMatchObject({
+        code: TimingErrorCode.ALREADY_N_PASSES,
+        details: { passCount: 2, requiredLaps: 2 },
+      });
+      expect(repository.createMark).not.toHaveBeenCalled();
+      expect(repository.createReceipt).not.toHaveBeenCalled();
+    });
+
+    it('refuses a capture at or before the start and beyond 24 hours', async () => {
+      arrangeCapture({
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+      });
+
+      await expect(
+        service.capturePass(
+          USER_ID,
+          EVENT_ID,
+          capturePassDto({
+            kind: 'TILE',
+            startNumber: undefined,
+            enrollmentId: 'enrollment-a',
+            clientElapsedMs: 0,
+          }),
+          'key-1',
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.OUT_OF_BOUNDS });
+      await expect(
+        service.capturePass(
+          USER_ID,
+          EVENT_ID,
+          capturePassDto({
+            kind: 'TILE',
+            startNumber: undefined,
+            enrollmentId: 'enrollment-a',
+            clientElapsedMs: TIMING_MAX_TOTAL_MS + 1,
+          }),
+          'key-1',
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.OUT_OF_BOUNDS });
+      expect(repository.createMark).not.toHaveBeenCalled();
+      expect(repository.createReceipt).not.toHaveBeenCalled();
+    });
+
+    it('renumbers laps when a capture lands before existing official instants', async () => {
+      arrangeCapture({
+        candidates: [candidateRow({ enrollmentId: 'enrollment-a' })],
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        marks: [
+          markRow({
+            id: 'mark-existing-1',
+            officialElapsedMs: 60_000,
+            officialAt: new Date(NOW.getTime() + 60_000),
+            lapNumber: 1,
+          }),
+          markRow({
+            id: 'mark-existing-2',
+            officialElapsedMs: 90_000,
+            officialAt: new Date(NOW.getTime() + 90_000),
+            lapNumber: 2,
+          }),
+        ],
+      });
+
+      const pass = await service.capturePass(
+        USER_ID,
+        EVENT_ID,
+        capturePassDto({ deviceSequence: 3 }),
+        'key-3',
+      );
+
+      expect(repository.updateMark.mock.calls).toEqual([
+        [TX, 'mark-new', { lapNumber: 1 }],
+        [TX, 'mark-existing-1', { lapNumber: 2 }],
+        [TX, 'mark-existing-2', { lapNumber: 3 }],
+      ]);
+      expect(pass.lapNumber).toBe(1);
+    });
+
+    it('writes the mark, its receipt and its audit in one transaction', async () => {
+      arrangeCapture();
+
+      await service.capturePass(
+        USER_ID,
+        EVENT_ID,
+        capturePassDto({
+          kind: 'PENDING_FINISH',
+          startNumber: undefined,
+          deviceSequence: 5,
+        }),
+        'key-5',
+      );
+
+      const transactionOf = (mock: jest.Mock): unknown =>
+        callArguments<[unknown]>(mock)[0];
+      expect(transactionOf(repository.createMark)).toBe(TX);
+      expect(transactionOf(repository.createReceipt)).toBe(TX);
+      expect(transactionOf(repository.insertAudit)).toBe(TX);
+      expect(repository.findReceipt).toHaveBeenCalledWith(
+        TX,
+        ATTEMPT_ID,
+        WORKSTATION,
+        5,
+      );
+      expect(repository.createMark.mock.invocationCallOrder[0]).toBeLessThan(
+        repository.createReceipt.mock.invocationCallOrder[0],
+      );
+      expect(repository.createReceipt.mock.invocationCallOrder[0]).toBeLessThan(
+        repository.insertAudit.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('refuses a capture on a closed attempt', async () => {
+      arrangeCapture({
+        attempt: attemptRow({
+          id: ATTEMPT_ID,
+          status: 'COMPLETED',
+          closedAt: NOW,
+        }),
+      });
+
+      await expect(
+        service.capturePass(USER_ID, EVENT_ID, capturePassDto(), 'key-1'),
+      ).rejects.toMatchObject({ code: TimingErrorCode.ATTEMPT_CLOSED });
+      expect(repository.findReceipt).not.toHaveBeenCalled();
+      expect(repository.createMark).not.toHaveBeenCalled();
+    });
+
+    it('refuses a capture from a workstation that does not hold it', async () => {
+      arrangeCapture({
+        lock: { ...lockRow(), workstationInstanceId: 'workstation-b' },
+      });
+
+      const refusal = await service
+        .capturePass(USER_ID, EVENT_ID, capturePassDto(), 'key-1')
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.CAPTURE_NOT_HELD,
+        details: {
+          workstationInstanceId: WORKSTATION,
+          holderWorkstationInstanceId: 'workstation-b',
+        },
+      });
+      expect(repository.findReceipt).not.toHaveBeenCalled();
+    });
+
+    it('refuses a capture without an open epoch on this workstation', async () => {
+      arrangeCapture({ epoch: null });
+
+      await expect(
+        service.capturePass(USER_ID, EVENT_ID, capturePassDto(), 'key-1'),
+      ).rejects.toMatchObject({ code: TimingErrorCode.CAPTURE_NOT_HELD });
+      expect(repository.createMark).not.toHaveBeenCalled();
+    });
+
+    it('refuses a clock epoch that is not the open one', async () => {
+      arrangeCapture({
+        epoch: clockEpochRow({ id: 'epoch-2', attemptId: ATTEMPT_ID }),
+      });
+
+      const refusal = await service
+        .capturePass(USER_ID, EVENT_ID, capturePassDto(), 'key-1')
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.INVALID_STATE,
+        details: { clockEpochId: 'epoch-1', openEpochId: 'epoch-2' },
+      });
+      expect(repository.createMark).not.toHaveBeenCalled();
     });
   });
 

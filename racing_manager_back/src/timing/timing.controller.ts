@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -18,13 +19,18 @@ import { TIMING_OPERATE_ROLE_CODES } from '../auth/role-codes';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
-import { OpenClockEpochDto, StartTimingAttemptDto } from './timing.dto';
+import {
+  CaptureTimingPassDto,
+  OpenClockEpochDto,
+  StartTimingAttemptDto,
+} from './timing.dto';
 import { TimingExceptionFilter } from './timing.exception.filter';
 import { TimingService } from './timing.service';
 import type {
   ClockEpochView,
   StartTimingAttemptResult,
   TimingAttemptRecordView,
+  TimingPassView,
   TimingSurfaceView,
 } from './timing.views';
 
@@ -95,6 +101,28 @@ export class TimingController {
       eventId,
       attemptId,
       dto,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/passes`: one number, tile or unbound finish.
+   * A repeated `Idempotency-Key` is replayed by the global interceptor, which
+   * never reaches this handler; the service stores a fresh key when the header
+   * is absent so the mark column is never empty.
+   */
+  @Post('passes')
+  @HttpCode(HttpStatus.CREATED)
+  capturePass(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Body() dto: CaptureTimingPassDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<TimingPassView> {
+    return this.timingService.capturePass(
+      req.session?.userSub,
+      eventId,
+      dto,
+      idempotencyKey,
     );
   }
 }
