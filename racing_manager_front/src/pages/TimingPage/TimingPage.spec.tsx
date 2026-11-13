@@ -7,8 +7,11 @@ import { useEventDetailsQuery } from '../../features/events/useEventDetailsQuery
 import { timingService } from '../../features/timing/timingService';
 import type {
   TimingCategoryBlockView,
+  TimingPassView,
   TimingSurfaceView,
 } from '../../features/timing/types';
+import type { UseTimingCaptureResult } from '../../features/timing/useTimingCapture';
+import { useTimingCapture } from '../../features/timing/useTimingCapture';
 import { formatDateTime } from '../../shared/formatDateTime';
 import type { EventDetails, StartResponse } from '../../shared/types/event';
 import { TimingPage } from './index';
@@ -16,9 +19,11 @@ import { TimingPage } from './index';
 vi.mock('../../features/timing/timingService', () => ({
   timingService: {
     getSurface: vi.fn(),
-    startAttempt: vi.fn(),
-    takeCapture: vi.fn(),
   },
+}));
+
+vi.mock('../../features/timing/useTimingCapture', () => ({
+  useTimingCapture: vi.fn(),
 }));
 
 vi.mock('../../features/auth/useSessionQuery', () => ({
@@ -31,8 +36,6 @@ vi.mock('../../features/events/useEventDetailsQuery', () => ({
 }));
 
 const getSurface = vi.mocked(timingService.getSurface);
-const startAttempt = vi.mocked(timingService.startAttempt);
-const takeCapture = vi.mocked(timingService.takeCapture);
 
 function start(overrides: Partial<StartResponse> = {}): StartResponse {
   return {
@@ -110,6 +113,20 @@ function block(
   };
 }
 
+function pendingFinish(overrides: Partial<TimingPassView> = {}): TimingPassView {
+  return {
+    passId: 'pending-1',
+    attemptId: 'attempt-1',
+    enrollmentId: null,
+    lapNumber: null,
+    rawCapturedAt: '2026-11-13T09:00:05.000Z',
+    officialAt: '2026-11-13T09:00:05.000Z',
+    officialElapsedMs: 5000,
+    status: 'PENDING',
+    ...overrides,
+  };
+}
+
 function surface(overrides: Partial<TimingSurfaceView> = {}): TimingSurfaceView {
   return {
     eventId: 'event-1',
@@ -117,6 +134,37 @@ function surface(overrides: Partial<TimingSurfaceView> = {}): TimingSurfaceView 
     categories: [block()],
     ...overrides,
   };
+}
+
+function captureResult(
+  overrides: Partial<UseTimingCaptureResult> = {},
+): UseTimingCaptureResult {
+  return {
+    resolveCandidates: vi.fn(() => []),
+    commitNumber: vi.fn(() => Promise.resolve()),
+    commitTile: vi.fn(() => Promise.resolve()),
+    bindPending: vi.fn(() => Promise.resolve()),
+    quickUndo: vi.fn(() => Promise.resolve()),
+    startAttempt: vi.fn(() => Promise.resolve()),
+    complete: vi.fn(() => Promise.resolve()),
+    forceComplete: vi.fn(() => Promise.resolve()),
+    cancelAttempt: vi.fn(() => Promise.resolve()),
+    takeCapture: vi.fn(() => Promise.resolve()),
+    transferCapture: vi.fn(() => Promise.resolve()),
+    forceRelease: vi.fn(() => Promise.resolve()),
+    flush: vi.fn(() => Promise.resolve()),
+    pendingCount: 0,
+    isFlushing: false,
+    ...overrides,
+  };
+}
+
+function mockCapture(
+  overrides: Partial<UseTimingCaptureResult> = {},
+): UseTimingCaptureResult {
+  const result = captureResult(overrides);
+  vi.mocked(useTimingCapture).mockReturnValue(result);
+  return result;
 }
 
 function mockSession(roles: string[]) {
@@ -171,6 +219,7 @@ afterEach(() => {
 
 describe('TimingPage', () => {
   it('shows the access message to an organizer without REFEREE and reads no surface', () => {
+    mockCapture();
     mockSession(['ORGANIZER']);
     mockEvent();
     renderPage();
@@ -179,9 +228,11 @@ describe('TimingPage', () => {
     expect(screen.getByText(/Роль ORGANIZER без роли REFEREE/)).not.toBeNull();
     expect(getSurface).not.toHaveBeenCalled();
     expect(screen.queryByText('5 км · Мужчины')).toBeNull();
+    expect(screen.queryByLabelText('Номер участника')).toBeNull();
   });
 
   it('shows the access message to a user with no role', () => {
+    mockCapture();
     mockSession([]);
     mockEvent();
     renderPage();
@@ -190,7 +241,51 @@ describe('TimingPage', () => {
     expect(getSurface).not.toHaveBeenCalled();
   });
 
+  it('wires capture controls, the number field and the blocks for a referee', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    const view = surface({
+      captureWorkstationInstanceId: 'ws-1',
+      categories: [
+        block({
+          state: 'RUNNING',
+          attemptId: 'attempt-1',
+          officialStartedAt: '2026-11-13T09:00:00.000Z',
+          elapsedMs: 65_000,
+          startControlEnabled: false,
+        }),
+      ],
+    });
+    getSurface.mockResolvedValue(view);
+    mockCapture({ pendingCount: 2 });
+
+    renderPage();
+
+    const numberField = (await screen.findByLabelText(
+      'Номер участника',
+    )) as HTMLInputElement;
+    expect(numberField.disabled).toBe(false);
+    expect(screen.getByText('Захват у этой станции')).not.toBeNull();
+    expect(screen.getByText(/Захват: эта станция/)).not.toBeNull();
+    expect(screen.getByText(/Станция: ws-1/)).not.toBeNull();
+    expect(screen.getByText(/Не синхронизировано: 2/)).not.toBeNull();
+    expect(screen.getByText('5 км · Мужчины')).not.toBeNull();
+    expect(useTimingCapture).toHaveBeenCalledWith(
+      'event-1',
+      view,
+      'ws-1',
+      expect.any(Function),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить' }));
+    await waitFor(() => {
+      expect(getSurface).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('renders one block per category in the backend order for a referee', async () => {
+    mockCapture();
     mockSession(['REFEREE']);
     mockEvent();
     getSurface.mockResolvedValue(
@@ -221,6 +316,7 @@ describe('TimingPage', () => {
   });
 
   it('shows the event name and date around the surface', async () => {
+    mockCapture();
     mockSession(['REFEREE']);
     mockEvent();
     getSurface.mockResolvedValue(surface());
@@ -235,70 +331,108 @@ describe('TimingPage', () => {
     ).not.toBeNull();
   });
 
-  it('takes capture for this workstation and refreshes the surface', async () => {
+  it('takes capture through the capture hook', async () => {
     sessionStorage.setItem('timing-workstation-instance', 'ws-1');
     mockSession(['REFEREE']);
     mockEvent();
     getSurface.mockResolvedValue(surface({ captureWorkstationInstanceId: null }));
-    takeCapture.mockResolvedValue({
-      eventId: 'event-1',
-      workstationInstanceId: 'ws-1',
-      heldByUserId: 'user-1',
-      heldAt: '2026-11-13T09:00:00.000Z',
-    });
+    const capture = mockCapture();
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: /Взять захват/ }));
+    const [takeButton] = await screen.findAllByRole('button', {
+      name: /Взять захват/,
+    });
+    fireEvent.click(takeButton);
 
     await waitFor(() => {
-      expect(takeCapture).toHaveBeenCalledWith('event-1', {
-        workstationInstanceId: 'ws-1',
-      });
-    });
-    await waitFor(() => {
-      expect(getSurface).toHaveBeenCalledTimes(2);
+      expect(capture.takeCapture).toHaveBeenCalledTimes(1);
     });
   });
 
-  it('starts a category from the capture workstation and refreshes the surface', async () => {
+  it('starts a category through the capture hook', async () => {
     sessionStorage.setItem('timing-workstation-instance', 'ws-1');
     mockSession(['ADMINISTRATOR']);
     mockEvent();
-    getSurface.mockResolvedValue(
-      surface({ captureWorkstationInstanceId: 'ws-1' }),
-    );
-    startAttempt.mockResolvedValue({
-      attempt: block({
-        state: 'RUNNING',
-        attemptId: 'attempt-1',
-        officialStartedAt: '2026-11-13T09:00:00.000Z',
-        elapsedMs: 0,
-        startControlEnabled: false,
-      }),
-      epoch: {
-        epochId: 'epoch-1',
-        attemptId: 'attempt-1',
-        officialElapsedAnchorMs: 0,
-        serverNow: '2026-11-13T09:00:00.000Z',
-      },
-    });
+    const view = surface({ captureWorkstationInstanceId: 'ws-1' });
+    getSurface.mockResolvedValue(view);
+    const capture = mockCapture();
 
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /Старт/ }));
 
     await waitFor(() => {
-      expect(startAttempt).toHaveBeenCalledWith('event-1', {
-        startId: 'start-a',
-        formatId: 1,
-        gender: 'M',
-        workstationInstanceId: 'ws-1',
-        clientStartedAt: expect.any(String),
-      });
+      expect(capture.startAttempt).toHaveBeenCalledWith(view.categories[0]);
     });
+  });
+
+  it('routes a tile click to the running attempt of its own block', async () => {
+    mockSession(['REFEREE']);
+    mockEvent();
+    const view = surface({
+      categories: [
+        block(),
+        block({
+          gender: 'F',
+          state: 'RUNNING',
+          attemptId: 'attempt-1',
+          officialStartedAt: '2026-11-13T09:00:00.000Z',
+          elapsedMs: 1000,
+          startControlEnabled: false,
+        }),
+      ],
+    });
+    getSurface.mockResolvedValue(view);
+    const capture = mockCapture();
+
+    renderPage();
+
+    await screen.findByText('5 км · Женщины');
+    const tiles = screen.getAllByRole('button', { name: '17 Иван Петров' });
+    expect(tiles).toHaveLength(1);
+    fireEvent.click(tiles[0]);
+
     await waitFor(() => {
-      expect(getSurface).toHaveBeenCalledTimes(2);
+      expect(capture.commitTile).toHaveBeenCalledWith(
+        view.categories[1].participants[0],
+        'attempt-1',
+      );
+    });
+  });
+
+  it('renders the pending-finish bar under its block and binds a number', async () => {
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 5000,
+            startControlEnabled: false,
+            pendingFinishes: [pendingFinish()],
+          }),
+        ],
+      }),
+    );
+    const capture = mockCapture();
+
+    renderPage();
+
+    expect(await screen.findByText('Непривязанные финиши')).not.toBeNull();
+    const bindButton = screen.getByRole('button', { name: /Привязать финиш/ });
+    expect(screen.queryByRole('button', { name: /Отменить финиш/ })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText(/Номер участника для финиша/), {
+      target: { value: '42' },
+    });
+    fireEvent.click(bindButton);
+
+    await waitFor(() => {
+      expect(capture.bindPending).toHaveBeenCalledWith('pending-1', 42);
     });
   });
 
@@ -309,14 +443,18 @@ describe('TimingPage', () => {
     getSurface.mockResolvedValue(
       surface({ captureWorkstationInstanceId: 'ws-other' }),
     );
+    mockCapture();
 
     renderPage();
 
     expect(await screen.findByText(/только для чтения/)).not.toBeNull();
-    expect(screen.queryByRole('button', { name: /Взять захват/ })).toBeNull();
+    expect(screen.getByText('Захват у станции ws-other')).not.toBeNull();
     expect(
       (screen.getByRole('button', { name: /Старт/ }) as HTMLButtonElement)
         .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByLabelText('Номер участника') as HTMLInputElement).disabled,
     ).toBe(true);
   });
 
@@ -324,11 +462,15 @@ describe('TimingPage', () => {
     mockSession(['REFEREE']);
     mockEvent();
     getSurface.mockResolvedValue(surface({ categories: [] }));
+    mockCapture();
 
     renderPage();
 
     expect(
       await screen.findByText('У мероприятия нет стартов и категорий для хронометража'),
     ).not.toBeNull();
+    expect(
+      (screen.getByLabelText('Номер участника') as HTMLInputElement).disabled,
+    ).toBe(true);
   });
 });

@@ -1,16 +1,31 @@
 import { AxiosError } from 'axios';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Empty, Result, Skeleton, Space, message } from 'antd';
+import {
+  Alert,
+  Button,
+  Card,
+  Empty,
+  Result,
+  Skeleton,
+  Space,
+  Typography,
+  message,
+} from 'antd';
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { useEventDetailsQuery } from '../../features/events/useEventDetailsQuery';
+import { CaptureControls } from '../../features/timing/CaptureControls';
+import { NumberCaptureField } from '../../features/timing/NumberCaptureField';
+import { PendingFinishBar } from '../../features/timing/PendingFinishBar';
 import { TimingCategoryBlock } from '../../features/timing/TimingCategoryBlock';
 import { timingService } from '../../features/timing/timingService';
 import type {
+  TimingCaptureView,
   TimingCategoryBlockView,
   TimingSurfaceView,
 } from '../../features/timing/types';
+import { useTimingCapture } from '../../features/timing/useTimingCapture';
 import { formatDateTime } from '../../shared/formatDateTime';
 import { AppShell } from '../../shared/layout';
 import type { EventDetails } from '../../shared/types/event';
@@ -92,12 +107,12 @@ function describeBlock(
 }
 
 /**
- * The event-wide read-only timing surface (AD-9).
+ * The event-wide timing surface (AD-9).
  *
- * One block per timeable protocol category in the backend order, each with its
- * own state, start time and elapsed value. The Start press and the capture
- * hand-over are the only writes of this wave; number capture, pending finishes,
- * the attempt record and corrections arrive later.
+ * One block per timeable protocol category in the backend order. The page only
+ * renders: `useTimingCapture` owns the clock anchor, the capture outbox and
+ * every mutation, so this component wires the controls to that hook and never
+ * talks to the API for a write itself.
  */
 export function TimingPage() {
   const { id } = useParams<{ id: string }>();
@@ -109,6 +124,7 @@ export function TimingPage() {
   const roles = sessionQuery.data?.roles ?? [];
   const canOperateTiming =
     roles.includes('REFEREE') || roles.includes('ADMINISTRATOR');
+  const canAdminister = roles.includes('ADMINISTRATOR');
 
   const surfaceQueryKey = ['timing-surface', id ?? ''] as const;
   const surfaceQuery = useQuery<TimingSurfaceView>({
@@ -121,36 +137,20 @@ export function TimingPage() {
         : false,
   });
 
+  // The capture hook is called before any early return: it owns the client
+  // clock anchor (AD-2), the write-before-send outbox (AD-3) and every
+  // invalidation, and a page render must never reorder those hooks.
+  const capture = useTimingCapture(
+    id,
+    surfaceQuery.data,
+    workstationInstanceId,
+    (text) => message.error(text),
+  );
+
   const event = eventQuery.data;
   const subtitle = event
     ? `${event.name} · ${formatDateTime(event.eventDate)}`
     : 'Загружаем мероприятие...';
-
-  const handleStart = async (block: TimingCategoryBlockView) => {
-    if (!id) return;
-    try {
-      await timingService.startAttempt(id, {
-        startId: block.startId,
-        formatId: block.formatId,
-        gender: block.gender,
-        workstationInstanceId,
-        clientStartedAt: new Date().toISOString(),
-      });
-      await queryClient.invalidateQueries({ queryKey: surfaceQueryKey });
-    } catch (error) {
-      message.error(describeError(error));
-    }
-  };
-
-  const handleTakeCapture = async () => {
-    if (!id) return;
-    try {
-      await timingService.takeCapture(id, { workstationInstanceId });
-      await queryClient.invalidateQueries({ queryKey: surfaceQueryKey });
-    } catch (error) {
-      message.error(describeError(error));
-    }
-  };
 
   if (!id) {
     return (
@@ -225,8 +225,30 @@ export function TimingPage() {
     );
   }
 
+  // The surface exposes the holder instance only, so the lock view carries the
+  // fields it knows and leaves the user id and moment absent. A free lock is
+  // `null`, the value the capture controls read as free (AD-5).
+  const captureView: TimingCaptureView | null =
+    surface.captureWorkstationInstanceId === null
+      ? null
+      : {
+          eventId: surface.eventId,
+          workstationInstanceId: surface.captureWorkstationInstanceId,
+          heldByUserId: null,
+          heldAt: null,
+        };
+
   const isCaptureHolder =
+    surface.captureWorkstationInstanceId !== null &&
     surface.captureWorkstationInstanceId === workstationInstanceId;
+  const holderLabel = isCaptureHolder
+    ? 'эта станция'
+    : surface.captureWorkstationInstanceId === null
+      ? 'свободен'
+      : `станция ${surface.captureWorkstationInstanceId}`;
+  const hasRunningBlock = surface.categories.some(
+    (block) => block.state === 'RUNNING',
+  );
 
   return (
     <AppShell title="Хронометраж" subtitle={subtitle}>
@@ -243,6 +265,47 @@ export function TimingPage() {
           />
         )}
 
+        <Card size="small">
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap size={16} align="center">
+              <Typography.Text>Захват: {holderLabel}</Typography.Text>
+              <Typography.Text type="secondary">
+                Станция: {workstationInstanceId}
+              </Typography.Text>
+              <Typography.Text
+                type={capture.pendingCount > 0 ? 'warning' : 'secondary'}
+              >
+                Не синхронизировано: {capture.pendingCount}
+              </Typography.Text>
+              <Button
+                size="small"
+                onClick={() => {
+                  void queryClient.invalidateQueries({
+                    queryKey: surfaceQueryKey,
+                  });
+                }}
+              >
+                Обновить
+              </Button>
+            </Space>
+
+            <CaptureControls
+              capture={captureView}
+              workstationInstanceId={workstationInstanceId}
+              canAdminister={canAdminister}
+              onTake={capture.takeCapture}
+              onTransfer={capture.transferCapture}
+              onForceRelease={capture.forceRelease}
+            />
+
+            <NumberCaptureField
+              disabled={!hasRunningBlock || !isCaptureHolder}
+              resolve={capture.resolveCandidates}
+              onCommit={capture.commitNumber}
+            />
+          </Space>
+        </Card>
+
         {surface.categories.length === 0 ? (
           <Card>
             <Empty description="У мероприятия нет стартов и категорий для хронометража" />
@@ -250,24 +313,51 @@ export function TimingPage() {
         ) : (
           surface.categories.map((block) => {
             const view = describeBlock(block, event);
+            // Narrowed once, because the attempt id must stay non-null inside
+            // the tile callback (E-07: a tile routes to its own attempt).
+            const attemptId =
+              block.state === 'RUNNING' ? block.attemptId : null;
             return (
-              <TimingCategoryBlock
+              <Space
                 key={`${block.startId}:${block.formatId}:${block.gender}`}
-                block={block}
-                title={view.title}
-                subtitle={view.subtitle}
-                isCaptureHolder={isCaptureHolder}
-                onStart={() => {
-                  void handleStart(block);
-                }}
-                onTakeCapture={
-                  surface.captureWorkstationInstanceId === null
-                    ? () => {
-                        void handleTakeCapture();
-                      }
-                    : undefined
-                }
-              />
+                direction="vertical"
+                size={8}
+                style={{ width: '100%' }}
+              >
+                <TimingCategoryBlock
+                  block={block}
+                  title={view.title}
+                  subtitle={view.subtitle}
+                  isCaptureHolder={isCaptureHolder}
+                  onStart={() => {
+                    void capture.startAttempt(block);
+                  }}
+                  // The block keeps its capture hand-over only while the lock
+                  // is free; the global controls above own take, transfer and
+                  // force-release in every other case (AD-5).
+                  onTakeCapture={
+                    surface.captureWorkstationInstanceId === null
+                      ? () => {
+                          void capture.takeCapture();
+                        }
+                      : undefined
+                  }
+                  onParticipantClick={
+                    attemptId === null
+                      ? undefined
+                      : (participant) => {
+                          void capture.commitTile(participant, attemptId);
+                        }
+                  }
+                />
+
+                {block.pendingFinishes.length > 0 ? (
+                  <PendingFinishBar
+                    pending={block.pendingFinishes}
+                    onBind={capture.bindPending}
+                  />
+                ) : null}
+              </Space>
             );
           })
         )}
