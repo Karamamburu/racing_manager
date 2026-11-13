@@ -15,6 +15,7 @@ Schema: [SCHEMA.md](SCHEMA.md) · Overview: [overview.md](overview.md) · Log: [
 | Tracks | [domains/tracks.md](domains/tracks.md) |
 | News | [domains/news.md](domains/news.md) |
 | Results | [domains/results.md](domains/results.md) |
+| Timing | [domains/timing.md](domains/timing.md) |
 | CMS / class competitions | [domains/cms.md](domains/cms.md) |
 | Storage / media | [domains/storage.md](domains/storage.md) |
 
@@ -24,7 +25,7 @@ Schema: [SCHEMA.md](SCHEMA.md) · Overview: [overview.md](overview.md) · Log: [
 
 ## Entities
 
-[event](entities/event.md) · [registration](entities/registration.md) · [user-and-roles](entities/user-and-roles.md) · [personal-consent](entities/personal-consent.md) · [track](entities/track.md) · [class-competition](entities/class-competition.md)
+[event](entities/event.md) · [registration](entities/registration.md) · [user-and-roles](entities/user-and-roles.md) · [personal-consent](entities/personal-consent.md) · [track](entities/track.md) · [class-competition](entities/class-competition.md) · [timing-session](entities/timing-session.md)
 
 ## Concepts
 
