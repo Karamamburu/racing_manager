@@ -1,6 +1,6 @@
 ---
 type: domain
-updated: 2026-11-13
+updated: 2026-11-14
 ---
 
 # Domain: cms (class competitions)
@@ -28,6 +28,13 @@ Façade from main API to competition engine; plan/start-lists/heats/qualificatio
 - «Завершить гонку» remains one action per start × format × gender, is rejected while any race of the category is not `DONE`, and treats a `DONE` race as satisfying completeness for its captured field. Simple-section snapshots stay per section and enrollment.
 - Existing races are backfilled to the event's single/first start and `CATEGORY`; the migration is idempotent and reports anomalies. The competition service exposes `DELETE /v1/competitions/:id` for creation compensation; it adds no product race-deletion action.
 
+## Timing heat attempts (MANUAL-TIMING-2)
+
+- A timing attempt may target one heat of one stage of a multi-stage race (event + race + stage + heat number). The heat roster is the heat start list resolved to race-start enrollments; N is the race start lap count.
+- A closed heat publishes only `ClassHeatTime` total + `OK`; no `ClassHeatLapTime`, ordinary result, split, place or qualification change, and no CMS write. Stage commitment remains a separate CMS-panel action.
+- The manual heat-time form and stage seeding/reassignment/removal/commit keep `ORGANIZER`/`ADMINISTRATOR` access. A running heat attempt refuses a manual write for that heat; stage commitment and structural stage changes are refused while any heat attempt of the stage runs.
+- «Завершить гонку» is refused while any category or heat attempt of the protocol category runs. See [timing](timing.md).
+
 ## Plan changes and mass-start finals
 
 - A standalone final (no source stage, for example after the judge removed every earlier stage) is seeded with **all participants** as a mass start. The first heat-time write on a PENDING stage with no heats auto-seeds it, so the judge does not have to build start lists manually.
@@ -52,4 +59,4 @@ Façade from main API to competition engine; plan/start-lists/heats/qualificatio
 - Several races in one protocol category coalesce, or a section race suppresses a sibling configured section.
 - Ordinary result entry is blocked for a simple section because a sibling section has a race.
 - Migration binds a race to anything other than the single/first start and `CATEGORY`.
-- A race created while its field would capture a participant of a running timing attempt, or timing writing a heat time.
+- A race created while its field would capture a participant of a running timing attempt; timing writing an ordinary result/split or advancing the stage; a manual heat-time write or stage commit allowed while a timing heat attempt runs.

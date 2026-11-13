@@ -1,6 +1,6 @@
 ---
 type: domain
-updated: 2026-11-13
+updated: 2026-11-14
 ---
 
 # Domain: events
@@ -97,6 +97,8 @@ A protocol category (`event × gender × start × format`) may carry one **age-c
 - A running timing attempt freezes its roster; a participant's start number cannot change while its registration is in that attempt, and race creation is refused while the proposed field would capture a participant of a running attempt. Rows displayed in a race section are excluded from timing.
 - The event protocol renders timing `lapSplits` inside the participant's own row; it does not change `laps`, place, section, race or finish fields.
 - A legacy event without starts offers no timing surface. See [timing](timing.md).
+- Each displayed protocol block has its own collapse state (gender + category + section/race), expanded by default and page-session only; collapsing one block never changes a sibling. A filtered-out block returns expanded. Category-wide controls, search, filters, compact/full and finish controls stay above the blocks.
+- «Завершить гонку» is refused while any category or heat timing attempt of the protocol category runs.
 
 ## Code
 
