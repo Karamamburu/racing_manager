@@ -857,7 +857,9 @@ export class TimingRepository {
    * take the same number.
    */
   async lockCategory(tx: TimingTx, key: string): Promise<void> {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+    // `pg_advisory_xact_lock` returns `void`; `$executeRaw` runs the call
+    // without trying to deserialize a result column (Prisma cannot read `void`).
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
   }
 
   async findEvent(

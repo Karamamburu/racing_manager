@@ -1,14 +1,17 @@
 import {
+  TimingRepository,
   buildMarkUpdate,
   toCaptureLockRow,
   toClosureReport,
   toJsonRecord,
+  type TimingTx,
 } from './timing.repository';
 
 /**
- * Unit tests for the pure row helpers of the timing repository. The SQL paths
- * are covered by the integration suite against a real database; nothing here
- * mocks Prisma.
+ * Unit tests for the pure row helpers of the timing repository and for the one
+ * raw SQL call whose result shape Prisma cannot read (`lockCategory`). The
+ * remaining SQL paths are covered by the integration suite against a real
+ * database.
  */
 
 describe('toClosureReport', () => {
@@ -144,5 +147,22 @@ describe('toCaptureLockRow', () => {
       acquiredAt,
       lastSeenAt,
     });
+  });
+});
+
+describe('TimingRepository.lockCategory', () => {
+  it('executes the advisory lock without querying its void result', async () => {
+    const executeRaw = jest.fn().mockResolvedValue(1);
+    const queryRaw = jest.fn();
+    const tx = {
+      $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
+    } as unknown as TimingTx;
+    const repository = new TimingRepository({} as never);
+
+    await repository.lockCategory(tx, 'event:start:format:gender');
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(queryRaw).not.toHaveBeenCalled();
   });
 });
