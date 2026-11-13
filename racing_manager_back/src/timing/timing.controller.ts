@@ -29,10 +29,13 @@ import {
   CompleteTimingAttemptDto,
   CorrectOfficialTimeDto,
   ForceCompleteTimingAttemptDto,
+  ForceReleaseCaptureDto,
   OpenClockEpochDto,
   QuickUndoTimingPassDto,
   RebindTimingPassDto,
   StartTimingAttemptDto,
+  TakeCaptureDto,
+  TransferCaptureDto,
 } from './timing.dto';
 import { TimingExceptionFilter } from './timing.exception.filter';
 import { TimingService } from './timing.service';
@@ -41,6 +44,7 @@ import type {
   StartTimingAttemptResult,
   TimingAttemptRecordView,
   TimingAttemptRef,
+  TimingCaptureView,
   TimingPassView,
   TimingSurfaceView,
 } from './timing.views';
@@ -312,6 +316,58 @@ export class TimingController {
       req.session?.userSub,
       eventId,
       attemptId,
+      dto,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/capture/take`: an authorized operator claims
+   * the one event-wide capture hold explicitly. Nobody takes it silently.
+   */
+  @Post('capture/take')
+  @HttpCode(HttpStatus.OK)
+  takeCapture(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Body() dto: TakeCaptureDto,
+  ): Promise<TimingCaptureView> {
+    return this.timingService.takeCapture(req.session?.userSub, eventId, dto);
+  }
+
+  /**
+   * `POST /events/:eventId/timing/capture/transfer`: the capture holder hands
+   * the hold to another workstation after its captures are confirmed.
+   */
+  @Post('capture/transfer')
+  @HttpCode(HttpStatus.OK)
+  transferCapture(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Body() dto: TransferCaptureDto,
+  ): Promise<TimingCaptureView> {
+    return this.timingService.transferCapture(
+      req.session?.userSub,
+      eventId,
+      dto,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/capture/force-release`: an administrator ends
+   * a hold whose workstation may be lost. The method-level role overrides the
+   * class-level timing roles, so a referee is refused.
+   */
+  @Post('capture/force-release')
+  @HttpCode(HttpStatus.OK)
+  @Roles(RoleCode.ADMINISTRATOR)
+  forceReleaseCapture(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Body() dto: ForceReleaseCaptureDto,
+  ): Promise<TimingCaptureView> {
+    return this.timingService.forceReleaseCapture(
+      req.session?.userSub,
+      eventId,
       dto,
     );
   }

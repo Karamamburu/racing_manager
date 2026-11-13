@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import { TIMING_OPERATE_ROLE_CODES, RoleCode } from '../auth/role-codes';
 import type { RolesService } from '../auth/roles.service';
 import type { EnrollmentStatus } from '../../generated/prisma';
@@ -11,17 +12,22 @@ import type {
   CompleteTimingAttemptDto,
   CorrectOfficialTimeDto,
   ForceCompleteTimingAttemptDto,
+  ForceReleaseCaptureDto,
   QuickUndoTimingPassDto,
   RebindTimingPassDto,
+  TakeCaptureDto,
+  TransferCaptureDto,
 } from './timing.dto';
 import { TimingErrorCode, TimingDomainError } from './timing.errors';
 import type {
+  ClaimCaptureLockInput,
   CreateAttemptInput,
   CreateClockEpochInput,
   CreateMarkInput,
   CreateReceiptInput,
   InsertAuditInput,
   PublishResultInput,
+  ReleaseCaptureLockInput,
   TimingAgeCategoryRow,
   TimingAgeSectionRow,
   TimingAttemptRow,
@@ -41,6 +47,7 @@ import type {
   TimingResultRow,
   TimingRoutingCandidateRow,
   TimingStartRow,
+  TransferCaptureLockInput,
   UpdateAttemptStatusInput,
   UpdateMarkInput,
 } from './timing.repository';
@@ -156,6 +163,21 @@ function createRepositoryFake() {
     ),
     releaseCaptureLock: jest.fn(
       (): Promise<TimingCaptureLockRow | null> => Promise.resolve(null),
+    ),
+    releaseCaptureLocksForUser: jest.fn(
+      (): Promise<TimingCaptureLockRow[]> => Promise.resolve([]),
+    ),
+    claimCaptureLock: jest.fn(
+      (): Promise<TimingCaptureLockRow | null> => Promise.resolve(null),
+    ),
+    transferCaptureLock: jest.fn(
+      (): Promise<TimingCaptureLockRow | null> => Promise.resolve(null),
+    ),
+    findUserRoleCodes: jest.fn(
+      (): Promise<string[]> => Promise.resolve([RoleCode.REFEREE]),
+    ),
+    listRunningAttemptIds: jest.fn(
+      (): Promise<string[]> => Promise.resolve([]),
     ),
     getCaptureLock: jest.fn(
       (): Promise<TimingCaptureLockRow | null> => Promise.resolve(null),
@@ -341,7 +363,9 @@ function clockEpochRow(
   };
 }
 
-function lockRow(): TimingCaptureLockRow {
+function lockRow(
+  overrides: Partial<TimingCaptureLockRow> = {},
+): TimingCaptureLockRow {
   return {
     eventId: EVENT_ID,
     workstationInstanceId: WORKSTATION,
@@ -349,6 +373,7 @@ function lockRow(): TimingCaptureLockRow {
     heldByUserId: USER_ID,
     acquiredAt: NOW,
     lastSeenAt: NOW,
+    ...overrides,
   };
 }
 
@@ -384,7 +409,9 @@ function candidateRow(
   };
 }
 
-function receiptRow(): TimingReceiptRow {
+function receiptRow(
+  overrides: Partial<TimingReceiptRow> = {},
+): TimingReceiptRow {
   return {
     attemptId: ATTEMPT_ID,
     workstationInstanceId: WORKSTATION,
@@ -392,6 +419,7 @@ function receiptRow(): TimingReceiptRow {
     status: 'APPLIED',
     reason: null,
     createdAt: NOW,
+    ...overrides,
   };
 }
 
@@ -553,6 +581,28 @@ function cancelAttemptDto(
   overrides: Partial<CancelTimingAttemptDto> = {},
 ): CancelTimingAttemptDto {
   return { reason: 'Забег отменён', ...overrides };
+}
+
+function takeCaptureDto(
+  overrides: Partial<TakeCaptureDto> = {},
+): TakeCaptureDto {
+  return { workstationInstanceId: WORKSTATION, ...overrides };
+}
+
+function transferCaptureDto(
+  overrides: Partial<TransferCaptureDto> = {},
+): TransferCaptureDto {
+  return { toWorkstationInstanceId: 'workstation-b', ...overrides };
+}
+
+function forceReleaseCaptureDto(
+  overrides: Partial<ForceReleaseCaptureDto> = {},
+): ForceReleaseCaptureDto {
+  return {
+    workstationInstanceId: WORKSTATION,
+    reason: 'Устройство потеряно',
+    ...overrides,
+  };
 }
 
 /** One authoritative result row; a timing-owned row names the attempt. */
@@ -4459,6 +4509,381 @@ describe('TimingService', () => {
         ),
       ).rejects.toMatchObject({ code: TimingErrorCode.REASON_REQUIRED });
       expect(repository.withTransaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('capture lock', () => {
+    beforeEach(() => {
+      repository.findEvent.mockResolvedValue(eventRow());
+    });
+
+    it('takes capture when no workstation holds it and audits the take', async () => {
+      repository.claimCaptureLock.mockResolvedValue(lockRow());
+      repository.listRunningAttemptIds.mockResolvedValue([ATTEMPT_ID]);
+
+      const view = await service.takeCapture(
+        USER_ID,
+        EVENT_ID,
+        takeCaptureDto(),
+      );
+
+      expect(view).toEqual({
+        eventId: EVENT_ID,
+        workstationInstanceId: WORKSTATION,
+        heldByUserId: USER_ID,
+        heldAt: NOW.toISOString(),
+      });
+      const [, claimInput] = callArguments<[unknown, ClaimCaptureLockInput]>(
+        repository.claimCaptureLock,
+      );
+      expect(claimInput).toMatchObject({
+        eventId: EVENT_ID,
+        workstationInstanceId: WORKSTATION,
+        heldByUserId: USER_ID,
+      });
+      expect(repository.insertAudit).toHaveBeenCalledTimes(1);
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        attemptId: ATTEMPT_ID,
+        actorUserId: USER_ID,
+        action: 'CAPTURE_TAKE',
+        targetType: 'CAPTURE_LOCK',
+        targetId: EVENT_ID,
+        newValues: {
+          workstationInstanceId: WORKSTATION,
+          heldByUserId: USER_ID,
+        },
+      });
+      expect(roles.assertHasAnyRole).toHaveBeenCalledWith(
+        USER_ID,
+        TIMING_OPERATE_ROLES,
+      );
+    });
+
+    it('returns the same hold when the same workstation takes capture again', async () => {
+      repository.getCaptureLock.mockResolvedValue(lockRow());
+
+      const view = await service.takeCapture(
+        USER_ID,
+        EVENT_ID,
+        takeCaptureDto(),
+      );
+
+      expect(view.workstationInstanceId).toBe(WORKSTATION);
+      expect(repository.claimCaptureLock).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('refuses a take while an entitled workstation holds capture and names the holder', async () => {
+      repository.getCaptureLock.mockResolvedValue(
+        lockRow({
+          workstationInstanceId: 'workstation-b',
+          heldByUserId: 'user-b',
+        }),
+      );
+      repository.findUserRoleCodes.mockResolvedValue([RoleCode.REFEREE]);
+
+      const refusal = await service
+        .takeCapture(USER_ID, EVENT_ID, takeCaptureDto())
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.CAPTURE_HELD,
+        details: {
+          holderWorkstationInstanceId: 'workstation-b',
+          holderUserId: 'user-b',
+        },
+      });
+      expect(repository.findUserRoleCodes).toHaveBeenCalledWith('user-b', TX);
+      expect(repository.releaseCaptureLock).not.toHaveBeenCalled();
+      expect(repository.claimCaptureLock).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('releases a stale hold whose user lost every timing role, then claims and audits both', async () => {
+      const stale = lockRow({
+        workstationInstanceId: 'workstation-b',
+        heldByUserId: 'user-b',
+        lockToken: 'stale-token',
+      });
+      repository.getCaptureLock.mockResolvedValue(stale);
+      repository.findUserRoleCodes.mockResolvedValue([RoleCode.ORGANIZER]);
+      repository.releaseCaptureLock.mockResolvedValue(stale);
+      repository.claimCaptureLock.mockResolvedValue(lockRow());
+      repository.listRunningAttemptIds.mockResolvedValue([ATTEMPT_ID]);
+
+      const view = await service.takeCapture(
+        USER_ID,
+        EVENT_ID,
+        takeCaptureDto(),
+      );
+
+      expect(view.workstationInstanceId).toBe(WORKSTATION);
+      expect(view.heldByUserId).toBe(USER_ID);
+      const [, releaseInput] = callArguments<
+        [unknown, ReleaseCaptureLockInput]
+      >(repository.releaseCaptureLock);
+      expect(releaseInput).toEqual({
+        eventId: EVENT_ID,
+        lockToken: 'stale-token',
+      });
+      const actions = repository.insertAudit.mock.calls.map(
+        (call: unknown[]) => (call[1] as InsertAuditInput).action,
+      );
+      expect(actions).toEqual(['CAPTURE_RELEASE_ROLE_REMOVED', 'CAPTURE_TAKE']);
+      expect(repository.claimCaptureLock).toHaveBeenCalled();
+    });
+
+    it('lets exactly one simultaneous claim win and names the winner', async () => {
+      repository.getCaptureLock
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(
+          lockRow({
+            workstationInstanceId: 'workstation-b',
+            heldByUserId: 'user-b',
+          }),
+        );
+      repository.claimCaptureLock.mockResolvedValue(null);
+
+      const refusal = await service
+        .takeCapture(USER_ID, EVENT_ID, takeCaptureDto())
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.CAPTURE_HELD,
+        details: {
+          holderWorkstationInstanceId: 'workstation-b',
+          holderUserId: 'user-b',
+        },
+      });
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('transfers capture after the outgoing workstation has no receipt gap and audits the move', async () => {
+      repository.getCaptureLock.mockResolvedValue(lockRow());
+      repository.listRunningAttemptIds.mockResolvedValue([ATTEMPT_ID]);
+      repository.listMarks.mockResolvedValue([
+        markRow({ id: 'mark-1', deviceSequence: 1 }),
+        markRow({ id: 'mark-2', deviceSequence: 2 }),
+      ]);
+      repository.listAttemptReceipts.mockResolvedValue([
+        receiptRow({ deviceSequence: 1 }),
+        receiptRow({ deviceSequence: 2 }),
+      ]);
+      repository.transferCaptureLock.mockResolvedValue(
+        lockRow({ workstationInstanceId: 'workstation-b' }),
+      );
+
+      const view = await service.transferCapture(
+        USER_ID,
+        EVENT_ID,
+        transferCaptureDto(),
+      );
+
+      expect(view).toEqual({
+        eventId: EVENT_ID,
+        workstationInstanceId: 'workstation-b',
+        heldByUserId: USER_ID,
+        heldAt: NOW.toISOString(),
+      });
+      const [, transferInput] = callArguments<
+        [unknown, TransferCaptureLockInput]
+      >(repository.transferCaptureLock);
+      expect(transferInput).toMatchObject({
+        eventId: EVENT_ID,
+        expectedLockToken: 'lock-token',
+        workstationInstanceId: 'workstation-b',
+        heldByUserId: USER_ID,
+      });
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        attemptId: ATTEMPT_ID,
+        actorUserId: USER_ID,
+        action: 'CAPTURE_TRANSFER',
+        targetType: 'CAPTURE_LOCK',
+        targetId: EVENT_ID,
+        oldValues: {
+          workstationInstanceId: WORKSTATION,
+          heldByUserId: USER_ID,
+        },
+        newValues: {
+          workstationInstanceId: 'workstation-b',
+          heldByUserId: USER_ID,
+        },
+      });
+    });
+
+    it('refuses a transfer while the outgoing workstation has an unconfirmed capture', async () => {
+      repository.getCaptureLock.mockResolvedValue(lockRow());
+      repository.listRunningAttemptIds.mockResolvedValue([ATTEMPT_ID]);
+      repository.listMarks.mockResolvedValue([
+        markRow({ id: 'mark-1', deviceSequence: 1 }),
+        markRow({ id: 'mark-3', deviceSequence: 3 }),
+      ]);
+      repository.listAttemptReceipts.mockResolvedValue([
+        receiptRow({ deviceSequence: 1 }),
+      ]);
+
+      const refusal = await service
+        .transferCapture(USER_ID, EVENT_ID, transferCaptureDto())
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.UNCONFIRMED_MUTATIONS,
+        details: {
+          workstationInstanceId: WORKSTATION,
+          attemptIds: [ATTEMPT_ID],
+          missingSequences: [2, 3],
+        },
+      });
+      expect(repository.transferCaptureLock).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('refuses a transfer when no workstation holds capture', async () => {
+      const refusal = await service
+        .transferCapture(USER_ID, EVENT_ID, transferCaptureDto())
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({ code: TimingErrorCode.CAPTURE_NOT_HELD });
+      expect(repository.transferCaptureLock).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('refuses a transfer from a user who does not hold capture', async () => {
+      repository.getCaptureLock.mockResolvedValue(
+        lockRow({ heldByUserId: 'user-b' }),
+      );
+
+      const refusal = await service
+        .transferCapture(USER_ID, EVENT_ID, transferCaptureDto())
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.CAPTURE_NOT_HELD,
+        details: {
+          holderWorkstationInstanceId: WORKSTATION,
+          holderUserId: 'user-b',
+        },
+      });
+      expect(repository.transferCaptureLock).not.toHaveBeenCalled();
+    });
+
+    it('force-releases the hold for an administrator with the reason and the workstation', async () => {
+      repository.getCaptureLock.mockResolvedValue(lockRow());
+      repository.releaseCaptureLock.mockResolvedValue(lockRow());
+      repository.listRunningAttemptIds.mockResolvedValue([ATTEMPT_ID]);
+
+      const view = await service.forceReleaseCapture(
+        USER_ID,
+        EVENT_ID,
+        forceReleaseCaptureDto(),
+      );
+
+      expect(view).toEqual({
+        eventId: EVENT_ID,
+        workstationInstanceId: null,
+        heldByUserId: null,
+        heldAt: null,
+      });
+      expect(roles.assertHasAnyRole).toHaveBeenCalledWith(USER_ID, [
+        RoleCode.ADMINISTRATOR,
+      ]);
+      const [, releaseInput] = callArguments<
+        [unknown, ReleaseCaptureLockInput]
+      >(repository.releaseCaptureLock);
+      expect(releaseInput).toEqual({
+        eventId: EVENT_ID,
+        lockToken: 'lock-token',
+      });
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        attemptId: ATTEMPT_ID,
+        actorUserId: USER_ID,
+        action: 'CAPTURE_FORCE_RELEASE',
+        targetType: 'CAPTURE_LOCK',
+        targetId: EVENT_ID,
+        reason: 'Устройство потеряно',
+        oldValues: {
+          workstationInstanceId: WORKSTATION,
+          heldByUserId: USER_ID,
+        },
+        newValues: {
+          releasedWorkstationInstanceId: WORKSTATION,
+          requestedWorkstationInstanceId: WORKSTATION,
+        },
+      });
+    });
+
+    it('refuses a forced release by a referee', async () => {
+      roles.assertHasAnyRole.mockRejectedValue(
+        new ForbiddenException('Insufficient role.'),
+      );
+
+      await expect(
+        service.forceReleaseCapture(
+          USER_ID,
+          EVENT_ID,
+          forceReleaseCaptureDto(),
+        ),
+      ).rejects.toThrow('Insufficient role.');
+      expect(roles.assertHasAnyRole).toHaveBeenCalledWith(USER_ID, [
+        RoleCode.ADMINISTRATOR,
+      ]);
+      expect(repository.releaseCaptureLock).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('refuses a forced release without a reason', async () => {
+      await expect(
+        service.forceReleaseCapture(
+          USER_ID,
+          EVENT_ID,
+          forceReleaseCaptureDto({ reason: '   ' }),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.REASON_REQUIRED });
+      expect(repository.withTransaction).not.toHaveBeenCalled();
+    });
+
+    it("ends a user's hold when the role is removed and audits the release", async () => {
+      repository.releaseCaptureLocksForUser.mockResolvedValue([
+        lockRow({ heldByUserId: 'user-b' }),
+      ]);
+      repository.listRunningAttemptIds.mockResolvedValue([ATTEMPT_ID]);
+
+      await service.releaseCaptureForUser('user-b');
+
+      expect(repository.releaseCaptureLocksForUser).toHaveBeenCalledWith(
+        TX,
+        'user-b',
+      );
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        attemptId: ATTEMPT_ID,
+        actorUserId: null,
+        action: 'CAPTURE_RELEASE_ROLE_REMOVED',
+        targetType: 'CAPTURE_LOCK',
+        targetId: EVENT_ID,
+        newValues: { trigger: 'ROLE_REMOVED', heldByUserId: 'user-b' },
+      });
+    });
+
+    it('does nothing when the user holds no capture', async () => {
+      await service.releaseCaptureForUser('user-b');
+
+      expect(repository.releaseCaptureLocksForUser).toHaveBeenCalledWith(
+        TX,
+        'user-b',
+      );
+      expect(repository.insertAudit).not.toHaveBeenCalled();
     });
   });
 });

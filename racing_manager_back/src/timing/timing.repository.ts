@@ -1497,6 +1497,36 @@ export class TimingRepository {
     return row === null ? null : toClockEpochRow(row);
   }
 
+  /**
+   * The ids of every running attempt of the event, oldest start first. A
+   * capture-lock change is event-wide, so the audit it writes and the transfer
+   * receipt sweep both read the attempts the hold currently covers.
+   */
+  async listRunningAttemptIds(
+    eventId: string,
+    tx?: TimingTx,
+  ): Promise<string[]> {
+    const rows = await this.db(tx).timingSession.findMany({
+      where: { eventId, status: 'RUNNING' },
+      select: { id: true },
+      orderBy: [{ officialStartedAt: 'asc' }, { id: 'asc' }],
+    });
+    return rows.map((row) => row.id);
+  }
+
+  /**
+   * The role codes one user currently holds. The stale-holder rule of the
+   * capture lock reads them to decide whether a hold still belongs to an
+   * entitled user.
+   */
+  async findUserRoleCodes(userId: string, tx?: TimingTx): Promise<string[]> {
+    const rows = await this.db(tx).userRole.findMany({
+      where: { userId },
+      select: { role: { select: { code: true } } },
+    });
+    return rows.map((row) => row.role.code);
+  }
+
   async getCaptureLock(
     eventId: string,
     tx?: TimingTx,
@@ -1581,6 +1611,24 @@ export class TimingRepository {
       RETURNING ${CAPTURE_LOCK_COLUMNS}
     `);
     return rows.length === 0 ? null : toCaptureLockRow(rows[0]);
+  }
+
+  /**
+   * Releases every event-wide hold one user has, in one statement. Ending a
+   * hold because the user lost a timing role must never depend on a read-then-
+   * write: the DELETE and its `held_by_user_id` predicate are atomic, and the
+   * returned rows say which events changed hands.
+   */
+  async releaseCaptureLocksForUser(
+    tx: TimingTx,
+    userId: string,
+  ): Promise<TimingCaptureLockRow[]> {
+    const rows = await tx.$queryRaw<RawCaptureLockRow[]>(Prisma.sql`
+      DELETE FROM timing_capture_locks
+      WHERE held_by_user_id = ${userId}::uuid
+      RETURNING ${CAPTURE_LOCK_COLUMNS}
+    `);
+    return rows.map(toCaptureLockRow);
   }
 
   async createReceipt(

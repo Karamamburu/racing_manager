@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { EnrollmentStatus, ResultOutcome } from '../../generated/prisma';
+import type {
+  EnrollmentStatus,
+  Prisma,
+  ResultOutcome,
+} from '../../generated/prisma';
 import { RoleCode, TIMING_OPERATE_ROLE_CODES } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
 import {
@@ -45,10 +49,13 @@ import type {
   CompleteTimingAttemptDto,
   CorrectOfficialTimeDto,
   ForceCompleteTimingAttemptDto,
+  ForceReleaseCaptureDto,
   OpenClockEpochDto,
   QuickUndoTimingPassDto,
   RebindTimingPassDto,
   StartTimingAttemptDto,
+  TakeCaptureDto,
+  TransferCaptureDto,
 } from './timing.dto';
 import {
   TimingErrorCode,
@@ -61,6 +68,7 @@ import {
   type TimingAgeSectionRow,
   type TimingAttemptRow,
   type TimingAuditRow,
+  type TimingCaptureLockRow,
   type TimingClassCompetitionRow,
   type TimingClockEpochRow,
   type TimingClosureReportRecord,
@@ -83,6 +91,7 @@ import type {
   TimingAttemptRef,
   TimingAttemptState,
   TimingAuditView,
+  TimingCaptureView,
   TimingCategoryBlockView,
   TimingCategoryState,
   TimingGender,
@@ -114,10 +123,11 @@ import type {
  * eligible result with its split set, the closure report, the capture-lock
  * release and the audit row commit together or not at all (U-20). A cancelled
  * attempt publishes nothing; a force-completed attempt publishes only the
- * participants that reached N. The capture-lock claim/transfer and the role
- * grant belong to later waves and are not implemented here. A correction still
- * republishes an already timing-published result, because the published total
- * must agree with the official values as soon as the category is unfinished.
+ * participants that reached N. The event-wide capture hold is taken, handed
+ * over and force-released explicitly (AD-5); the `REFEREE` grant route belongs
+ * to a later wave and is not implemented here. A correction still republishes
+ * an already timing-published result, because the published total must agree
+ * with the official values as soon as the category is unfinished.
  */
 
 /** Why a roster row is out of timing: displayed in a multi-stage race section. */
@@ -290,6 +300,12 @@ type ClosurePlan = {
 /** One workstation whose issued sequences lack a final receipt. */
 type WorkstationReceiptGap = {
   workstationInstanceId: string;
+  missingSequences: number[];
+};
+
+/** One running attempt whose outgoing workstation has receipt gaps. */
+type CaptureReceiptGap = {
+  attemptId: string;
   missingSequences: number[];
 };
 
@@ -574,6 +590,273 @@ export class TimingService {
       return created;
     });
     return toClockEpochView(epoch, now);
+  }
+
+  /**
+   * `POST /events/:eventId/timing/capture/take`: claim the one event-wide hold
+   * explicitly (E-25, FR-53).
+   *
+   * Opening the surface, pressing Start and capturing never claim capture, so
+   * this is the only route that takes it. The claim is a conditional insert: of
+   * two simultaneous claims exactly one row is written and the other request
+   * names the winner, so the surface can never show two capturing stations.
+   *
+   * AD-5 stale holder: a hold whose user no longer holds `REFEREE` or
+   * `ADMINISTRATOR` is not a hold any more. It is released before the claim and
+   * both the release and the take are audited, so a role removal that raced the
+   * take still ends the old hold instead of blocking the new operator.
+   */
+  async takeCapture(
+    authentikId: string | undefined,
+    eventId: string,
+    dto: TakeCaptureDto,
+  ): Promise<TimingCaptureView> {
+    await this.rolesService.assertHasAnyRole(
+      authentikId,
+      TIMING_OPERATE_ROLE_CODES,
+    );
+    await this.loadEvent(eventId);
+    const workstationInstanceId = normalizeWorkstationInstanceId(
+      dto.workstationInstanceId,
+    );
+    const actorUserId = await this.requireUserId(authentikId);
+
+    const held = await this.repository.withTransaction(async (tx) => {
+      const current = await this.repository.getCaptureLock(eventId, tx);
+      if (current !== null) {
+        // A repeated take from the same workstation is the same hold, not a
+        // second claim and not a second audit row.
+        if (current.workstationInstanceId === workstationInstanceId) {
+          return current;
+        }
+        const holderRoles = await this.repository.findUserRoleCodes(
+          current.heldByUserId,
+          tx,
+        );
+        if (holdsTimingRole(holderRoles)) {
+          throw captureHeldError(current);
+        }
+        await this.releaseStaleHolder(tx, current, actorUserId);
+      }
+
+      const claimed = await this.repository.claimCaptureLock(tx, {
+        eventId,
+        workstationInstanceId,
+        heldByUserId: actorUserId,
+      });
+      if (claimed === null) {
+        // The primary key decided the race inside `INSERT ... ON CONFLICT`.
+        const winner = await this.repository.getCaptureLock(eventId, tx);
+        if (
+          winner !== null &&
+          winner.workstationInstanceId === workstationInstanceId
+        ) {
+          return winner;
+        }
+        throw captureHeldError(winner);
+      }
+      await this.auditCaptureLock(tx, eventId, actorUserId, 'CAPTURE_TAKE', {
+        oldValues: null,
+        newValues: {
+          workstationInstanceId,
+          heldByUserId: actorUserId,
+        },
+        reason: null,
+      });
+      return claimed;
+    });
+    return toCaptureView(eventId, held);
+  }
+
+  /**
+   * `POST /events/:eventId/timing/capture/transfer`: hand the event-wide hold
+   * to another workstation voluntarily (E-28, FR-56).
+   *
+   * The outgoing workstation's captures must be fully receipted first: a
+   * mutation that never reached the shared record would be stranded on a
+   * station that no longer holds capture. Every running attempt of the event is
+   * swept, because the hold covers all of them at once (AD-3, AD-5).
+   *
+   * `TransferCaptureDto` names only the target, so the outgoing workstation is
+   * the one the lock row holds and the caller must be the user the lock names.
+   * The move is one conditional update on the token that was read; a lost race
+   * names the workstation that holds capture instead of overwriting it. The
+   * receiving workstation opens its own clock epoch through the existing route.
+   */
+  async transferCapture(
+    authentikId: string | undefined,
+    eventId: string,
+    dto: TransferCaptureDto,
+  ): Promise<TimingCaptureView> {
+    await this.rolesService.assertHasAnyRole(
+      authentikId,
+      TIMING_OPERATE_ROLE_CODES,
+    );
+    await this.loadEvent(eventId);
+    const targetWorkstationInstanceId = normalizeWorkstationInstanceId(
+      dto.toWorkstationInstanceId,
+    );
+    const actorUserId = await this.requireUserId(authentikId);
+
+    const held = await this.repository.withTransaction(async (tx) => {
+      const current = await this.repository.getCaptureLock(eventId, tx);
+      if (current === null) {
+        throw timingError(
+          TimingErrorCode.CAPTURE_NOT_HELD,
+          'No workstation holds capture for this event.',
+          { eventId, workstationInstanceId: targetWorkstationInstanceId },
+        );
+      }
+      if (current.heldByUserId !== actorUserId) {
+        throw timingError(
+          TimingErrorCode.CAPTURE_NOT_HELD,
+          'Only the capture holder may hand capture over.',
+          {
+            workstationInstanceId: targetWorkstationInstanceId,
+            holderWorkstationInstanceId: current.workstationInstanceId,
+            holderUserId: current.heldByUserId,
+          },
+        );
+      }
+      if (current.workstationInstanceId === targetWorkstationInstanceId) {
+        return current;
+      }
+      await this.assertOutgoingReceiptsConfirmed(
+        tx,
+        eventId,
+        current.workstationInstanceId,
+      );
+
+      const transferred = await this.repository.transferCaptureLock(tx, {
+        eventId,
+        expectedLockToken: current.lockToken,
+        workstationInstanceId: targetWorkstationInstanceId,
+        heldByUserId: actorUserId,
+      });
+      if (transferred === null) {
+        const winner = await this.repository.getCaptureLock(eventId, tx);
+        if (
+          winner !== null &&
+          winner.workstationInstanceId === targetWorkstationInstanceId
+        ) {
+          return winner;
+        }
+        throw captureHeldError(winner);
+      }
+      await this.auditCaptureLock(
+        tx,
+        eventId,
+        actorUserId,
+        'CAPTURE_TRANSFER',
+        {
+          oldValues: captureLockAuditValues(current),
+          newValues: {
+            workstationInstanceId: targetWorkstationInstanceId,
+            heldByUserId: actorUserId,
+          },
+          reason: null,
+        },
+      );
+      return transferred;
+    });
+    return toCaptureView(eventId, held);
+  }
+
+  /**
+   * `POST /events/:eventId/timing/capture/force-release`: an administrator ends
+   * a hold whose workstation may be gone (E-28, F-28).
+   *
+   * The release is by the token the record currently holds, so a lost or
+   * unreachable device does not have to cooperate. The possible loss of passes
+   * that never reached the shared record is warned about by the surface; the
+   * frozen `TimingCaptureView` gains no field for it, and this method returns
+   * the view as it is after the release — nobody holds capture. Administrator
+   * only: the method-level role is enforced here as well as on the route.
+   */
+  async forceReleaseCapture(
+    authentikId: string | undefined,
+    eventId: string,
+    dto: ForceReleaseCaptureDto,
+  ): Promise<TimingCaptureView> {
+    await this.rolesService.assertHasAnyRole(authentikId, [
+      RoleCode.ADMINISTRATOR,
+    ]);
+    const reason = normalizeReason(dto.reason);
+    await this.loadEvent(eventId);
+    const requestedWorkstationInstanceId = normalizeWorkstationInstanceId(
+      dto.workstationInstanceId,
+    );
+    const actorUserId = await this.requireUserId(authentikId);
+
+    const remaining = await this.repository.withTransaction(async (tx) => {
+      const current = await this.repository.getCaptureLock(eventId, tx);
+      if (current === null) {
+        return null;
+      }
+      const released = await this.repository.releaseCaptureLock(tx, {
+        eventId,
+        lockToken: current.lockToken,
+      });
+      if (released === null) {
+        // A transfer or another release changed the token between the read and
+        // the delete. Nothing of this hold was released, and the response
+        // reports whoever holds it now instead of claiming an empty surface.
+        return this.repository.getCaptureLock(eventId, tx);
+      }
+      await this.auditCaptureLock(
+        tx,
+        eventId,
+        actorUserId,
+        'CAPTURE_FORCE_RELEASE',
+        {
+          oldValues: captureLockAuditValues(released),
+          newValues: {
+            releasedWorkstationInstanceId: released.workstationInstanceId,
+            requestedWorkstationInstanceId,
+            heldByUserId: released.heldByUserId,
+          },
+          reason,
+        },
+      );
+      return null;
+    });
+    return toCaptureView(eventId, remaining);
+  }
+
+  /**
+   * Ends the event-wide hold of one user because that user lost a timing role
+   * (E-14, FR-10). Called by the role-removal route; it has no HTTP route of
+   * its own.
+   *
+   * Nothing of the attempt moves: the start time, the passes and the pending
+   * finishes stay exactly as they are, and another authorized workstation may
+   * take capture and continue the same clock. A user without a hold is a no-op,
+   * so a repeated removal stays idempotent. The releasing statement filters on
+   * the holder, so a hold that changed hands before the removal is untouched.
+   */
+  async releaseCaptureForUser(userId: string): Promise<void> {
+    await this.repository.withTransaction(async (tx) => {
+      const released = await this.repository.releaseCaptureLocksForUser(
+        tx,
+        userId,
+      );
+      for (const lock of released) {
+        await this.auditCaptureLock(
+          tx,
+          lock.eventId,
+          null,
+          'CAPTURE_RELEASE_ROLE_REMOVED',
+          {
+            oldValues: captureLockAuditValues(lock),
+            newValues: {
+              trigger: 'ROLE_REMOVED',
+              heldByUserId: lock.heldByUserId,
+            },
+            reason: null,
+          },
+        );
+      }
+    });
   }
 
   /**
@@ -1454,6 +1737,131 @@ export class TimingService {
       );
     }
     return attempt;
+  }
+
+  /** The event a capture-lock action addresses; a missing one is `NOT_FOUND`. */
+  private async loadEvent(
+    eventId: string,
+    tx?: TimingTx,
+  ): Promise<TimingEventRow> {
+    const event = await this.repository.findEvent(eventId, tx);
+    if (event === null) {
+      throw timingError(TimingErrorCode.NOT_FOUND, 'Event not found.', {
+        eventId,
+      });
+    }
+    return event;
+  }
+
+  /**
+   * AD-5: a hold whose user no longer holds a timing role is released before a
+   * new workstation may claim it. The release is conditional on the token that
+   * was read; a lost race leaves the fresh row to the claim, which then either
+   * wins or names the new holder.
+   */
+  private async releaseStaleHolder(
+    tx: TimingTx,
+    lock: TimingCaptureLockRow,
+    actorUserId: string,
+  ): Promise<void> {
+    const released = await this.repository.releaseCaptureLock(tx, {
+      eventId: lock.eventId,
+      lockToken: lock.lockToken,
+    });
+    if (released === null) {
+      return;
+    }
+    await this.auditCaptureLock(
+      tx,
+      lock.eventId,
+      actorUserId,
+      'CAPTURE_RELEASE_ROLE_REMOVED',
+      {
+        oldValues: captureLockAuditValues(released),
+        newValues: {
+          trigger: 'STALE_HOLDER',
+          heldByUserId: released.heldByUserId,
+        },
+        reason: null,
+      },
+    );
+  }
+
+  /**
+   * E-28: no transfer while the outgoing workstation still has a capture
+   * mutation without a final receipt. Each running attempt is swept, so a gap
+   * in any of them blocks the move and names the missing sequences.
+   */
+  private async assertOutgoingReceiptsConfirmed(
+    tx: TimingTx,
+    eventId: string,
+    workstationInstanceId: string,
+  ): Promise<void> {
+    const attemptIds = await this.repository.listRunningAttemptIds(eventId, tx);
+    const gaps: CaptureReceiptGap[] = [];
+    for (const attemptId of attemptIds) {
+      const [marks, receipts] = await Promise.all([
+        this.repository.listMarks(attemptId, tx),
+        this.repository.listAttemptReceipts(attemptId, tx),
+      ]);
+      const missingSequences = missingReceiptSequences(
+        marks,
+        receipts,
+        workstationInstanceId,
+        0,
+      );
+      if (missingSequences.length > 0) {
+        gaps.push({ attemptId, missingSequences });
+      }
+    }
+    if (gaps.length === 0) {
+      return;
+    }
+    throw timingError(
+      TimingErrorCode.UNCONFIRMED_MUTATIONS,
+      'The outgoing workstation still has captures without a final receipt.',
+      {
+        workstationInstanceId,
+        attemptIds: gaps.map((gap) => gap.attemptId),
+        missingSequences: [
+          ...new Set(gaps.flatMap((gap) => gap.missingSequences)),
+        ].sort((left, right) => left - right),
+      },
+    );
+  }
+
+  /**
+   * One capture-lock change, audited on every running attempt of the event.
+   *
+   * `timing_audit` is session-scoped and the hold is event-wide, so the hold's
+   * history lands on the attempts it actually covers. An event with no running
+   * attempt has no session to attach the row to; its next Start press records
+   * the workstation in the `START` audit instead.
+   */
+  private async auditCaptureLock(
+    tx: TimingTx,
+    eventId: string,
+    actorUserId: string | null,
+    action: string,
+    values: {
+      oldValues: Prisma.InputJsonValue | null;
+      newValues: Prisma.InputJsonValue | null;
+      reason: string | null;
+    },
+  ): Promise<void> {
+    const attemptIds = await this.repository.listRunningAttemptIds(eventId, tx);
+    for (const attemptId of attemptIds) {
+      await this.repository.insertAudit(tx, {
+        attemptId,
+        actorUserId,
+        action,
+        targetType: 'CAPTURE_LOCK',
+        targetId: eventId,
+        oldValues: values.oldValues,
+        newValues: values.newValues,
+        reason: values.reason,
+      });
+    }
   }
 
   /**
@@ -3079,6 +3487,67 @@ function toRoutingCandidate(
 function normalizeIdempotencyKey(idempotencyKey: string | undefined): string {
   const trimmed = idempotencyKey?.trim() ?? '';
   return trimmed.length === 0 ? randomUUID() : trimmed;
+}
+
+/** Whether a user's current role set still permits holding capture (AD-6). */
+function holdsTimingRole(roleCodes: readonly string[]): boolean {
+  return TIMING_OPERATE_ROLE_CODES.some((code) => roleCodes.includes(code));
+}
+
+/**
+ * A workstation id is an opaque client value; the only normalization is the
+ * trim that keeps a padded copy from becoming a second station. A blank one can
+ * never match a hold or open an epoch, so it is refused instead of stored.
+ */
+function normalizeWorkstationInstanceId(value: string): string {
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    throw timingError(
+      TimingErrorCode.INVALID_STATE,
+      'The workstation instance id is blank.',
+    );
+  }
+  return normalized;
+}
+
+/** The one refusal of a claim or a transfer that lost to another station. */
+function captureHeldError(
+  lock: TimingCaptureLockRow | null,
+): TimingDomainError {
+  return timingError(
+    TimingErrorCode.CAPTURE_HELD,
+    'Another workstation holds capture for this event.',
+    {
+      holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
+      holderUserId: lock?.heldByUserId ?? null,
+    },
+  );
+}
+
+/** The old values of a capture-lock audit row: who held it and since when. */
+function captureLockAuditValues(lock: TimingCaptureLockRow): {
+  workstationInstanceId: string;
+  heldByUserId: string;
+  heldAt: string;
+} {
+  return {
+    workstationInstanceId: lock.workstationInstanceId,
+    heldByUserId: lock.heldByUserId,
+    heldAt: lock.acquiredAt.toISOString(),
+  };
+}
+
+/** The frozen capture view of the hold as it stands after the action. */
+function toCaptureView(
+  eventId: string,
+  lock: TimingCaptureLockRow | null,
+): TimingCaptureView {
+  return {
+    eventId,
+    workstationInstanceId: lock?.workstationInstanceId ?? null,
+    heldByUserId: lock?.heldByUserId ?? null,
+    heldAt: lock === null ? null : lock.acquiredAt.toISOString(),
+  };
 }
 
 function toAttemptRef(attempt: TimingAttemptRow): TimingAttemptRef {
