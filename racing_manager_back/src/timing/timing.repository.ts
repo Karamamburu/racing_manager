@@ -1304,6 +1304,25 @@ export class TimingRepository {
   }
 
   /**
+   * The current enrollment status of the given enrollments, keyed by id. A
+   * closure publishes only an enrollment that is still `REGISTERED`, so a row
+   * the event no longer knows reads as absent instead of publishable.
+   */
+  async listEnrollmentStatuses(
+    enrollmentIds: readonly string[],
+    tx?: TimingTx,
+  ): Promise<Map<string, EnrollmentStatus>> {
+    if (enrollmentIds.length === 0) {
+      return new Map();
+    }
+    const rows = await this.db(tx).enrollment.findMany({
+      where: { id: { in: [...new Set(enrollmentIds)] } },
+      select: { id: true, status: true },
+    });
+    return new Map(rows.map((row) => [row.id, row.status]));
+  }
+
+  /**
    * Whether an active enrollment of the event carries this start number. The
    * routing query reads only running attempts, so this tells an unknown number
    * apart from one whose categories have not started or are already closed.
@@ -1622,6 +1641,23 @@ export class TimingRepository {
       status: row.status,
       reason: row.reason,
     }));
+  }
+
+  /**
+   * Every receipt of the attempt, ordered by workstation and sequence. An
+   * administrative closure checks all capturing workstations, so it reads them
+   * in one query instead of one per workstation.
+   */
+  async listAttemptReceipts(
+    attemptId: string,
+    tx?: TimingTx,
+  ): Promise<TimingReceiptRow[]> {
+    const rows = await this.db(tx).timingCaptureReceipt.findMany({
+      where: { sessionId: attemptId },
+      select: RECEIPT_SELECT,
+      orderBy: [{ workstationInstanceId: 'asc' }, { deviceSequence: 'asc' }],
+    });
+    return rows.map(toReceiptRow);
   }
 
   async insertAudit(

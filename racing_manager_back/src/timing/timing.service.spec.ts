@@ -1,12 +1,16 @@
 import { TIMING_OPERATE_ROLE_CODES, RoleCode } from '../auth/role-codes';
 import type { RolesService } from '../auth/roles.service';
-import { TIMING_MAX_TOTAL_MS } from './timing.domain';
+import type { EnrollmentStatus } from '../../generated/prisma';
+import { TIMING_MAX_TOTAL_MS, type TimingLapSplit } from './timing.domain';
 import type {
   BindPendingFinishDto,
   CaptureTimingPassDto,
   CancelPendingFinishDto,
+  CancelTimingAttemptDto,
   CancelTimingPassDto,
+  CompleteTimingAttemptDto,
   CorrectOfficialTimeDto,
+  ForceCompleteTimingAttemptDto,
   QuickUndoTimingPassDto,
   RebindTimingPassDto,
 } from './timing.dto';
@@ -25,6 +29,7 @@ import type {
   TimingCaptureLockRow,
   TimingClassCompetitionRow,
   TimingClockEpochRow,
+  TimingClosureReportRecord,
   TimingEnrollmentRow,
   TimingEventRow,
   TimingFormatRow,
@@ -36,6 +41,7 @@ import type {
   TimingResultRow,
   TimingRoutingCandidateRow,
   TimingStartRow,
+  UpdateAttemptStatusInput,
   UpdateMarkInput,
 } from './timing.repository';
 import { TimingRepository } from './timing.repository';
@@ -127,11 +133,30 @@ function createRepositoryFake() {
     listParticipantMarks: jest.fn<Promise<TimingMarkRow[]>, [string, string]>(
       () => Promise.resolve([]),
     ),
-    findResultByEnrollment: jest.fn(
-      (): Promise<TimingResultRow | null> => Promise.resolve(null),
+    findResultByEnrollment: jest.fn<Promise<TimingResultRow | null>, [string]>(
+      () => Promise.resolve(null),
     ),
     publishResult: jest.fn(),
     replaceResultSplits: jest.fn(),
+    updateAttemptStatus: jest.fn(),
+    listEnrollmentStatuses: jest.fn(
+      (
+        enrollmentIds: readonly string[],
+      ): Promise<Map<string, EnrollmentStatus>> =>
+        Promise.resolve(
+          new Map(
+            enrollmentIds.map(
+              (enrollmentId) => [enrollmentId, 'REGISTERED'] as const,
+            ),
+          ),
+        ),
+    ),
+    listAttemptReceipts: jest.fn(
+      (): Promise<TimingReceiptRow[]> => Promise.resolve([]),
+    ),
+    releaseCaptureLock: jest.fn(
+      (): Promise<TimingCaptureLockRow | null> => Promise.resolve(null),
+    ),
     getCaptureLock: jest.fn(
       (): Promise<TimingCaptureLockRow | null> => Promise.resolve(null),
     ),
@@ -506,6 +531,28 @@ function rebindPassDto(
     reason: 'Не тот участник',
     ...overrides,
   };
+}
+
+function completeAttemptDto(
+  overrides: Partial<CompleteTimingAttemptDto> = {},
+): CompleteTimingAttemptDto {
+  return {
+    workstationInstanceId: WORKSTATION,
+    lastIssuedSequence: 3,
+    ...overrides,
+  };
+}
+
+function forceCompleteDto(
+  overrides: Partial<ForceCompleteTimingAttemptDto> = {},
+): ForceCompleteTimingAttemptDto {
+  return { reason: 'Досрочное завершение', ...overrides };
+}
+
+function cancelAttemptDto(
+  overrides: Partial<CancelTimingAttemptDto> = {},
+): CancelTimingAttemptDto {
+  return { reason: 'Забег отменён', ...overrides };
 }
 
 /** One authoritative result row; a timing-owned row names the attempt. */
@@ -3698,6 +3745,720 @@ describe('TimingService', () => {
 
       expect(repository.withTransaction).not.toHaveBeenCalled();
       expect(repository.updateMark).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('closure, publication and splits', () => {
+    /** One participant's passes at the given elapsed values, in lap order. */
+    function passesOf(
+      enrollmentId: string,
+      elapsedValues: number[],
+      options: {
+        workstationInstanceId?: string;
+        firstSequence?: number;
+        idPrefix?: string;
+      } = {},
+    ): TimingMarkRow[] {
+      const firstSequence = options.firstSequence ?? 1;
+      const idPrefix = options.idPrefix ?? `mark-${enrollmentId}`;
+      return elapsedValues.map((officialElapsedMs, index) =>
+        markRow({
+          id: `${idPrefix}-${index + 1}`,
+          enrollmentId,
+          registrationId: `registration-${enrollmentId}`,
+          lapNumber: index + 1,
+          officialAt: new Date(NOW.getTime() + officialElapsedMs),
+          officialElapsedMs,
+          deviceSequence: firstSequence + index,
+          workstationInstanceId: options.workstationInstanceId ?? WORKSTATION,
+        }),
+      );
+    }
+
+    /** Final receipts for the given sequences of one workstation. */
+    function receiptRows(
+      sequences: number[],
+      workstationInstanceId = WORKSTATION,
+    ): TimingReceiptRow[] {
+      return sequences.map((deviceSequence) => ({
+        attemptId: ATTEMPT_ID,
+        workstationInstanceId,
+        deviceSequence,
+        status: 'APPLIED',
+        reason: null,
+        createdAt: NOW,
+      }));
+    }
+
+    /**
+     * Wires the fake repository around one running attempt. The stores record
+     * what a closure writes, so a test sees the publication the service built
+     * without a database.
+     */
+    function arrangeClosure(
+      overrides: {
+        attempt?: TimingAttemptRow;
+        participants?: TimingParticipantRow[];
+        marks?: TimingMarkRow[];
+        receipts?: TimingReceiptRow[];
+        pendingFinishes?: TimingMarkRow[];
+        lock?: TimingCaptureLockRow | null;
+        withdrawn?: string[];
+        result?: (enrollmentId: string) => TimingResultRow | null;
+      } = {},
+    ): {
+      attempt: TimingAttemptRow;
+      published: TimingPublishedResultRow[];
+      auditInputs: InsertAuditInput[];
+    } {
+      const attempt =
+        overrides.attempt ?? attemptRow({ id: ATTEMPT_ID, status: 'RUNNING' });
+      const participants = overrides.participants ?? [];
+      const published: TimingPublishedResultRow[] = [];
+      const auditInputs: InsertAuditInput[] = [];
+      const withdrawn = new Set(overrides.withdrawn ?? []);
+      repository.findAttempt.mockResolvedValue(attempt);
+      repository.listParticipants.mockResolvedValue(participants);
+      repository.listMarks.mockResolvedValue(overrides.marks ?? []);
+      repository.listPendingFinishes.mockResolvedValue(
+        overrides.pendingFinishes ?? [],
+      );
+      repository.listAttemptReceipts.mockResolvedValue(
+        overrides.receipts ?? [],
+      );
+      repository.getCaptureLock.mockResolvedValue(
+        overrides.lock === undefined ? lockRow() : overrides.lock,
+      );
+      repository.listEnrollmentStatuses.mockImplementation(
+        (enrollmentIds: readonly string[]) =>
+          Promise.resolve(
+            new Map<string, EnrollmentStatus>(
+              enrollmentIds.map((enrollmentId) => [
+                enrollmentId,
+                withdrawn.has(enrollmentId) ? 'WITHDRAWN' : 'REGISTERED',
+              ]),
+            ),
+          ),
+      );
+      repository.findResultByEnrollment.mockImplementation(
+        (enrollmentId: string) =>
+          Promise.resolve(overrides.result?.(enrollmentId) ?? null),
+      );
+      repository.publishResult.mockImplementation(
+        (_tx: unknown, input: PublishResultInput) => {
+          const row = publishedResultRow({
+            id: `result-${input.enrollmentId}`,
+            enrollmentId: input.enrollmentId,
+            registrationId: input.registrationId,
+            outcome: input.outcome,
+            timeMilliseconds: input.timeMilliseconds,
+            timingSessionId: input.timingSessionId,
+            laps: [],
+          });
+          published.push(row);
+          return Promise.resolve(
+            resultRow({
+              id: row.id,
+              enrollmentId: input.enrollmentId,
+              registrationId: input.registrationId,
+              outcome: input.outcome,
+              timeMilliseconds: input.timeMilliseconds,
+              timingSessionId: input.timingSessionId,
+            }),
+          );
+        },
+      );
+      repository.replaceResultSplits.mockImplementation(
+        (_tx: unknown, resultId: string, splits: TimingLapSplit[]) => {
+          const row = published.find((entry) => entry.id === resultId);
+          if (row !== undefined) {
+            row.laps = splits;
+          }
+          return Promise.resolve();
+        },
+      );
+      repository.updateAttemptStatus.mockImplementation(
+        (_tx: unknown, _attemptId: string, input: UpdateAttemptStatusInput) =>
+          Promise.resolve({
+            ...attempt,
+            status: input.status,
+            closedAt: input.closedAt,
+            closedByUserId: input.closedByUserId,
+            closureReport: input.closureReport,
+          }),
+      );
+      repository.listPublishedResults.mockImplementation(() =>
+        Promise.resolve([...published]),
+      );
+      repository.insertAudit.mockImplementation(
+        (_tx: unknown, input: InsertAuditInput) => {
+          auditInputs.push(input);
+          return Promise.resolve({
+            auditId: `audit-${auditInputs.length}`,
+            actorUserId: input.actorUserId,
+            action: input.action,
+            targetType: input.targetType,
+            targetId: input.targetId,
+            oldValues: null,
+            newValues: null,
+            reason: input.reason,
+            createdAt: NOW,
+          });
+        },
+      );
+      repository.listAudit.mockImplementation(() =>
+        Promise.resolve(
+          auditInputs.map((input, index) => ({
+            auditId: `audit-${index + 1}`,
+            actorUserId: input.actorUserId,
+            action: input.action,
+            targetType: input.targetType,
+            targetId: input.targetId,
+            oldValues: null,
+            newValues: null,
+            reason: input.reason,
+            createdAt: NOW,
+          })),
+        ),
+      );
+      return { attempt, published, auditInputs };
+    }
+
+    /** The transaction a repository write was called on. */
+    function transactionOf(mock: jest.Mock): unknown {
+      return callArguments<[unknown]>(mock)[0];
+    }
+
+    it('publishes every at-N participant with exactly N splits and reports the rest', async () => {
+      const { published, auditInputs } = arrangeClosure({
+        participants: [
+          participantRow({ enrollmentId: 'enrollment-a', requiredLaps: 3 }),
+          participantRow({
+            enrollmentId: 'enrollment-excluded',
+            startNumber: 11,
+            requiredLaps: 3,
+            excludedReason: 'RACE_SECTION',
+          }),
+        ],
+        marks: passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+        receipts: receiptRows([1, 2, 3]),
+      });
+
+      const record = await service.completeAttempt(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        completeAttemptDto({ lastIssuedSequence: 3 }),
+      );
+
+      expect(roles.assertHasAnyRole).toHaveBeenCalledWith(
+        USER_ID,
+        TIMING_OPERATE_ROLES,
+      );
+      expect(repository.publishResult).toHaveBeenCalledTimes(1);
+      const [, publishInput] = callArguments<[unknown, PublishResultInput]>(
+        repository.publishResult,
+      );
+      expect(publishInput).toEqual({
+        enrollmentId: 'enrollment-a',
+        registrationId: 'registration-enrollment-a',
+        outcome: 'FINISHED',
+        timeMilliseconds: 90_000,
+        timingSessionId: ATTEMPT_ID,
+      });
+      // U-11, U-12: exactly N splits, the last cumulative value is the total.
+      expect(repository.replaceResultSplits).toHaveBeenCalledWith(
+        TX,
+        'result-enrollment-a',
+        [
+          { lapNumber: 1, lapTimeMs: 30_000, cumulativeMs: 30_000 },
+          { lapNumber: 2, lapTimeMs: 30_000, cumulativeMs: 60_000 },
+          { lapNumber: 3, lapTimeMs: 30_000, cumulativeMs: 90_000 },
+        ],
+      );
+      expect(published.map((row) => row.laps)).toEqual([
+        [
+          { lapNumber: 1, lapTimeMs: 30_000, cumulativeMs: 30_000 },
+          { lapNumber: 2, lapTimeMs: 30_000, cumulativeMs: 60_000 },
+          { lapNumber: 3, lapTimeMs: 30_000, cumulativeMs: 90_000 },
+        ],
+      ]);
+      const expectedReport: TimingClosureReportRecord = {
+        publishedEnrollmentIds: ['enrollment-a'],
+        unpublishedEnrollmentIds: ['enrollment-excluded'],
+        conflictEnrollmentIds: [],
+      };
+      const [, , updateInput] = callArguments<
+        [unknown, string, UpdateAttemptStatusInput]
+      >(repository.updateAttemptStatus);
+      expect(updateInput).toMatchObject({
+        status: 'COMPLETED',
+        closedAt: NOW,
+        closedByUserId: USER_ID,
+        closureReport: expectedReport,
+      });
+      // U-20: the publication, the state change, the lock release and the audit
+      // commit on one transaction.
+      expect(transactionOf(repository.publishResult)).toBe(TX);
+      expect(transactionOf(repository.replaceResultSplits)).toBe(TX);
+      expect(transactionOf(repository.updateAttemptStatus)).toBe(TX);
+      expect(transactionOf(repository.releaseCaptureLock)).toBe(TX);
+      expect(transactionOf(repository.insertAudit)).toBe(TX);
+      expect(repository.releaseCaptureLock).toHaveBeenCalledWith(TX, {
+        eventId: EVENT_ID,
+        lockToken: 'lock-token',
+      });
+      expect(auditInputs).toEqual([
+        expect.objectContaining({
+          attemptId: ATTEMPT_ID,
+          actorUserId: USER_ID,
+          action: 'COMPLETE',
+          targetType: 'ATTEMPT',
+          targetId: ATTEMPT_ID,
+          reason: null,
+          newValues: { status: 'COMPLETED', closureReport: expectedReport },
+        }),
+      ]);
+      expect(record.state).toBe('COMPLETED');
+      expect(record.closureReport).toEqual(expectedReport);
+      expect(
+        record.publishedResults.map((result) => result.enrollmentId),
+      ).toEqual(['enrollment-a']);
+    });
+
+    it('refuses completion while a pending finish is unbound and writes nothing', async () => {
+      arrangeClosure({
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        marks: passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+        receipts: receiptRows([1, 2, 3]),
+        pendingFinishes: [pendingMarkRow()],
+      });
+
+      const refusal = await service
+        .completeAttempt(USER_ID, EVENT_ID, ATTEMPT_ID, completeAttemptDto())
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.PENDING_REMAINS,
+        details: {
+          attemptId: ATTEMPT_ID,
+          pendingFinishIds: ['mark-pending'],
+        },
+      });
+      expect(repository.publishResult).not.toHaveBeenCalled();
+      expect(repository.updateAttemptStatus).not.toHaveBeenCalled();
+      expect(repository.releaseCaptureLock).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('refuses completion when the workstation has an unreceipted sequence', async () => {
+      arrangeClosure({
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        marks: passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+        receipts: receiptRows([1, 3]),
+      });
+
+      const refusal = await service
+        .completeAttempt(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          completeAttemptDto({ lastIssuedSequence: 4 }),
+        )
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.UNCONFIRMED_MUTATIONS,
+        details: {
+          attemptId: ATTEMPT_ID,
+          missingSequences: [2, 4],
+          workstations: [
+            { workstationInstanceId: WORKSTATION, missingSequences: [2, 4] },
+          ],
+        },
+      });
+      expect(repository.publishResult).not.toHaveBeenCalled();
+      expect(repository.updateAttemptStatus).not.toHaveBeenCalled();
+    });
+
+    it('refuses ordinary completion while a non-excluded participant is below N', async () => {
+      arrangeClosure({
+        participants: [
+          participantRow({ enrollmentId: 'enrollment-a', requiredLaps: 3 }),
+          participantRow({
+            enrollmentId: 'enrollment-b',
+            startNumber: 11,
+            requiredLaps: 3,
+          }),
+        ],
+        marks: [
+          ...passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+          ...passesOf('enrollment-b', [30_000, 60_000], {
+            firstSequence: 4,
+          }),
+        ],
+        receipts: receiptRows([1, 2, 3, 4, 5]),
+      });
+
+      const refusal = await service
+        .completeAttempt(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          completeAttemptDto({ lastIssuedSequence: 5 }),
+        )
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.PARTICIPANTS_BELOW_LAPS,
+        details: {
+          attemptId: ATTEMPT_ID,
+          participants: [
+            {
+              enrollmentId: 'enrollment-b',
+              registrationId: 'registration-enrollment-b',
+              startNumber: 11,
+              passCount: 2,
+              requiredLaps: 3,
+            },
+          ],
+        },
+      });
+      expect(repository.publishResult).not.toHaveBeenCalled();
+      expect(repository.updateAttemptStatus).not.toHaveBeenCalled();
+    });
+
+    it('force-completes as INCOMPLETE, publishing only the participants at N', async () => {
+      const { published, auditInputs } = arrangeClosure({
+        participants: [
+          participantRow({ enrollmentId: 'enrollment-a', requiredLaps: 3 }),
+          participantRow({
+            enrollmentId: 'enrollment-b',
+            startNumber: 11,
+            requiredLaps: 3,
+          }),
+          participantRow({
+            enrollmentId: 'enrollment-excluded',
+            startNumber: 12,
+            requiredLaps: 3,
+            excludedReason: 'EXISTING_OUTCOME',
+          }),
+        ],
+        marks: [
+          ...passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+          ...passesOf('enrollment-b', [30_000, 60_000], { firstSequence: 4 }),
+        ],
+        receipts: receiptRows([1, 2, 3, 4, 5]),
+        lock: { ...lockRow(), workstationInstanceId: 'workstation-b' },
+      });
+
+      const record = await service.forceCompleteAttempt(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        forceCompleteDto({ reason: '  Дождь  ' }),
+      );
+
+      expect(roles.assertHasAnyRole).toHaveBeenCalledWith(USER_ID, [
+        RoleCode.ADMINISTRATOR,
+      ]);
+      // No DNF and no result for the short participant.
+      expect(repository.publishResult).toHaveBeenCalledTimes(1);
+      expect(published.map((row) => row.enrollmentId)).toEqual([
+        'enrollment-a',
+      ]);
+      const [, , updateInput] = callArguments<
+        [unknown, string, UpdateAttemptStatusInput]
+      >(repository.updateAttemptStatus);
+      expect(updateInput).toMatchObject({
+        status: 'INCOMPLETE',
+        closureReport: {
+          publishedEnrollmentIds: ['enrollment-a'],
+          unpublishedEnrollmentIds: ['enrollment-b', 'enrollment-excluded'],
+          conflictEnrollmentIds: [],
+        },
+      });
+      expect(repository.releaseCaptureLock).toHaveBeenCalledWith(TX, {
+        eventId: EVENT_ID,
+        lockToken: 'lock-token',
+      });
+      expect(auditInputs[0]).toMatchObject({
+        action: 'FORCE_COMPLETE',
+        reason: 'Дождь',
+        newValues: { status: 'INCOMPLETE' },
+      });
+      expect(record.state).toBe('INCOMPLETE');
+    });
+
+    it('force-completion checks the receipts of every capturing workstation', async () => {
+      arrangeClosure({
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        marks: [
+          ...passesOf('enrollment-a', [30_000]),
+          ...passesOf('enrollment-a', [60_000, 90_000], {
+            workstationInstanceId: 'workstation-b',
+            idPrefix: 'mark-b',
+          }),
+        ],
+        receipts: receiptRows([1]),
+      });
+
+      const refusal = await service
+        .forceCompleteAttempt(USER_ID, EVENT_ID, ATTEMPT_ID, forceCompleteDto())
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.UNCONFIRMED_MUTATIONS,
+        details: {
+          missingSequences: [1, 2],
+          workstations: [
+            {
+              workstationInstanceId: 'workstation-b',
+              missingSequences: [1, 2],
+            },
+          ],
+        },
+      });
+      expect(repository.updateAttemptStatus).not.toHaveBeenCalled();
+    });
+
+    it('cancels as CANCELLED and publishes nothing', async () => {
+      const { published, auditInputs } = arrangeClosure({
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        marks: passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+        receipts: receiptRows([1, 2, 3]),
+      });
+
+      const record = await service.cancelAttempt(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        cancelAttemptDto({ reason: 'Забег отменён' }),
+      );
+
+      expect(roles.assertHasAnyRole).toHaveBeenCalledWith(USER_ID, [
+        RoleCode.ADMINISTRATOR,
+      ]);
+      expect(repository.publishResult).not.toHaveBeenCalled();
+      expect(repository.replaceResultSplits).not.toHaveBeenCalled();
+      expect(published).toEqual([]);
+      const [, , updateInput] = callArguments<
+        [unknown, string, UpdateAttemptStatusInput]
+      >(repository.updateAttemptStatus);
+      expect(updateInput).toMatchObject({
+        status: 'CANCELLED',
+        closureReport: {
+          publishedEnrollmentIds: [],
+          unpublishedEnrollmentIds: ['enrollment-a'],
+          conflictEnrollmentIds: [],
+        },
+      });
+      expect(auditInputs[0]).toMatchObject({
+        action: 'CANCEL_ATTEMPT',
+        reason: 'Забег отменён',
+      });
+      expect(record.state).toBe('CANCELLED');
+    });
+
+    it('reports a pre-existing hand-entered result as a conflict and leaves it unchanged', async () => {
+      const { published } = arrangeClosure({
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        marks: passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+        receipts: receiptRows([1, 2, 3]),
+        result: (enrollmentId) =>
+          enrollmentId === 'enrollment-a'
+            ? resultRow({ id: 'result-manual', timingSessionId: null })
+            : null,
+      });
+
+      await service.completeAttempt(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        completeAttemptDto(),
+      );
+
+      expect(repository.publishResult).not.toHaveBeenCalled();
+      expect(repository.replaceResultSplits).not.toHaveBeenCalled();
+      expect(published).toEqual([]);
+      const [, , updateInput] = callArguments<
+        [unknown, string, UpdateAttemptStatusInput]
+      >(repository.updateAttemptStatus);
+      expect(updateInput.closureReport).toEqual({
+        publishedEnrollmentIds: [],
+        unpublishedEnrollmentIds: [],
+        conflictEnrollmentIds: ['enrollment-a'],
+      });
+    });
+
+    it('skips a withdrawn enrollment and reports it unpublished', async () => {
+      const { published } = arrangeClosure({
+        participants: [
+          participantRow({ enrollmentId: 'enrollment-a', requiredLaps: 3 }),
+          participantRow({
+            enrollmentId: 'enrollment-b',
+            startNumber: 11,
+            requiredLaps: 3,
+          }),
+        ],
+        marks: [
+          ...passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+          ...passesOf('enrollment-b', [40_000, 80_000, 120_000], {
+            firstSequence: 4,
+            idPrefix: 'mark-b',
+          }),
+        ],
+        receipts: receiptRows([1, 2, 3, 4, 5, 6]),
+        withdrawn: ['enrollment-a'],
+      });
+
+      await service.completeAttempt(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        completeAttemptDto({ lastIssuedSequence: 6 }),
+      );
+
+      expect(published.map((row) => row.enrollmentId)).toEqual([
+        'enrollment-b',
+      ]);
+      expect(published[0].timeMilliseconds).toBe(120_000);
+      const [, , updateInput] = callArguments<
+        [unknown, string, UpdateAttemptStatusInput]
+      >(repository.updateAttemptStatus);
+      expect(updateInput.closureReport).toEqual({
+        publishedEnrollmentIds: ['enrollment-b'],
+        unpublishedEnrollmentIds: ['enrollment-a'],
+        conflictEnrollmentIds: [],
+      });
+    });
+
+    it('accepts lastIssuedSequence zero when the completing workstation issued nothing', async () => {
+      arrangeClosure({
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        marks: passesOf('enrollment-a', [30_000, 60_000, 90_000], {
+          workstationInstanceId: 'workstation-earlier',
+        }),
+        receipts: receiptRows([1, 2, 3], 'workstation-earlier'),
+      });
+
+      const record = await service.completeAttempt(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        completeAttemptDto({ lastIssuedSequence: 0 }),
+      );
+
+      expect(record.state).toBe('COMPLETED');
+      expect(repository.publishResult).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves the attempt running and writes nothing when a publication fails', async () => {
+      arrangeClosure({
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        marks: passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+        receipts: receiptRows([1, 2, 3]),
+      });
+      repository.publishResult.mockRejectedValue(
+        new Error('Result insert failed.'),
+      );
+
+      await expect(
+        service.completeAttempt(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          completeAttemptDto(),
+        ),
+      ).rejects.toThrow('Result insert failed.');
+
+      expect(repository.replaceResultSplits).not.toHaveBeenCalled();
+      expect(repository.updateAttemptStatus).not.toHaveBeenCalled();
+      expect(repository.releaseCaptureLock).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('refuses every closure on an attempt that is not running', async () => {
+      arrangeClosure({
+        attempt: attemptRow({
+          id: ATTEMPT_ID,
+          status: 'CANCELLED',
+          closedAt: NOW,
+        }),
+      });
+
+      await expect(
+        service.completeAttempt(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          completeAttemptDto(),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.ATTEMPT_CLOSED });
+      await expect(
+        service.forceCompleteAttempt(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          forceCompleteDto(),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.ATTEMPT_CLOSED });
+      await expect(
+        service.cancelAttempt(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          cancelAttemptDto(),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.ATTEMPT_CLOSED });
+      expect(repository.updateAttemptStatus).not.toHaveBeenCalled();
+      expect(repository.publishResult).not.toHaveBeenCalled();
+    });
+
+    it('refuses ordinary completion from a workstation that does not hold capture', async () => {
+      arrangeClosure({
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        marks: passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+        receipts: receiptRows([1, 2, 3]),
+        lock: { ...lockRow(), workstationInstanceId: 'workstation-b' },
+      });
+
+      const refusal = await service
+        .completeAttempt(USER_ID, EVENT_ID, ATTEMPT_ID, completeAttemptDto())
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.CAPTURE_NOT_HELD,
+        details: {
+          workstationInstanceId: WORKSTATION,
+          holderWorkstationInstanceId: 'workstation-b',
+        },
+      });
+      expect(repository.updateAttemptStatus).not.toHaveBeenCalled();
+    });
+
+    it('refuses a blank reason for force-completion and cancellation', async () => {
+      arrangeClosure({
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+      });
+
+      await expect(
+        service.forceCompleteAttempt(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          forceCompleteDto({ reason: '   ' }),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.REASON_REQUIRED });
+      await expect(
+        service.cancelAttempt(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          cancelAttemptDto({ reason: '' }),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.REASON_REQUIRED });
+      expect(repository.withTransaction).not.toHaveBeenCalled();
     });
   });
 });

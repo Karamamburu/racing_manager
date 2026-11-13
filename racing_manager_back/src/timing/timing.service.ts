@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { ResultOutcome } from '../../generated/prisma';
+import type { EnrollmentStatus, ResultOutcome } from '../../generated/prisma';
 import { RoleCode, TIMING_OPERATE_ROLE_CODES } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
 import {
@@ -20,6 +20,7 @@ import {
   assertCanAddPass,
   assertWithinBounds,
   assignLapNumbers,
+  canComplete,
   canCorrectOfficialTime,
   canRebindOrCancelPass,
   canStartAttempt,
@@ -38,9 +39,12 @@ import {
 import type {
   BindPendingFinishDto,
   CancelPendingFinishDto,
+  CancelTimingAttemptDto,
   CancelTimingPassDto,
   CaptureTimingPassDto,
+  CompleteTimingAttemptDto,
   CorrectOfficialTimeDto,
+  ForceCompleteTimingAttemptDto,
   OpenClockEpochDto,
   QuickUndoTimingPassDto,
   RebindTimingPassDto,
@@ -59,6 +63,7 @@ import {
   type TimingAuditRow,
   type TimingClassCompetitionRow,
   type TimingClockEpochRow,
+  type TimingClosureReportRecord,
   type TimingEnrollmentRow,
   type TimingEventRow,
   type TimingMarkRow,
@@ -66,6 +71,7 @@ import {
   type TimingParticipantRow,
   type TimingParticipantRosterRow,
   type TimingPublishedResultRow,
+  type TimingReceiptRow,
   type TimingRoutingCandidateRow,
   type TimingStartRow,
   type TimingTx,
@@ -104,10 +110,14 @@ import type {
  * correction, a pass cancellation and a pass rebind write no receipt at all:
  * they are record corrections, not workstation captures.
  *
- * Closure, the lock lifecycle and the role grant belong to later waves and are
- * not implemented here. A correction still republishes an already
- * timing-published result, because the published total must agree with the
- * official values as soon as the category is unfinished.
+ * Closure is the one indivisible action of this module: the state change, every
+ * eligible result with its split set, the closure report, the capture-lock
+ * release and the audit row commit together or not at all (U-20). A cancelled
+ * attempt publishes nothing; a force-completed attempt publishes only the
+ * participants that reached N. The capture-lock claim/transfer and the role
+ * grant belong to later waves and are not implemented here. A correction still
+ * republishes an already timing-published result, because the published total
+ * must agree with the official values as soon as the category is unfinished.
  */
 
 /** Why a roster row is out of timing: displayed in a multi-stage race section. */
@@ -245,6 +255,42 @@ type RepublishPlan = {
   registrationId: string;
   totalMs: number;
   splits: TimingLapSplit[];
+};
+
+/** Everything one closure decides before it writes a row. */
+type ClosureInput = {
+  eventId: string;
+  attemptId: string;
+  actorUserId: string;
+  status: 'COMPLETED' | 'INCOMPLETE' | 'CANCELLED';
+  action: 'COMPLETE' | 'FORCE_COMPLETE' | 'CANCEL_ATTEMPT';
+  reason: string | null;
+  /** The completing workstation; `null` for an administrative closure. */
+  workstationInstanceId: string | null;
+  /** The completing workstation's highest issued sequence; `null` for admin. */
+  lastIssuedSequence: number | null;
+  /** Ordinary completion also requires every non-excluded participant at N. */
+  requireEveryParticipantAtN: boolean;
+};
+
+/** One participant a closure publishes, with its exact split set. */
+type ClosurePublication = {
+  enrollmentId: string;
+  registrationId: string;
+  totalMs: number;
+  splits: TimingLapSplit[];
+};
+
+/** What a closure publishes and what it reports for every other participant. */
+type ClosurePlan = {
+  publications: ClosurePublication[];
+  report: TimingClosureReportRecord;
+};
+
+/** One workstation whose issued sequences lack a final receipt. */
+type WorkstationReceiptGap = {
+  workstationInstanceId: string;
+  missingSequences: number[];
 };
 
 @Injectable()
@@ -1221,6 +1267,118 @@ export class TimingService {
   }
 
   /**
+   * `POST /events/:eventId/timing/attempts/:attemptId/complete`: the ordinary
+   * closure (E-17, E-18).
+   *
+   * Closure is the capture holder's action, so the event-wide lock is checked
+   * before the transaction and again inside it. Every gate is evaluated from
+   * freshly read marks, receipts and roster rows inside the transaction, so a
+   * mutation that lands between the check and the closure is still gated.
+   */
+  async completeAttempt(
+    authentikId: string | undefined,
+    eventId: string,
+    attemptId: string,
+    dto: CompleteTimingAttemptDto,
+  ): Promise<TimingAttemptRecordView> {
+    await this.rolesService.assertHasAnyRole(
+      authentikId,
+      TIMING_OPERATE_ROLE_CODES,
+    );
+    await this.loadRunningAttemptForEvent(attemptId, eventId);
+    const lock = await this.repository.getCaptureLock(eventId);
+    if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
+      throw timingError(
+        TimingErrorCode.CAPTURE_NOT_HELD,
+        'This workstation does not hold capture.',
+        {
+          workstationInstanceId: dto.workstationInstanceId,
+          holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
+        },
+      );
+    }
+    const actorUserId = await this.requireUserId(authentikId);
+    return this.closeAttempt({
+      eventId,
+      attemptId,
+      actorUserId,
+      status: 'COMPLETED',
+      action: 'COMPLETE',
+      reason: null,
+      workstationInstanceId: dto.workstationInstanceId,
+      lastIssuedSequence: dto.lastIssuedSequence,
+      requireEveryParticipantAtN: true,
+    });
+  }
+
+  /**
+   * `POST /events/:eventId/timing/attempts/:attemptId/force-complete`: an
+   * administrator closes a running attempt as `INCOMPLETE` (E-19).
+   *
+   * The resolution gates still hold — no unbound pending finish and every
+   * issued mutation receipted — but the attempt closes without requiring N
+   * passes. It writes no DNF, no synthetic pass and no invented time; only a
+   * participant already holding exactly N passes is published.
+   */
+  async forceCompleteAttempt(
+    authentikId: string | undefined,
+    eventId: string,
+    attemptId: string,
+    dto: ForceCompleteTimingAttemptDto,
+  ): Promise<TimingAttemptRecordView> {
+    await this.rolesService.assertHasAnyRole(authentikId, [
+      RoleCode.ADMINISTRATOR,
+    ]);
+    const reason = normalizeReason(dto.reason);
+    await this.loadRunningAttemptForEvent(attemptId, eventId);
+    const actorUserId = await this.requireUserId(authentikId);
+    return this.closeAttempt({
+      eventId,
+      attemptId,
+      actorUserId,
+      status: 'INCOMPLETE',
+      action: 'FORCE_COMPLETE',
+      reason,
+      workstationInstanceId: null,
+      lastIssuedSequence: null,
+      requireEveryParticipantAtN: false,
+    });
+  }
+
+  /**
+   * `POST /events/:eventId/timing/attempts/:attemptId/cancel`: an administrator
+   * closes a running attempt as `CANCELLED` and publishes nothing (E-20).
+   *
+   * The start time, the passes and the history stay readable as
+   * non-authoritative. The status change also frees the category for a new
+   * attempt, because the partial unique index covers `RUNNING` only.
+   */
+  async cancelAttempt(
+    authentikId: string | undefined,
+    eventId: string,
+    attemptId: string,
+    dto: CancelTimingAttemptDto,
+  ): Promise<TimingAttemptRecordView> {
+    await this.rolesService.assertHasAnyRole(authentikId, [
+      RoleCode.ADMINISTRATOR,
+    ]);
+    const reason = normalizeReason(dto.reason);
+    await this.loadRunningAttemptForEvent(attemptId, eventId);
+    const actorUserId = await this.requireUserId(authentikId);
+    return this.closeAttempt({
+      eventId,
+      attemptId,
+      actorUserId,
+      status: 'CANCELLED',
+      action: 'CANCEL_ATTEMPT',
+      reason,
+      workstationInstanceId: null,
+      lastIssuedSequence: null,
+      requireEveryParticipantAtN: false,
+    });
+  }
+
+  /**
    * One bound pass of the event and the attempt it belongs to. The mark must be
    * a `PASS`; its state is read separately by the caller, so a correction after
    * closure can still address it while a cancellation cannot.
@@ -1273,6 +1431,26 @@ export class TimingService {
         TimingErrorCode.NOT_FOUND,
         'The timing attempt belongs to another event.',
         { attemptId, eventId },
+      );
+    }
+    return attempt;
+  }
+
+  /**
+   * One attempt that belongs to the addressed event and is still active. A
+   * closure, like every other mutation, only accepts a `RUNNING` attempt.
+   */
+  private async loadRunningAttemptForEvent(
+    attemptId: string,
+    eventId: string,
+    tx?: TimingTx,
+  ): Promise<TimingAttemptRow> {
+    const attempt = await this.loadAttemptForEvent(attemptId, eventId, tx);
+    if (attempt.status !== 'RUNNING') {
+      throw timingError(
+        TimingErrorCode.ATTEMPT_CLOSED,
+        'A closure requires a running attempt.',
+        { attemptId, status: attempt.status },
       );
     }
     return attempt;
@@ -1588,6 +1766,290 @@ export class TimingService {
       timingSessionId: attemptId,
     });
     await this.repository.replaceResultSplits(tx, published.id, plan.splits);
+  }
+
+  /**
+   * One closure, in one transaction: the resolution gates, the publication of
+   * every eligible result with its split set, the state change, the closure
+   * report, the capture-lock release and the audit row.
+   *
+   * A refusal or a failed write throws out of the transaction, so PostgreSQL
+   * rolls back all of it: the attempt stays `RUNNING`, no participant gains a
+   * result or a split and the lock is still held (U-20, F-19).
+   */
+  private async closeAttempt(
+    input: ClosureInput,
+  ): Promise<TimingAttemptRecordView> {
+    return this.repository.withTransaction(async (tx) => {
+      const current = await this.loadRunningAttemptForEvent(
+        input.attemptId,
+        input.eventId,
+        tx,
+      );
+      const participants = await this.repository.listParticipants(
+        input.attemptId,
+        tx,
+      );
+      const marks = await this.repository.listMarks(input.attemptId, tx);
+      const pendingFinishes = await this.repository.listPendingFinishes(
+        input.attemptId,
+        tx,
+      );
+      const statuses = await this.repository.listEnrollmentStatuses(
+        participants
+          .filter((participant) => participant.excludedReason === null)
+          .map((participant) => participant.enrollmentId),
+        tx,
+      );
+      await this.assertClosureGates(
+        tx,
+        current,
+        participants,
+        marks,
+        pendingFinishes,
+        statuses,
+        input,
+      );
+      const plan = await this.planClosure(
+        tx,
+        current,
+        participants,
+        marks,
+        statuses,
+        input.status !== 'CANCELLED',
+      );
+
+      for (const publication of plan.publications) {
+        const published = await this.repository.publishResult(tx, {
+          enrollmentId: publication.enrollmentId,
+          registrationId: publication.registrationId,
+          outcome: 'FINISHED',
+          timeMilliseconds: publication.totalMs,
+          timingSessionId: current.id,
+        });
+        await this.repository.replaceResultSplits(
+          tx,
+          published.id,
+          publication.splits,
+        );
+      }
+
+      const closedAt = new Date();
+      const closed = await this.repository.updateAttemptStatus(tx, current.id, {
+        status: input.status,
+        closedAt,
+        closedByUserId: input.actorUserId,
+        closureReport: plan.report,
+      });
+      await this.releaseClosureLock(tx, input);
+      await this.repository.insertAudit(tx, {
+        attemptId: current.id,
+        actorUserId: input.actorUserId,
+        action: input.action,
+        targetType: 'ATTEMPT',
+        targetId: current.id,
+        oldValues: { status: current.status },
+        newValues: {
+          status: input.status,
+          closureReport: plan.report,
+        },
+        reason: input.reason,
+      });
+
+      const [publishedResults, audit] = await Promise.all([
+        this.repository.listPublishedResults(current.id, tx),
+        this.repository.listAudit(current.id, tx),
+      ]);
+      return {
+        attemptId: closed.id,
+        state: closed.status,
+        officialStartedAt: closed.officialStartedAt.toISOString(),
+        passes: this.toOrderedPassViews(marks),
+        pendingFinishes: pendingFinishes.map((mark) => toPassView(mark)),
+        closureReport: closed.closureReport,
+        publishedResults: publishedResults.map((row) =>
+          toPublishedResultView(row),
+        ),
+        audit: audit.map(toAuditView),
+      };
+    });
+  }
+
+  /**
+   * The three closure gates in the surface's order: an unbound pending finish,
+   * an issued sequence without a final receipt, then a participant below N.
+   * Force-completion and cancellation skip the third gate only.
+   */
+  private async assertClosureGates(
+    tx: TimingTx,
+    attempt: TimingAttemptRow,
+    participants: readonly TimingParticipantRow[],
+    marks: readonly TimingMarkRow[],
+    pendingFinishes: readonly TimingMarkRow[],
+    statuses: ReadonlyMap<string, EnrollmentStatus>,
+    input: ClosureInput,
+  ): Promise<void> {
+    const receipts = await this.repository.listAttemptReceipts(attempt.id, tx);
+    const coverage = closureReceiptCoverage(marks, receipts, input);
+    const below = input.requireEveryParticipantAtN
+      ? participants.filter(
+          (participant) =>
+            isGateParticipant(participant, statuses) &&
+            boundPassCount(marks, participant.enrollmentId) !==
+              participant.requiredLaps,
+        )
+      : [];
+    const refusal = canComplete({
+      pendingFinishCount: pendingFinishes.length,
+      unconfirmedMutationCount: coverage.missingSequences.length,
+      participantsBelowRequiredLaps: below.length,
+    });
+    if (refusal === null) {
+      return;
+    }
+    if (refusal === TimingErrorCode.PENDING_REMAINS) {
+      throw timingError(
+        TimingErrorCode.PENDING_REMAINS,
+        'An unbound pending finish still blocks closure.',
+        {
+          attemptId: attempt.id,
+          pendingFinishIds: pendingFinishes.map((mark) => mark.id),
+        },
+      );
+    }
+    if (refusal === TimingErrorCode.UNCONFIRMED_MUTATIONS) {
+      throw timingError(
+        TimingErrorCode.UNCONFIRMED_MUTATIONS,
+        'Unconfirmed workstation mutations block closure.',
+        {
+          attemptId: attempt.id,
+          missingSequences: coverage.missingSequences,
+          workstations: coverage.workstations,
+        },
+      );
+    }
+    throw timingError(
+      TimingErrorCode.PARTICIPANTS_BELOW_LAPS,
+      'Every participant must hold N passes to complete.',
+      {
+        attemptId: attempt.id,
+        participants: below.map((participant) => ({
+          enrollmentId: participant.enrollmentId,
+          registrationId: participant.registrationId,
+          startNumber: participant.startNumber,
+          passCount: boundPassCount(marks, participant.enrollmentId),
+          requiredLaps: participant.requiredLaps,
+        })),
+      },
+    );
+  }
+
+  /**
+   * The publication set of one closure. A cancellation publishes nothing; a
+   * completed or forced attempt publishes every non-excluded participant that
+   * holds exactly N passes, unless the enrollment was withdrawn or already
+   * carries another outcome, which is reported instead of overwritten (F-21,
+   * F-30, U-10).
+   */
+  private async planClosure(
+    tx: TimingTx,
+    attempt: TimingAttemptRow,
+    participants: readonly TimingParticipantRow[],
+    marks: readonly TimingMarkRow[],
+    statuses: ReadonlyMap<string, EnrollmentStatus>,
+    publish: boolean,
+  ): Promise<ClosurePlan> {
+    const publishedEnrollmentIds: string[] = [];
+    const unpublishedEnrollmentIds: string[] = [];
+    const conflictEnrollmentIds: string[] = [];
+    const publications: ClosurePublication[] = [];
+    if (!publish) {
+      return {
+        publications,
+        report: {
+          publishedEnrollmentIds,
+          unpublishedEnrollmentIds: participants.map(
+            (participant) => participant.enrollmentId,
+          ),
+          conflictEnrollmentIds,
+        },
+      };
+    }
+
+    const eligible = new Set(
+      participants
+        .filter(
+          (participant) =>
+            isGateParticipant(participant, statuses) &&
+            boundPassCount(marks, participant.enrollmentId) ===
+              participant.requiredLaps,
+        )
+        .map((participant) => participant.enrollmentId),
+    );
+    for (const participant of participants) {
+      if (!eligible.has(participant.enrollmentId)) {
+        unpublishedEnrollmentIds.push(participant.enrollmentId);
+        continue;
+      }
+      const existing = await this.repository.findResultByEnrollment(
+        participant.enrollmentId,
+        tx,
+      );
+      if (
+        existing !== null &&
+        existing.outcome !== null &&
+        existing.timingSessionId !== attempt.id
+      ) {
+        conflictEnrollmentIds.push(participant.enrollmentId);
+        continue;
+      }
+      publications.push({
+        enrollmentId: participant.enrollmentId,
+        registrationId: participant.registrationId,
+        ...participantPublication(attempt, participant, marks),
+      });
+      publishedEnrollmentIds.push(participant.enrollmentId);
+    }
+    return {
+      publications,
+      report: {
+        publishedEnrollmentIds,
+        unpublishedEnrollmentIds,
+        conflictEnrollmentIds,
+      },
+    };
+  }
+
+  /**
+   * Releases the one event-wide capture hold inside the closure transaction.
+   * Ordinary completion releases only the hold the completing workstation still
+   * owns; an administrative closure releases whatever hold exists.
+   */
+  private async releaseClosureLock(
+    tx: TimingTx,
+    input: ClosureInput,
+  ): Promise<void> {
+    const lock = await this.repository.getCaptureLock(input.eventId, tx);
+    if (lock === null) {
+      return;
+    }
+    if (
+      input.status === 'COMPLETED' &&
+      lock.workstationInstanceId !== input.workstationInstanceId
+    ) {
+      throw timingError(
+        TimingErrorCode.CAPTURE_NOT_HELD,
+        'This workstation does not hold capture.',
+        {
+          workstationInstanceId: input.workstationInstanceId,
+          holderWorkstationInstanceId: lock.workstationInstanceId,
+        },
+      );
+    }
+    await this.repository.releaseCaptureLock(tx, {
+      eventId: input.eventId,
+      lockToken: lock.lockToken,
+    });
   }
 
   /** Rewrites one participant's bound lap numbers in official-instant order. */
@@ -2430,6 +2892,129 @@ function boundPassCount(
   return marks.filter(
     (mark) => mark.status === 'BOUND' && mark.enrollmentId === enrollmentId,
   ).length;
+}
+
+/**
+ * Whether a frozen participant takes part in a closure gate and publication:
+ * it was not excluded at the freeze and its enrollment is still `REGISTERED`.
+ * A withdrawn or missing enrollment row is neither gated nor published (S-08).
+ */
+function isGateParticipant(
+  participant: TimingParticipantRow,
+  statuses: ReadonlyMap<string, EnrollmentStatus>,
+): boolean {
+  return (
+    participant.excludedReason === null &&
+    statuses.get(participant.enrollmentId) === 'REGISTERED'
+  );
+}
+
+/**
+ * The publication of one participant that holds exactly N passes: the total is
+ * the elapsed value of the N-th pass and the splits are the N lap times in
+ * official-instant order, so the last cumulative value equals the total
+ * (U-11, U-12, U-15).
+ */
+function participantPublication(
+  attempt: TimingAttemptRow,
+  participant: TimingParticipantRow,
+  marks: readonly TimingMarkRow[],
+): { totalMs: number; splits: TimingLapSplit[] } {
+  const passes = marks
+    .filter(
+      (mark) =>
+        mark.status === 'BOUND' &&
+        mark.enrollmentId === participant.enrollmentId,
+    )
+    .map((mark) => ({ passId: mark.id, officialAt: mark.officialAt }));
+  const splits = computeSplits(attempt.officialStartedAt, passes);
+  if (splits.length !== participant.requiredLaps) {
+    throw timingError(
+      TimingErrorCode.INVALID_STATE,
+      'A published participant must hold exactly N passes.',
+      {
+        enrollmentId: participant.enrollmentId,
+        passCount: splits.length,
+        requiredLaps: participant.requiredLaps,
+      },
+    );
+  }
+  return { totalMs: splits[splits.length - 1].cumulativeMs, splits };
+}
+
+/**
+ * The sequences of one workstation that have no final receipt. The ceiling is
+ * the higher of the caller's `lastIssuedSequence` and the highest sequence the
+ * shared record already holds, so a stale or dishonest client count can never
+ * hide an issued mutation (AD-3).
+ */
+function missingReceiptSequences(
+  marks: readonly TimingMarkRow[],
+  receipts: readonly TimingReceiptRow[],
+  workstationInstanceId: string,
+  lastIssuedSequence: number,
+): number[] {
+  const covered = new Set(
+    receipts
+      .filter(
+        (receipt) => receipt.workstationInstanceId === workstationInstanceId,
+      )
+      .map((receipt) => receipt.deviceSequence),
+  );
+  let highest = Math.max(0, lastIssuedSequence);
+  for (const mark of marks) {
+    if (mark.workstationInstanceId !== workstationInstanceId) continue;
+    if (mark.deviceSequence !== null && mark.deviceSequence > highest) {
+      highest = mark.deviceSequence;
+    }
+  }
+  const missing: number[] = [];
+  for (let sequence = 1; sequence <= highest; sequence += 1) {
+    if (!covered.has(sequence)) {
+      missing.push(sequence);
+    }
+  }
+  return missing;
+}
+
+/**
+ * The receipted sequence coverage of a closure. Ordinary completion checks the
+ * completing workstation only; an administrative closure checks every
+ * workstation that captured in the attempt. Every contiguous run from 1 to the
+ * highest issued sequence must have a receipt.
+ */
+function closureReceiptCoverage(
+  marks: readonly TimingMarkRow[],
+  receipts: readonly TimingReceiptRow[],
+  input: Pick<ClosureInput, 'workstationInstanceId' | 'lastIssuedSequence'>,
+): { missingSequences: number[]; workstations: WorkstationReceiptGap[] } {
+  const workstations =
+    input.workstationInstanceId === null
+      ? [
+          ...new Set([
+            ...marks.map((mark) => mark.workstationInstanceId),
+            ...receipts.map((receipt) => receipt.workstationInstanceId),
+          ]),
+        ].sort()
+      : [input.workstationInstanceId];
+  const gaps: WorkstationReceiptGap[] = [];
+  for (const workstationInstanceId of workstations) {
+    const missingSequences = missingReceiptSequences(
+      marks,
+      receipts,
+      workstationInstanceId,
+      workstationInstanceId === input.workstationInstanceId
+        ? (input.lastIssuedSequence ?? 0)
+        : 0,
+    );
+    if (missingSequences.length > 0) {
+      gaps.push({ workstationInstanceId, missingSequences });
+    }
+  }
+  const missingSequences = [
+    ...new Set(gaps.flatMap((gap) => gap.missingSequences)),
+  ].sort((left, right) => left - right);
+  return { missingSequences, workstations: gaps };
 }
 
 /**

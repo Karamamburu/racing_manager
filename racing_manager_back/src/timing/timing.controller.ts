@@ -23,9 +23,12 @@ import { SessionAuthGuard } from '../auth/session-auth.guard';
 import {
   BindPendingFinishDto,
   CancelPendingFinishDto,
+  CancelTimingAttemptDto,
   CancelTimingPassDto,
   CaptureTimingPassDto,
+  CompleteTimingAttemptDto,
   CorrectOfficialTimeDto,
+  ForceCompleteTimingAttemptDto,
   OpenClockEpochDto,
   QuickUndoTimingPassDto,
   RebindTimingPassDto,
@@ -265,6 +268,73 @@ export class TimingController {
       attemptId,
       dto,
       idempotencyKey,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/attempts/:attemptId/complete`: the capture
+   * workstation closes a running attempt as `COMPLETED` and publishes every
+   * eligible result with its splits.
+   */
+  @Post('attempts/:attemptId/complete')
+  @HttpCode(HttpStatus.OK)
+  completeAttempt(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('attemptId', new ParseUUIDPipe({ version: '4' }))
+    attemptId: string,
+    @Body() dto: CompleteTimingAttemptDto,
+  ): Promise<TimingAttemptRecordView> {
+    return this.timingService.completeAttempt(
+      req.session?.userSub,
+      eventId,
+      attemptId,
+      dto,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/attempts/:attemptId/force-complete`: an
+   * administrator closes a running attempt as `INCOMPLETE` with a reason. The
+   * method-level role overrides the class-level timing roles.
+   */
+  @Post('attempts/:attemptId/force-complete')
+  @HttpCode(HttpStatus.OK)
+  @Roles(RoleCode.ADMINISTRATOR)
+  forceCompleteAttempt(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('attemptId', new ParseUUIDPipe({ version: '4' }))
+    attemptId: string,
+    @Body() dto: ForceCompleteTimingAttemptDto,
+  ): Promise<TimingAttemptRecordView> {
+    return this.timingService.forceCompleteAttempt(
+      req.session?.userSub,
+      eventId,
+      attemptId,
+      dto,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/attempts/:attemptId/cancel`: an administrator
+   * closes a running attempt as `CANCELLED` with a reason and publishes nothing.
+   */
+  @Post('attempts/:attemptId/cancel')
+  @HttpCode(HttpStatus.OK)
+  @Roles(RoleCode.ADMINISTRATOR)
+  cancelAttempt(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('attemptId', new ParseUUIDPipe({ version: '4' }))
+    attemptId: string,
+    @Body() dto: CancelTimingAttemptDto,
+  ): Promise<TimingAttemptRecordView> {
+    return this.timingService.cancelAttempt(
+      req.session?.userSub,
+      eventId,
+      attemptId,
+      dto,
     );
   }
 }
