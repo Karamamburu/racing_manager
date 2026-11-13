@@ -1,25 +1,49 @@
-import { describe, expect, it } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { useSessionQuery } from '../../features/auth/useSessionQuery';
+import { useClassCompetitionsQuery } from '../../features/class-competitions/useClassCompetitionsQuery';
 import { categoryTitle } from '../../features/events/ageCategories';
 import {
   categoryReadyToFinish,
   groupParticipants,
 } from '../../features/events/protocolGroups';
 import { filterProtocolGroups } from '../../features/events/protocolFilters';
+import { useEventDetailsQuery } from '../../features/events/useEventDetailsQuery';
 import type {
   AgeCategoryRef,
   AgeGroupId,
   AgeSplitRef,
+  EventDetails,
   EventFormatRef,
   EventParticipant,
   StartResponse,
 } from '../../shared/types/event';
 import {
   AGE_SPLIT_BLOCKING_EVENT_STATUSES,
+  EventPage,
   resolveAgeSplitGroupCounts,
   resolveAgeSplitSelection,
   type AgeSplitSelectionInput,
 } from './index';
 import type { AgeSplitCategory } from './components/AgeSplitModal';
+
+vi.mock('../../features/auth/useSessionQuery', () => ({
+  useSessionQuery: vi.fn(),
+}));
+
+vi.mock('../../features/events/useEventDetailsQuery', () => ({
+  useEventDetailsQuery: vi.fn(),
+  eventDetailsQueryKey: (id: string | undefined) => ['event', id ?? ''] as const,
+}));
+
+vi.mock('../../features/class-competitions/useClassCompetitionsQuery', () => ({
+  useClassCompetitionsQuery: vi.fn(),
+  classCompetitionsQueryKey: (id: string | undefined) =>
+    ['class-competitions', id ?? ''] as const,
+}));
+
 
 const base: AgeSplitSelectionInput = {
   roles: ['ADMINISTRATOR'],
@@ -352,5 +376,261 @@ describe('resolveAgeSplitGroupCounts', () => {
 
   it('returns an empty record when no category is selected', () => {
     expect(resolveAgeSplitGroupCounts(filteredGroups, null)).toEqual({});
+  });
+});
+
+const TIMING_SURFACE_TEXT = 'Хронометраж мероприятия';
+
+function eventDetails(registrations: EventParticipant[]): EventDetails {
+  return {
+    id: 'event-1',
+    name: 'Кубок города',
+    eventType: 'RACE',
+    sport: 'RUN',
+    eventDate: '2026-11-13T09:00:00.000Z',
+    distanceKm: null,
+    description: null,
+    mapLink: null,
+    registrationOpen: null,
+    registrationClose: null,
+    status: 'IN_PROGRESS',
+    createdAt: '2026-11-01T09:00:00.000Z',
+    updatedAt: '2026-11-01T09:00:00.000Z',
+    track: { id: 'track-1', name: 'Трасса', locationCity: null, mapLink: null },
+    createdBy: null,
+    formats,
+    laps: [],
+    starts,
+    registrations,
+    registeredCount: registrations.length,
+    finishedCategories: [],
+  };
+}
+
+function mockSession(session: {
+  authenticated: boolean;
+  userId: string | null;
+  roles: string[];
+}) {
+  vi.mocked(useSessionQuery).mockReturnValue({
+    data: session,
+    isLoading: false,
+    isFetched: true,
+  } as unknown as ReturnType<typeof useSessionQuery>);
+}
+
+function mockEvent(registrations: EventParticipant[]) {
+  vi.mocked(useEventDetailsQuery).mockReturnValue({
+    data: eventDetails(registrations),
+    isLoading: false,
+    isError: false,
+  } as unknown as ReturnType<typeof useEventDetailsQuery>);
+}
+
+function mockCompetitions() {
+  vi.mocked(useClassCompetitionsQuery).mockReturnValue({
+    data: [],
+    isSuccess: true,
+    isError: false,
+    isLoading: false,
+  } as unknown as ReturnType<typeof useClassCompetitionsQuery>);
+}
+
+function renderEventPage() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={['/events/event-1']}>
+        <Routes>
+          <Route path="/events/:id" element={<EventPage />} />
+          <Route
+            path="/events/:id/timing"
+            element={<div>{TIMING_SURFACE_TEXT}</div>}
+          />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+function protocolRow(fullName: string): HTMLElement {
+  const cell = screen.getByText(fullName);
+  const row = cell.closest('tr');
+  if (!row) throw new Error(`no protocol row for ${fullName}`);
+  return row;
+}
+
+const reader = { authenticated: true, userId: 'user-reader', roles: [] };
+const anonymous = { authenticated: false, userId: null, roles: [] };
+
+const timingFixture: EventParticipant[] = [
+  participant({ id: 'row-reader', enrollmentId: 'enrollment-reader' }),
+];
+
+beforeAll(() => {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+});
+
+afterEach(() => {
+  cleanup();
+});
+
+describe('EventPage timing entry', () => {
+  it('offers the timing entry to a referee', () => {
+    mockSession({ authenticated: true, userId: 'ref-1', roles: ['REFEREE'] });
+    mockEvent(timingFixture);
+    mockCompetitions();
+
+    renderEventPage();
+
+    expect(screen.getByRole('button', { name: /Хронометраж/ })).not.toBeNull();
+  });
+
+  it('offers the timing entry to an administrator', () => {
+    mockSession({
+      authenticated: true,
+      userId: 'admin-1',
+      roles: ['ADMINISTRATOR'],
+    });
+    mockEvent(timingFixture);
+    mockCompetitions();
+
+    renderEventPage();
+
+    expect(screen.getByRole('button', { name: /Хронометраж/ })).not.toBeNull();
+  });
+
+  it('offers no timing entry to an organizer without REFEREE', () => {
+    mockSession({
+      authenticated: true,
+      userId: 'org-1',
+      roles: ['ORGANIZER'],
+    });
+    mockEvent(timingFixture);
+    mockCompetitions();
+
+    renderEventPage();
+
+    expect(screen.queryByRole('button', { name: /Хронометраж/ })).toBeNull();
+  });
+
+  it('offers no timing entry to a reader and to an unauthenticated visitor', () => {
+    mockSession(reader);
+    mockEvent(timingFixture);
+    mockCompetitions();
+    renderEventPage();
+    expect(screen.queryByRole('button', { name: /Хронометраж/ })).toBeNull();
+    cleanup();
+
+    mockSession(anonymous);
+    mockEvent(timingFixture);
+    mockCompetitions();
+    renderEventPage();
+    expect(screen.queryByRole('button', { name: /Хронометраж/ })).toBeNull();
+  });
+
+  it('opens the timing surface of the event when pressed', () => {
+    mockSession({ authenticated: true, userId: 'ref-1', roles: ['REFEREE'] });
+    mockEvent(timingFixture);
+    mockCompetitions();
+
+    renderEventPage();
+    fireEvent.click(screen.getByRole('button', { name: /Хронометраж/ }));
+
+    expect(screen.getByText(TIMING_SURFACE_TEXT)).not.toBeNull();
+  });
+});
+
+describe('EventPage protocol splits', () => {
+  const splitRows: EventParticipant[] = [
+    participant({
+      id: 'row-splits',
+      enrollmentId: 'enrollment-splits',
+      fullName: 'Иван Сплитов',
+      startNumber: 1,
+      outcome: 'FINISHED',
+      finishTimeMs: 25_000,
+      place: 1,
+      lapSplits: [
+        { lapNumber: 1, lapTimeMs: 10_000, cumulativeMs: 10_000 },
+        { lapNumber: 2, lapTimeMs: 15_000, cumulativeMs: 25_000 },
+      ],
+    }),
+    participant({
+      id: 'row-manual',
+      enrollmentId: 'enrollment-manual',
+      fullName: 'Пётр Ручной',
+      startNumber: 2,
+      outcome: 'FINISHED',
+      finishTimeMs: 3_600_000,
+      place: 2,
+    }),
+    participant({
+      id: 'row-legacy',
+      enrollmentId: 'enrollment-legacy',
+      fullName: 'Семён Наследие',
+      startNumber: 3,
+      outcome: 'FINISHED',
+      finishTimeMs: 1_000,
+      place: 3,
+      laps: [{ lapNumber: 1, timeMilliseconds: 12_345 }],
+    }),
+  ];
+
+  function renderSplits() {
+    mockSession(reader);
+    mockEvent(splitRows);
+    mockCompetitions();
+    renderEventPage();
+  }
+
+  it('renders the lap time and the cumulative time of every published split', () => {
+    renderSplits();
+
+    const row = protocolRow('Иван Сплитов');
+
+    expect(within(row).getByText('10.000 · 10.000')).not.toBeNull();
+    expect(within(row).getByText('15.000 · 25.000')).not.toBeNull();
+    expect(
+      within(row).getByLabelText('Круг 1 из 2: круг 10.000, итог 10.000'),
+    ).not.toBeNull();
+    expect(
+      within(row).getByLabelText('Круг 2 из 2: круг 15.000, итог 25.000'),
+    ).not.toBeNull();
+    expect(within(row).getByText('00:00:25')).not.toBeNull();
+  });
+
+  it('renders nothing in that column for a row without splits', () => {
+    renderSplits();
+
+    const row = protocolRow('Пётр Ручной');
+
+    expect(within(row).queryByLabelText(/^Круг \d/)).toBeNull();
+    expect(within(row).queryByText(/·/)).toBeNull();
+    expect(within(row).getByText('01:00:00')).not.toBeNull();
+  });
+
+  it('leaves a legacy laps row unchanged and shows no split for it', () => {
+    renderSplits();
+
+    const row = protocolRow('Семён Наследие');
+
+    expect(within(row).queryByLabelText(/^Круг \d/)).toBeNull();
+    expect(within(row).queryByText(/12\.345/)).toBeNull();
+    expect(within(row).getByText('00:00:01')).not.toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { DownOutlined, RightOutlined } from '@ant-design/icons';
+import { ClockCircleOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
 import { Button, Card, Col, Empty, Grid, Modal, Result, Row, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useState } from 'react';
@@ -43,8 +43,10 @@ import {
   registrationClosedReason,
 } from '../../features/registrations/registrationWindow';
 import { registrationsService } from '../../features/registrations/registrationsService';
+import { canOperateTiming } from '../../features/timing/capabilities';
 import { FeaturesCard } from '../../shared/components';
 import { formatDateTime } from '../../shared/formatDateTime';
+import { formatFinishTime } from '../../shared/formatFinishTime';
 import { eventStatusMeta, isPastCompletedEvent, PAST_COMPLETED_EVENT_LOCKED_MESSAGE, type EventStatusCode } from '../../shared/eventStatus';
 import {
   isActiveRegistrationStatus,
@@ -57,6 +59,7 @@ import type {
   AgeGroupId,
   EventFormatRef,
   EventParticipant,
+  ParticipantLapSplit,
   SetAgeCategoriesRequest,
   StartResponse,
 } from '../../shared/types/event';
@@ -210,6 +213,48 @@ function isIncompleteProfileError(text: string): boolean {
   );
 }
 
+/**
+ * FR-43/U-12: a split shows the lap time and the cumulative elapsed time of
+ * that lap. Short races read as seconds with milliseconds (`10.000`); anything
+ * an hour or longer keeps the protocol's `hh:mm:ss` form.
+ */
+function formatSplitTime(milliseconds: number): string {
+  if (milliseconds >= 3_600_000) return formatFinishTime(milliseconds);
+  return (milliseconds / 1000).toFixed(3);
+}
+
+/**
+ * AD-12/FR-44: timing-published splits render inside the participant's own row.
+ * A row without `lapSplits` — a hand-entered total, a race row or a legacy
+ * result — renders nothing here, and the legacy `laps` array is not read.
+ */
+function LapSplitsCell({ splits }: { splits: ParticipantLapSplit[] | undefined }) {
+  if (!splits || splits.length === 0) return null;
+  return (
+    <Space direction="vertical" size={0}>
+      {splits.map((split) => {
+        const label = `Круг ${split.lapNumber} из ${splits.length}: круг ${formatSplitTime(
+          split.lapTimeMs,
+        )}, итог ${formatSplitTime(split.cumulativeMs)}`;
+        return (
+          <Tooltip key={split.lapNumber} title={label}>
+            <span
+              title={label}
+              aria-label={label}
+              style={{
+                fontVariantNumeric: 'tabular-nums',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {formatSplitTime(split.lapTimeMs)} · {formatSplitTime(split.cumulativeMs)}
+            </span>
+          </Tooltip>
+        );
+      })}
+    </Space>
+  );
+}
+
 function getParticipantColumns(options: {
   showReachedStage?: boolean;
   canAssignNumbers: boolean;
@@ -310,6 +355,14 @@ function getParticipantColumns(options: {
           saving={options.savingResultId === record.enrollmentId}
           onSave={(timeMilliseconds) => options.onAssignResult(record, timeMilliseconds)}
         />
+      ),
+    },
+    {
+      title: 'Отсечки',
+      key: 'lapSplits',
+      width: 190,
+      render: (_value: unknown, record: ProtocolParticipant) => (
+        <LapSplitsCell splits={record.lapSplits} />
       ),
     },
     {
@@ -600,7 +653,9 @@ export function EventPage() {
     myRegistration != null &&
     isActiveRegistrationStatus(myRegistration.status) &&
     event.status === 'PLANNED';
-  const hasHeaderActions = showRegister || canWithdrawOwn || canManage;
+  const canTimeEvent = canOperateTiming(session?.roles);
+  const hasHeaderActions =
+    showRegister || canWithdrawOwn || canManage || canTimeEvent;
   const status = eventStatusMeta(event.status);
   const features: FeatureItem[] = [
     { key: 'track', title: 'Трасса', value: event.track.name },
@@ -970,6 +1025,15 @@ export function EventPage() {
       extra={
         hasHeaderActions ? (
           <Space wrap>
+            {canTimeEvent ? (
+              <Button
+                type="primary"
+                icon={<ClockCircleOutlined />}
+                onClick={() => navigate(`/events/${event.id}/timing`)}
+              >
+                Хронометраж
+              </Button>
+            ) : null}
             {showRegister ? (
               <Tooltip title={registerTooltip}>
                 <span>
