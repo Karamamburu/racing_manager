@@ -362,6 +362,20 @@ export class ClassCompetitionsService {
       ...new Map(starters.map((item) => [item.registrationId, item])).values(),
     ].sort((a, b) => a.startNumber - b.startNumber);
 
+    const runningTimingParticipant =
+      await this.prisma.timingSessionParticipant.findFirst({
+        where: {
+          registrationId: { in: capturedRegistrationIds },
+          session: { eventId, status: 'RUNNING' },
+        },
+        select: { sessionId: true },
+      });
+    if (runningTimingParticipant) {
+      throw new ConflictException(
+        'Нельзя создать многоэтапную гонку, пока участник её поля выступает в идущей попытке хронометража.',
+      );
+    }
+
     const protocolResults =
       capturedEnrollmentIds.length > 0
         ? await this.prisma.result.count({

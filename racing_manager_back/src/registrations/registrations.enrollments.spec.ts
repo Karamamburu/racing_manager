@@ -21,6 +21,13 @@ type FakeEnrollmentRow = {
   createdAt: Date;
 };
 
+type FakeTimingSessionParticipant = {
+  sessionId: string;
+  eventId: string;
+  registrationId: string;
+  status: string;
+};
+
 type HarnessOptions = {
   enrollments?: {
     startId: string;
@@ -30,6 +37,11 @@ type HarnessOptions = {
   }[];
   registrationStatus?: string;
   hasResult?: boolean;
+  timingSessionParticipants?: {
+    registrationId: string;
+    eventId?: string;
+    status?: string;
+  }[];
 };
 
 function makeHarness(options: HarnessOptions = {}) {
@@ -83,6 +95,14 @@ function makeHarness(options: HarnessOptions = {}) {
       createdAt: new Date(Date.now() + index),
     })) as FakeEnrollmentRow[],
     hasResult: options.hasResult ?? false,
+    timingSessionParticipants: (options.timingSessionParticipants ?? []).map(
+      (row, index): FakeTimingSessionParticipant => ({
+        sessionId: `timing-session-${index + 1}`,
+        eventId: row.eventId ?? EVENT_ID,
+        registrationId: row.registrationId,
+        status: row.status ?? 'RUNNING',
+      }),
+    ),
   };
 
   const tx = {
@@ -178,6 +198,24 @@ function makeHarness(options: HarnessOptions = {}) {
     classCompetition: {
       findFirst: jest.fn(() => Promise.resolve(null)),
     },
+    timingSessionParticipant: {
+      findFirst: jest.fn(
+        (args: {
+          where: {
+            registrationId: string;
+            session: { eventId: string; status: string };
+          };
+        }) =>
+          Promise.resolve(
+            state.timingSessionParticipants.find(
+              (row) =>
+                row.registrationId === args.where.registrationId &&
+                row.eventId === args.where.session.eventId &&
+                row.status === args.where.session.status,
+            ) ?? null,
+          ),
+      ),
+    },
     $transaction: jest.fn((work: (client: typeof tx) => Promise<unknown>) =>
       work(tx),
     ),
@@ -208,7 +246,7 @@ function makeHarness(options: HarnessOptions = {}) {
     sync as unknown as EventStatusSyncService,
   );
 
-  return { service, state };
+  return { service, state, prisma };
 }
 
 function desired(startId: string, formatId: number) {
@@ -425,6 +463,103 @@ describe('RegistrationsService PATCH enrollments', () => {
         isCupEligible: false,
       }),
     ]);
+  });
+});
+
+describe('RegistrationsService start-number lock', () => {
+  it('refuses a number change while the participant is in a running timing attempt', async () => {
+    const { service, state, prisma } = makeHarness({
+      enrollments: [{ startId: START_A, formatId: 1 }],
+      timingSessionParticipants: [
+        { registrationId: REGISTRATION_ID, status: 'RUNNING' },
+      ],
+    });
+
+    const attempt = service.update('admin-sub', EVENT_ID, REGISTRATION_ID, {
+      startNumber: 7,
+    });
+
+    await expect(attempt).rejects.toBeInstanceOf(BadRequestException);
+    await expect(attempt).rejects.toThrow(
+      'Стартовый номер нельзя менять, пока участник выступает в идущей попытке хронометража.',
+    );
+    expect(state.registration.startNumber).toBeNull();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('allows a number change after the timing attempt has closed', async () => {
+    const { service } = makeHarness({
+      enrollments: [{ startId: START_A, formatId: 1 }],
+      timingSessionParticipants: [
+        { registrationId: REGISTRATION_ID, status: 'COMPLETED' },
+      ],
+    });
+
+    const updated = await service.update(
+      'admin-sub',
+      EVENT_ID,
+      REGISTRATION_ID,
+      { startNumber: 7 },
+    );
+
+    expect(updated.startNumber).toBe(7);
+  });
+
+  it('allows a number change when the event has no timing attempt', async () => {
+    const { service } = makeHarness({
+      enrollments: [{ startId: START_A, formatId: 1 }],
+    });
+
+    const updated = await service.update(
+      'admin-sub',
+      EVENT_ID,
+      REGISTRATION_ID,
+      { startNumber: 7 },
+    );
+
+    expect(updated.startNumber).toBe(7);
+  });
+
+  it('keeps the lock inside the event of the registration', async () => {
+    const { service } = makeHarness({
+      enrollments: [{ startId: START_A, formatId: 1 }],
+      timingSessionParticipants: [
+        {
+          registrationId: REGISTRATION_ID,
+          eventId: '99999999-9999-4999-8999-999999999999',
+          status: 'RUNNING',
+        },
+      ],
+    });
+
+    const updated = await service.update(
+      'admin-sub',
+      EVENT_ID,
+      REGISTRATION_ID,
+      { startNumber: 7 },
+    );
+
+    expect(updated.startNumber).toBe(7);
+  });
+
+  it('still updates enrollments while a timing attempt runs', async () => {
+    const { service, state } = makeHarness({
+      enrollments: [
+        { startId: START_A, formatId: 1 },
+        { startId: START_B, formatId: 1 },
+      ],
+      timingSessionParticipants: [
+        { registrationId: REGISTRATION_ID, status: 'RUNNING' },
+      ],
+    });
+
+    await service.update('admin-sub', EVENT_ID, REGISTRATION_ID, {
+      enrollments: [desired(START_A, 1)],
+    });
+
+    const byStart = new Map(state.enrollments.map((row) => [row.startId, row]));
+    expect(byStart.get(START_A)?.status).toBe('REGISTERED');
+    expect(byStart.get(START_B)?.status).toBe('WITHDRAWN');
   });
 });
 

@@ -587,6 +587,19 @@ export class RegistrationsService {
           'Стартовый номер нельзя менять, пока участник выступает в многоэтапной гонке.',
         );
       }
+      const runningTiming =
+        await this.prisma.timingSessionParticipant.findFirst({
+          where: {
+            registrationId: existing.id,
+            session: { eventId, status: 'RUNNING' },
+          },
+          select: { sessionId: true },
+        });
+      if (runningTiming) {
+        throw new BadRequestException(
+          'Стартовый номер нельзя менять, пока участник выступает в идущей попытке хронометража.',
+        );
+      }
     }
 
     try {
