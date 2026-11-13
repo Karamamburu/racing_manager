@@ -57,9 +57,20 @@ export const TIMING_CAPTURE_KINDS = [
   'NUMBER',
   'TILE',
   'PENDING_FINISH',
+  'ANONYMOUS_SPLIT',
 ] as const;
 
 export type TimingCaptureKind = (typeof TIMING_CAPTURE_KINDS)[number];
+
+/** Which lifecycle a timing attempt follows: a protocol category or one heat. */
+export const TIMING_ATTEMPT_KINDS = ['CATEGORY', 'HEAT'] as const;
+
+export type TimingAttemptKind = (typeof TIMING_ATTEMPT_KINDS)[number];
+
+/** Stage state as the surface reports it; a stage whose heats are not formed is `PENDING`. */
+export const TIMING_STAGE_STATES = ['PENDING', 'SEEDED', 'COMPLETED'] as const;
+
+export type TimingStageState = (typeof TIMING_STAGE_STATES)[number];
 
 /** A role code the user-roles view may report. */
 
@@ -78,6 +89,53 @@ export interface TimingCategoryBlockView {
   participants: TimingParticipantTileView[];
   pendingFinishes: TimingPassView[];
   lastAttempts: TimingAttemptRef[];
+  /**
+   * Which lifecycle the block follows; a block without the field is a category
+   * block. A heat block adds the heat fields below.
+   */
+  kind?: TimingAttemptKind;
+  /** Stable collapse identity of the block: category + section + race (AD-20). */
+  blockKey?: string;
+  /** The multi-stage race a heat block belongs to. */
+  classCompetitionId?: string;
+  /** The CMS stage a heat block belongs to. */
+  stageId?: string;
+  /** Human-readable stage name, for example the round of a seeded stage. */
+  stageLabel?: string;
+  stageState?: TimingStageState;
+  /** The heat number inside the stage, ascending in render order. */
+  heatNumber?: number;
+  /** Human-readable heat name. */
+  heatLabel?: string;
+}
+
+/** One stage header grouping the heat blocks of a multi-stage race. */
+export interface TimingStageGroupView {
+  /** Stable collapse identity of the stage header (AD-20). */
+  blockKey: string;
+  /** The multi-stage race; `classCompetitionId` in the CMS view. */
+  raceId: string;
+  raceTitle: string;
+  stageId: string;
+  stageLabel: string;
+  stageState: TimingStageState;
+  /** `blockKey` of every heat block this header groups, in render order. */
+  heatBlockKeys: string[];
+  blockReason: string | null;
+}
+
+/** One queued anonymous split of the event, oldest capture first. */
+export interface TimingAnonymousSplitView {
+  splitId: string;
+  attemptId: string;
+  /** `blockKey` of the attempt's block, so the queue can name it. */
+  blockKey: string;
+  attemptLabel: string;
+  /** The press instant, ISO-8601. */
+  capturedAt: string;
+  /** Elapsed value since the attempt's own official start, integer milliseconds. */
+  officialElapsedMs: number;
+  status: 'QUEUED';
 }
 
 /** The whole surface of one event: every protocol category plus the lock holder. */
@@ -85,6 +143,10 @@ export interface TimingSurfaceView {
   eventId: string;
   captureWorkstationInstanceId: string | null;
   categories: TimingCategoryBlockView[];
+  /** Stage headers of every multi-stage race; absent on a category-only surface. */
+  stageGroups?: TimingStageGroupView[];
+  /** The anonymous split queue; absent on a surface read that predates it. */
+  anonymousSplits?: TimingAnonymousSplitView[];
 }
 
 /** One participant tile: the frozen roster facts and the live capture state. */
@@ -125,6 +187,10 @@ export interface TimingClosureReportView {
   publishedEnrollmentIds: string[];
   unpublishedEnrollmentIds: string[];
   conflictEnrollmentIds: string[];
+  /** Heat closure: registrations that received a heat time. */
+  publishedRegistrationIds?: string[];
+  /** Heat closure: registrations that already gained a heat time elsewhere. */
+  conflictRegistrationIds?: string[];
 }
 
 /** One append-only audit row of the attempt. */

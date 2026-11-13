@@ -67,22 +67,32 @@ function ConsistentCaptureIdentity(
           if (body.kind === 'PENDING_FINISH') {
             return !hasValue(body.startNumber) && !hasValue(body.enrollmentId);
           }
+          if (body.kind === 'ANONYMOUS_SPLIT') {
+            return !hasValue(body.startNumber) && !hasValue(body.enrollmentId);
+          }
           // An unknown kind is already reported by @IsIn.
           return true;
         },
         defaultMessage(): string {
-          return 'startNumber and enrollmentId must match kind: number for NUMBER, enrollment for TILE, neither for PENDING_FINISH.';
+          return 'startNumber and enrollmentId must match kind: number for NUMBER, enrollment for TILE, neither for PENDING_FINISH or ANONYMOUS_SPLIT.';
         },
       },
     });
   };
 }
 
+/** The two interchangeable participant identities one commit may name. */
+type SelectedIdentity = {
+  startNumber?: number;
+  enrollmentId?: string;
+};
+
 /**
- * Rejects a bind that names both a number and an enrollment, or neither.
+ * Rejects a body that names both a number and an enrollment, or neither.
  *
- * The constraint sits on the always-required `pendingFinishId` because a
- * property can carry only one `@ValidateIf` gate; the gates on `startNumber`
+ * The constraint sits on an always-required property of the body, because a
+ * property can carry only one `@ValidateIf` gate: `pendingFinishId` for a bind,
+ * `workstationInstanceId` for a split assignment. The gates on `startNumber`
  * and `enrollmentId` then only have to express "required when the sibling is
  * missing".
  */
@@ -97,7 +107,7 @@ function SelectsExactlyOneIdentity(
       options: validationOptions,
       validator: {
         validate(_value: unknown, arguments_: ValidationArguments): boolean {
-          const body = arguments_.object as BindPendingFinishDto;
+          const body = arguments_.object as SelectedIdentity;
           return hasValue(body.startNumber) !== hasValue(body.enrollmentId);
         },
         defaultMessage(): string {
@@ -132,6 +142,31 @@ export class StartTimingAttemptDto {
   clientStartedAt!: string;
 }
 
+/** `POST /events/:eventId/timing/heat-attempts` — the Start press of one heat. */
+export class StartHeatAttemptDto {
+  /** The multi-stage race whose stage heat is timed. */
+  @IsUUID()
+  classCompetitionId!: string;
+
+  /** The CMS stage the heat belongs to; only a `SEEDED` stage starts. */
+  @IsString()
+  @MinLength(1)
+  stageId!: string;
+
+  @IsInt()
+  @Min(1)
+  heatNumber!: number;
+
+  /** The workstation that pressed Start and must hold the capture lock. */
+  @IsString()
+  @MinLength(1)
+  workstationInstanceId!: string;
+
+  /** Client wall clock of the press, ISO-8601. */
+  @IsISO8601()
+  clientStartedAt!: string;
+}
+
 /** `POST /events/:eventId/timing/attempts/:attemptId/clock-epochs`. */
 export class OpenClockEpochDto {
   @IsString()
@@ -139,7 +174,7 @@ export class OpenClockEpochDto {
   workstationInstanceId!: string;
 }
 
-/** `POST /events/:eventId/timing/passes` — one number, tile or unbound finish. */
+/** `POST /events/:eventId/timing/passes` — one number, tile, unbound finish or anonymous split. */
 export class CaptureTimingPassDto {
   @IsUUID()
   attemptId!: string;
@@ -148,13 +183,13 @@ export class CaptureTimingPassDto {
   @ConsistentCaptureIdentity()
   kind!: TimingCaptureKind;
 
-  /** Required for `NUMBER`; absent for `TILE` and `PENDING_FINISH`. */
+  /** Required for `NUMBER`; absent for `TILE`, `PENDING_FINISH` and `ANONYMOUS_SPLIT`. */
   @ValidateIf((body: CaptureTimingPassDto) => body.kind === 'NUMBER')
   @IsInt()
   @Min(1)
   startNumber?: number;
 
-  /** Required for `TILE`; absent for `NUMBER` and `PENDING_FINISH`. */
+  /** Required for `TILE`; absent for `NUMBER`, `PENDING_FINISH` and `ANONYMOUS_SPLIT`. */
   @ValidateIf((body: CaptureTimingPassDto) => body.kind === 'TILE')
   @IsString()
   @MinLength(1)
@@ -213,6 +248,38 @@ export class BindPendingFinishDto {
 
 /** `POST /events/:eventId/timing/pending-finishes/:pendingFinishId/cancel`. */
 export class CancelPendingFinishDto {
+  @IsString()
+  @MinLength(1)
+  reason!: string;
+}
+
+/** `POST /events/:eventId/timing/splits/:splitId/assign` — bind a queued split. */
+export class AssignAnonymousSplitDto {
+  /** Exactly one of `startNumber` and `enrollmentId` is required. */
+  @ValidateIf((body: AssignAnonymousSplitDto) => !hasValue(body.enrollmentId))
+  @IsInt()
+  @Min(1)
+  startNumber?: number;
+
+  /** Exactly one of `startNumber` and `enrollmentId` is required. */
+  @ValidateIf((body: AssignAnonymousSplitDto) => !hasValue(body.startNumber))
+  @IsString()
+  @MinLength(1)
+  enrollmentId?: string;
+
+  /** The workstation assigning the split; carries the exactly-one identity rule. */
+  @IsString()
+  @MinLength(1)
+  @SelectsExactlyOneIdentity()
+  workstationInstanceId!: string;
+
+  @IsInt()
+  @Min(1)
+  deviceSequence!: number;
+}
+
+/** `POST /events/:eventId/timing/splits/:splitId/cancel`. */
+export class CancelAnonymousSplitDto {
   @IsString()
   @MinLength(1)
   reason!: string;

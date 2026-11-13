@@ -1,7 +1,9 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import {
+  AssignAnonymousSplitDto,
   BindPendingFinishDto,
+  CancelAnonymousSplitDto,
   CancelPendingFinishDto,
   CancelTimingAttemptDto,
   CancelTimingPassDto,
@@ -14,6 +16,7 @@ import {
   QuickUndoTimingPassDto,
   RebindTimingPassDto,
   SetRefereeRoleDto,
+  StartHeatAttemptDto,
   StartTimingAttemptDto,
   TakeCaptureDto,
   TransferCaptureDto,
@@ -21,6 +24,7 @@ import {
 
 const ISO = '2026-11-13T10:00:00.000Z';
 const ATTEMPT_ID = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+const CLASS_COMPETITION_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
 const WORKSTATION = 'workstation-a';
 
 /** Names of the properties the validator refused for one payload. */
@@ -56,6 +60,41 @@ function capturePass(
     clientCapturedAt: ISO,
     clientElapsedMs: 1234,
     clockEpochId: 'epoch-1',
+    workstationInstanceId: WORKSTATION,
+    deviceSequence: 1,
+    ...overrides,
+  };
+}
+
+/** One `ANONYMOUS_SPLIT` capture: no participant identity at all. */
+function anonymousCapture(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return capturePass({
+    kind: 'ANONYMOUS_SPLIT',
+    startNumber: undefined,
+    ...overrides,
+  });
+}
+
+function startHeatAttempt(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    classCompetitionId: CLASS_COMPETITION_ID,
+    stageId: 'stage-1',
+    heatNumber: 1,
+    workstationInstanceId: WORKSTATION,
+    clientStartedAt: ISO,
+    ...overrides,
+  };
+}
+
+function assignSplit(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    startNumber: 42,
     workstationInstanceId: WORKSTATION,
     deviceSequence: 1,
     ...overrides,
@@ -112,6 +151,59 @@ describe('StartTimingAttemptDto', () => {
         startAttempt({ workstationInstanceId: '' }),
       ),
     ).resolves.toContain('workstationInstanceId');
+  });
+});
+
+describe('StartHeatAttemptDto', () => {
+  it('accepts a minimal heat Start press', async () => {
+    await expect(
+      refused(StartHeatAttemptDto, startHeatAttempt()),
+    ).resolves.toEqual([]);
+  });
+
+  it.each([
+    'classCompetitionId',
+    'stageId',
+    'heatNumber',
+    'workstationInstanceId',
+    'clientStartedAt',
+  ])('refuses a payload without %s', async (field) => {
+    const payload = startHeatAttempt();
+    delete payload[field];
+
+    await expect(refused(StartHeatAttemptDto, payload)).resolves.toContain(
+      field,
+    );
+  });
+
+  it('refuses a race id that is not a UUID', async () => {
+    await expect(
+      refused(
+        StartHeatAttemptDto,
+        startHeatAttempt({ classCompetitionId: 'competition-1' }),
+      ),
+    ).resolves.toContain('classCompetitionId');
+  });
+
+  it.each([0, -1, 1.5, '1'])('refuses heatNumber %p', async (heatNumber) => {
+    await expect(
+      refused(StartHeatAttemptDto, startHeatAttempt({ heatNumber })),
+    ).resolves.toContain('heatNumber');
+  });
+
+  it('refuses a blank stage id', async () => {
+    await expect(
+      refused(StartHeatAttemptDto, startHeatAttempt({ stageId: '' })),
+    ).resolves.toContain('stageId');
+  });
+
+  it('refuses a client start that is not ISO-8601', async () => {
+    await expect(
+      refused(
+        StartHeatAttemptDto,
+        startHeatAttempt({ clientStartedAt: '13.11.2026 10:00' }),
+      ),
+    ).resolves.toContain('clientStartedAt');
   });
 });
 
@@ -223,6 +315,37 @@ describe('CaptureTimingPassDto', () => {
       ),
     ).resolves.toContain('clientCapturedAt');
   });
+
+  it('accepts an ANONYMOUS_SPLIT capture with neither identity', async () => {
+    await expect(
+      refused(CaptureTimingPassDto, anonymousCapture()),
+    ).resolves.toEqual([]);
+  });
+
+  it.each([{ startNumber: 42 }, { enrollmentId: 'enrollment-1' }])(
+    'refuses an ANONYMOUS_SPLIT capture carrying %p',
+    async (identity) => {
+      await expect(
+        refused(CaptureTimingPassDto, anonymousCapture(identity)),
+      ).resolves.toContain('kind');
+    },
+  );
+
+  it.each([
+    'attemptId',
+    'clockEpochId',
+    'workstationInstanceId',
+    'deviceSequence',
+    'clientCapturedAt',
+    'clientElapsedMs',
+  ])('refuses an ANONYMOUS_SPLIT capture without %s', async (field) => {
+    const payload = anonymousCapture();
+    delete payload[field];
+
+    await expect(refused(CaptureTimingPassDto, payload)).resolves.toContain(
+      field,
+    );
+  });
 });
 
 describe('BindPendingFinishDto', () => {
@@ -290,9 +413,78 @@ describe('BindPendingFinishDto', () => {
   });
 });
 
+describe('AssignAnonymousSplitDto', () => {
+  it('accepts an assignment by start number', async () => {
+    await expect(
+      refused(AssignAnonymousSplitDto, assignSplit()),
+    ).resolves.toEqual([]);
+  });
+
+  it('accepts an assignment by enrollment', async () => {
+    const payload = assignSplit({
+      startNumber: undefined,
+      enrollmentId: 'enrollment-1',
+    });
+
+    await expect(refused(AssignAnonymousSplitDto, payload)).resolves.toEqual(
+      [],
+    );
+  });
+
+  it('refuses an assignment that names both a number and an enrollment', async () => {
+    await expect(
+      refused(
+        AssignAnonymousSplitDto,
+        assignSplit({ enrollmentId: 'enrollment-1' }),
+      ),
+    ).resolves.toContain('workstationInstanceId');
+  });
+
+  it('refuses an assignment that names neither a number nor an enrollment', async () => {
+    const errors = await refused(
+      AssignAnonymousSplitDto,
+      assignSplit({ startNumber: undefined }),
+    );
+
+    expect(errors).toContain('workstationInstanceId');
+    expect(errors).toContain('startNumber');
+    expect(errors).toContain('enrollmentId');
+  });
+
+  it.each([0, -1, 1.5, '42'])('refuses startNumber %p', async (startNumber) => {
+    await expect(
+      refused(AssignAnonymousSplitDto, assignSplit({ startNumber })),
+    ).resolves.toContain('startNumber');
+  });
+
+  it('refuses a blank enrollment id', async () => {
+    const payload = assignSplit({ startNumber: undefined, enrollmentId: '' });
+
+    await expect(refused(AssignAnonymousSplitDto, payload)).resolves.toContain(
+      'enrollmentId',
+    );
+  });
+
+  it('refuses a blank workstation id', async () => {
+    await expect(
+      refused(
+        AssignAnonymousSplitDto,
+        assignSplit({ workstationInstanceId: '' }),
+      ),
+    ).resolves.toContain('workstationInstanceId');
+  });
+
+  it('refuses a device sequence below 1', async () => {
+    await expect(
+      refused(AssignAnonymousSplitDto, assignSplit({ deviceSequence: 0 })),
+    ).resolves.toContain('deviceSequence');
+  });
+});
+
 describe('reason-carrying DTOs', () => {
   const cases: Array<[string, new () => object, Record<string, unknown>]> = [
     ['CancelPendingFinishDto', CancelPendingFinishDto, {}],
+    ['CancelAnonymousSplitDto', CancelAnonymousSplitDto, {}],
     ['CancelTimingPassDto', CancelTimingPassDto, {}],
     ['ForceCompleteTimingAttemptDto', ForceCompleteTimingAttemptDto, {}],
     ['CancelTimingAttemptDto', CancelTimingAttemptDto, {}],
