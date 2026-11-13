@@ -1,7 +1,12 @@
-import { TIMING_OPERATE_ROLE_CODES } from '../auth/role-codes';
+import { TIMING_OPERATE_ROLE_CODES, RoleCode } from '../auth/role-codes';
 import type { RolesService } from '../auth/roles.service';
 import { TIMING_MAX_TOTAL_MS } from './timing.domain';
-import type { CaptureTimingPassDto } from './timing.dto';
+import type {
+  BindPendingFinishDto,
+  CaptureTimingPassDto,
+  CancelPendingFinishDto,
+  QuickUndoTimingPassDto,
+} from './timing.dto';
 import { TimingErrorCode, TimingDomainError } from './timing.errors';
 import type {
   CreateAttemptInput,
@@ -92,11 +97,18 @@ function createRepositoryFake() {
       Promise<TimingParticipantRow | null>,
       [string, string]
     >(() => Promise.resolve(null)),
+    findParticipantByStartNumber: jest.fn<
+      Promise<TimingParticipantRow | null>,
+      [string, number]
+    >(() => Promise.resolve(null)),
     findRoutingCandidates: jest.fn(
       (): Promise<TimingRoutingCandidateRow[]> => Promise.resolve([]),
     ),
     existsStartNumber: jest.fn((): Promise<boolean> => Promise.resolve(false)),
     listMarks: jest.fn((): Promise<TimingMarkRow[]> => Promise.resolve([])),
+    findMark: jest.fn<Promise<TimingMarkRow | null>, [string]>(() =>
+      Promise.resolve(null),
+    ),
     listPendingFinishes: jest.fn(
       (): Promise<TimingMarkRow[]> => Promise.resolve([]),
     ),
@@ -338,6 +350,100 @@ function receiptRow(): TimingReceiptRow {
     status: 'APPLIED',
     reason: null,
     createdAt: NOW,
+  };
+}
+
+/** One pending finish: a captured instant that names no participant yet. */
+function pendingMarkRow(overrides: Partial<TimingMarkRow> = {}): TimingMarkRow {
+  return markRow({
+    id: 'mark-pending',
+    kind: 'PENDING_FINISH',
+    status: 'PENDING',
+    enrollmentId: null,
+    registrationId: null,
+    startNumber: null,
+    lapNumber: null,
+    deviceSequence: 4,
+    officialElapsedMs: 70_000,
+    officialAt: new Date(NOW.getTime() + 70_000),
+    ...overrides,
+  });
+}
+
+/** One audit row; a capture row is the creation proof quick undo reads. */
+function auditRow(
+  overrides: Partial<TimingAuditRow> & Pick<TimingAuditRow, 'auditId'>,
+): TimingAuditRow {
+  return {
+    actorUserId: USER_ID,
+    action: 'PASS_CAPTURE',
+    targetType: 'PASS',
+    targetId: 'mark-1',
+    oldValues: null,
+    newValues: {
+      workstationInstanceId: WORKSTATION,
+      deviceSequence: 1,
+    },
+    reason: null,
+    createdAt: NOW,
+    ...overrides,
+  };
+}
+
+/** Applies a mark update the way `repository.updateMark` would. */
+function applyMarkUpdate(
+  mark: TimingMarkRow,
+  input: UpdateMarkInput,
+): TimingMarkRow {
+  return {
+    ...mark,
+    ...(input.enrollmentId === undefined
+      ? {}
+      : { enrollmentId: input.enrollmentId }),
+    ...(input.registrationId === undefined
+      ? {}
+      : { registrationId: input.registrationId }),
+    ...(input.startNumber === undefined
+      ? {}
+      : { startNumber: input.startNumber }),
+    ...(input.kind === undefined ? {} : { kind: input.kind }),
+    ...(input.lapNumber === undefined ? {} : { lapNumber: input.lapNumber }),
+    ...(input.status === undefined ? {} : { status: input.status }),
+    ...(input.officialAt === undefined ? {} : { officialAt: input.officialAt }),
+    ...(input.officialElapsedMs === undefined
+      ? {}
+      : { officialElapsedMs: input.officialElapsedMs }),
+    ...(input.deviceSequence === undefined
+      ? {}
+      : { deviceSequence: input.deviceSequence }),
+  };
+}
+
+function bindDto(
+  overrides: Partial<BindPendingFinishDto> = {},
+): BindPendingFinishDto {
+  return {
+    pendingFinishId: 'mark-pending',
+    startNumber: 10,
+    workstationInstanceId: WORKSTATION,
+    deviceSequence: 5,
+    ...overrides,
+  };
+}
+
+function cancelDto(
+  overrides: Partial<CancelPendingFinishDto> = {},
+): CancelPendingFinishDto {
+  return { reason: 'Ошибочный финиш', ...overrides };
+}
+
+function undoDto(
+  overrides: Partial<QuickUndoTimingPassDto> = {},
+): QuickUndoTimingPassDto {
+  return {
+    workstationInstanceId: WORKSTATION,
+    deviceSequence: 13,
+    ...overrides,
   };
 }
 
@@ -1984,6 +2090,832 @@ describe('TimingService', () => {
       await expect(
         service.getAttemptRecord(USER_ID, EVENT_ID, 'attempt-1'),
       ).rejects.toMatchObject({ code: TimingErrorCode.NOT_FOUND });
+    });
+  });
+
+  describe('bindPendingFinish', () => {
+    type PendingArrange = {
+      attempt?: TimingAttemptRow;
+      lock?: TimingCaptureLockRow | null;
+      marks?: TimingMarkRow[];
+      receipt?: TimingReceiptRow | null;
+      participants?: TimingParticipantRow[];
+      audit?: TimingAuditRow[];
+    };
+
+    function arrangePending(overrides: PendingArrange = {}): void {
+      repository.findAttempt.mockResolvedValue(
+        overrides.attempt ?? attemptRow({ id: ATTEMPT_ID }),
+      );
+      repository.getCaptureLock.mockResolvedValue(
+        overrides.lock === undefined ? lockRow() : overrides.lock,
+      );
+      const participants = overrides.participants ?? [
+        participantRow({ enrollmentId: 'enrollment-a' }),
+      ];
+      const written = new Map(
+        (overrides.marks ?? [pendingMarkRow()]).map((mark) => [mark.id, mark]),
+      );
+      repository.findMark.mockImplementation(
+        (markId: string): Promise<TimingMarkRow | null> =>
+          Promise.resolve(written.get(markId) ?? null),
+      );
+      repository.listMarks.mockResolvedValue(
+        overrides.marks ?? [pendingMarkRow()],
+      );
+      repository.listAudit.mockResolvedValue(overrides.audit ?? []);
+      repository.findReceipt.mockResolvedValue(overrides.receipt ?? null);
+      repository.findParticipant.mockImplementation(
+        (
+          _attemptId: string,
+          enrollmentId: string,
+        ): Promise<TimingParticipantRow | null> =>
+          Promise.resolve(
+            participants.find((row) => row.enrollmentId === enrollmentId) ??
+              null,
+          ),
+      );
+      repository.findParticipantByStartNumber.mockImplementation(
+        (
+          _attemptId: string,
+          startNumber: number,
+        ): Promise<TimingParticipantRow | null> =>
+          Promise.resolve(
+            participants.find((row) => row.startNumber === startNumber) ?? null,
+          ),
+      );
+      repository.updateMark.mockImplementation(
+        (_tx: unknown, markId: string, input: UpdateMarkInput) => {
+          const current = written.get(markId) ?? markRow({ id: markId });
+          const updated = applyMarkUpdate(current, input);
+          written.set(markId, updated);
+          return Promise.resolve(updated);
+        },
+      );
+      repository.createReceipt.mockImplementation(
+        (_tx: unknown, input: CreateReceiptInput): TimingReceiptRow => ({
+          attemptId: input.attemptId,
+          workstationInstanceId: input.workstationInstanceId,
+          deviceSequence: input.deviceSequence,
+          status: input.status,
+          reason: input.reason,
+          createdAt: NOW,
+        }),
+      );
+      repository.insertAudit.mockImplementation(
+        (_tx: unknown, input: InsertAuditInput) => ({
+          auditId: 'audit-1',
+          actorUserId: input.actorUserId,
+          action: input.action,
+          targetType: input.targetType,
+          targetId: input.targetId,
+          oldValues: null,
+          newValues: null,
+          reason: input.reason,
+          createdAt: NOW,
+        }),
+      );
+    }
+
+    it('binds a pending finish by number, keeps its instant and renumbers the laps', async () => {
+      arrangePending({
+        marks: [
+          markRow({
+            id: 'mark-pass-1',
+            enrollmentId: 'enrollment-a',
+            registrationId: 'registration-enrollment-a',
+            startNumber: 10,
+            lapNumber: 1,
+            officialElapsedMs: 30_000,
+            officialAt: new Date(NOW.getTime() + 30_000),
+          }),
+          pendingMarkRow(),
+        ],
+      });
+
+      const pass = await service.bindPendingFinish(
+        USER_ID,
+        EVENT_ID,
+        'mark-pending',
+        bindDto(),
+        'key-5',
+      );
+
+      expect(roles.assertHasAnyRole).toHaveBeenCalledWith(
+        USER_ID,
+        TIMING_OPERATE_ROLES,
+      );
+      expect(repository.findParticipantByStartNumber).toHaveBeenCalledWith(
+        ATTEMPT_ID,
+        10,
+        TX,
+      );
+      expect(repository.updateMark.mock.calls).toEqual([
+        [
+          TX,
+          'mark-pending',
+          {
+            enrollmentId: 'enrollment-a',
+            registrationId: 'registration-enrollment-a',
+            startNumber: 10,
+            kind: 'PASS',
+            status: 'BOUND',
+          },
+        ],
+        [TX, 'mark-pending', { lapNumber: 2 }],
+      ]);
+      // AD-3: the bind keeps the creation sequence and every raw column.
+      const [, , bindInput] = callArguments<[unknown, string, UpdateMarkInput]>(
+        repository.updateMark,
+      );
+      expect(bindInput).not.toHaveProperty('deviceSequence');
+      expect(bindInput).not.toHaveProperty('officialAt');
+      expect(pass).toEqual({
+        passId: 'mark-pending',
+        attemptId: ATTEMPT_ID,
+        enrollmentId: 'enrollment-a',
+        lapNumber: 2,
+        rawCapturedAt: NOW.toISOString(),
+        officialAt: new Date(NOW.getTime() + 70_000).toISOString(),
+        officialElapsedMs: 70_000,
+        status: 'BOUND',
+      });
+      const [, receiptInput] = callArguments<[unknown, CreateReceiptInput]>(
+        repository.createReceipt,
+      );
+      expect(receiptInput).toEqual({
+        attemptId: ATTEMPT_ID,
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 5,
+        status: 'APPLIED',
+        reason: null,
+      });
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        attemptId: ATTEMPT_ID,
+        actorUserId: USER_ID,
+        action: 'PENDING_BIND',
+        targetType: 'PASS',
+        targetId: 'mark-pending',
+        reason: null,
+        oldValues: { kind: 'PENDING_FINISH', status: 'PENDING' },
+        newValues: {
+          kind: 'PASS',
+          status: 'BOUND',
+          enrollmentId: 'enrollment-a',
+          startNumber: 10,
+          lapNumber: 2,
+          bindOfSequence: 4,
+          workstationInstanceId: WORKSTATION,
+          deviceSequence: 5,
+        },
+      });
+    });
+
+    it('binds by enrollment without routing a number', async () => {
+      arrangePending({
+        marks: [pendingMarkRow()],
+        participants: [participantRow({ enrollmentId: 'enrollment-b' })],
+      });
+
+      const pass = await service.bindPendingFinish(
+        USER_ID,
+        EVENT_ID,
+        'mark-pending',
+        bindDto({ startNumber: undefined, enrollmentId: 'enrollment-b' }),
+        'key-5',
+      );
+
+      expect(repository.findParticipantByStartNumber).not.toHaveBeenCalled();
+      expect(repository.findParticipant).toHaveBeenCalledWith(
+        ATTEMPT_ID,
+        'enrollment-b',
+        TX,
+      );
+      expect(pass).toMatchObject({
+        passId: 'mark-pending',
+        enrollmentId: 'enrollment-b',
+        lapNumber: 1,
+        status: 'BOUND',
+      });
+    });
+
+    it('refuses a target of another attempt and keeps the pending finish', async () => {
+      arrangePending({ marks: [pendingMarkRow()], participants: [] });
+
+      await expect(
+        service.bindPendingFinish(
+          USER_ID,
+          EVENT_ID,
+          'mark-pending',
+          bindDto({
+            startNumber: undefined,
+            enrollmentId: 'enrollment-elsewhere',
+          }),
+          'key-5',
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.NOT_FOUND });
+      expect(repository.updateMark).not.toHaveBeenCalled();
+      expect(repository.createReceipt).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('refuses an excluded target and keeps the pending finish', async () => {
+      arrangePending({
+        marks: [pendingMarkRow()],
+        participants: [
+          participantRow({
+            enrollmentId: 'enrollment-a',
+            excludedReason: 'RACE_SECTION',
+          }),
+        ],
+      });
+
+      await expect(
+        service.bindPendingFinish(
+          USER_ID,
+          EVENT_ID,
+          'mark-pending',
+          bindDto(),
+          'key-5',
+        ),
+      ).rejects.toMatchObject({
+        code: TimingErrorCode.EXCLUDED_PARTICIPANT,
+        details: {
+          enrollmentId: 'enrollment-a',
+          excludedReason: 'RACE_SECTION',
+        },
+      });
+      expect(repository.updateMark).not.toHaveBeenCalled();
+      expect(repository.createReceipt).not.toHaveBeenCalled();
+    });
+
+    it('refuses a target that already holds N passes and keeps the pending finish', async () => {
+      arrangePending({
+        marks: [
+          markRow({ id: 'mark-1', lapNumber: 1 }),
+          markRow({
+            id: 'mark-2',
+            lapNumber: 2,
+            officialElapsedMs: 60_000,
+            officialAt: new Date(NOW.getTime() + 60_000),
+          }),
+          pendingMarkRow(),
+        ],
+        participants: [
+          participantRow({ enrollmentId: 'enrollment-a', requiredLaps: 2 }),
+        ],
+      });
+
+      await expect(
+        service.bindPendingFinish(
+          USER_ID,
+          EVENT_ID,
+          'mark-pending',
+          bindDto(),
+          'key-5',
+        ),
+      ).rejects.toMatchObject({
+        code: TimingErrorCode.ALREADY_N_PASSES,
+        details: { passCount: 2, requiredLaps: 2 },
+      });
+      expect(repository.updateMark).not.toHaveBeenCalled();
+      expect(repository.createReceipt).not.toHaveBeenCalled();
+    });
+
+    it('refuses a bind sequence that already has a receipt', async () => {
+      arrangePending({ marks: [pendingMarkRow()], receipt: receiptRow() });
+
+      const refusal = await service
+        .bindPendingFinish(
+          USER_ID,
+          EVENT_ID,
+          'mark-pending',
+          bindDto(),
+          'key-5',
+        )
+        .catch((error: unknown) => error);
+
+      expect(refusal).toMatchObject({
+        code: TimingErrorCode.CONFLICT,
+        details: {
+          attemptId: ATTEMPT_ID,
+          workstationInstanceId: WORKSTATION,
+          deviceSequence: 5,
+          receiptStatus: 'APPLIED',
+        },
+      });
+      expect(repository.findReceipt).toHaveBeenCalledWith(
+        TX,
+        ATTEMPT_ID,
+        WORKSTATION,
+        5,
+      );
+      expect(repository.updateMark).not.toHaveBeenCalled();
+      expect(repository.createReceipt).not.toHaveBeenCalled();
+    });
+
+    it('refuses a pending finish that is already cancelled', async () => {
+      arrangePending({
+        marks: [pendingMarkRow({ status: 'CANCELLED' })],
+      });
+
+      await expect(
+        service.bindPendingFinish(USER_ID, EVENT_ID, 'mark-pending', bindDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.INVALID_STATE });
+      expect(repository.withTransaction).not.toHaveBeenCalled();
+      expect(repository.updateMark).not.toHaveBeenCalled();
+    });
+
+    it('refuses a pending finish of another event and one that is not a pending finish', async () => {
+      arrangePending({
+        attempt: attemptRow({ id: ATTEMPT_ID, eventId: 'event-b' }),
+      });
+
+      await expect(
+        service.bindPendingFinish(USER_ID, EVENT_ID, 'mark-pending', bindDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.NOT_FOUND });
+
+      repository.findAttempt.mockResolvedValue(attemptRow({ id: ATTEMPT_ID }));
+      repository.findMark.mockResolvedValue(
+        markRow({ id: 'mark-pending', kind: 'PASS' }),
+      );
+
+      await expect(
+        service.bindPendingFinish(USER_ID, EVENT_ID, 'mark-pending', bindDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.NOT_FOUND });
+      expect(repository.updateMark).not.toHaveBeenCalled();
+    });
+
+    it('refuses a bind from a workstation that does not hold capture', async () => {
+      arrangePending({
+        marks: [pendingMarkRow()],
+        lock: { ...lockRow(), workstationInstanceId: 'workstation-b' },
+      });
+
+      await expect(
+        service.bindPendingFinish(USER_ID, EVENT_ID, 'mark-pending', bindDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.CAPTURE_NOT_HELD });
+      expect(repository.withTransaction).not.toHaveBeenCalled();
+    });
+
+    it('writes the mark, its receipt and its audit in one transaction', async () => {
+      arrangePending({ marks: [pendingMarkRow()] });
+
+      await service.bindPendingFinish(
+        USER_ID,
+        EVENT_ID,
+        'mark-pending',
+        bindDto(),
+        'key-5',
+      );
+
+      const transactionOf = (mock: jest.Mock): unknown =>
+        callArguments<[unknown]>(mock)[0];
+      expect(transactionOf(repository.updateMark)).toBe(TX);
+      expect(transactionOf(repository.createReceipt)).toBe(TX);
+      expect(transactionOf(repository.insertAudit)).toBe(TX);
+      expect(repository.updateMark.mock.invocationCallOrder[0]).toBeLessThan(
+        repository.createReceipt.mock.invocationCallOrder[0],
+      );
+      expect(repository.createReceipt.mock.invocationCallOrder[0]).toBeLessThan(
+        repository.insertAudit.mock.invocationCallOrder[0],
+      );
+    });
+  });
+
+  describe('cancelPendingFinish', () => {
+    function arrangeCancel(
+      overrides: {
+        attempt?: TimingAttemptRow;
+        marks?: TimingMarkRow[];
+      } = {},
+    ): void {
+      repository.findAttempt.mockResolvedValue(
+        overrides.attempt ?? attemptRow({ id: ATTEMPT_ID }),
+      );
+      const written = new Map(
+        (overrides.marks ?? [pendingMarkRow()]).map((mark) => [mark.id, mark]),
+      );
+      repository.findMark.mockImplementation(
+        (markId: string): Promise<TimingMarkRow | null> =>
+          Promise.resolve(written.get(markId) ?? null),
+      );
+      repository.updateMark.mockImplementation(
+        (_tx: unknown, markId: string, input: UpdateMarkInput) => {
+          const current = written.get(markId) ?? markRow({ id: markId });
+          const updated = applyMarkUpdate(current, input);
+          written.set(markId, updated);
+          return Promise.resolve(updated);
+        },
+      );
+      repository.insertAudit.mockImplementation(
+        (_tx: unknown, input: InsertAuditInput) => ({
+          auditId: 'audit-1',
+          actorUserId: input.actorUserId,
+          action: input.action,
+          targetType: input.targetType,
+          targetId: input.targetId,
+          oldValues: null,
+          newValues: null,
+          reason: input.reason,
+          createdAt: NOW,
+        }),
+      );
+    }
+
+    it('cancels an unbound pending finish as an administrator with its reason', async () => {
+      arrangeCancel();
+
+      const pass = await service.cancelPendingFinish(
+        USER_ID,
+        EVENT_ID,
+        'mark-pending',
+        cancelDto(),
+      );
+
+      expect(roles.assertHasAnyRole).toHaveBeenCalledWith(USER_ID, [
+        RoleCode.ADMINISTRATOR,
+      ]);
+      expect(repository.updateMark).toHaveBeenCalledWith(TX, 'mark-pending', {
+        status: 'CANCELLED',
+      });
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        attemptId: ATTEMPT_ID,
+        actorUserId: USER_ID,
+        action: 'PENDING_CANCEL',
+        targetType: 'PASS',
+        targetId: 'mark-pending',
+        reason: 'Ошибочный финиш',
+        oldValues: { kind: 'PENDING_FINISH', status: 'PENDING' },
+        newValues: { status: 'CANCELLED' },
+      });
+      // A correction of the record, not a capture mutation of a workstation.
+      expect(repository.getCaptureLock).not.toHaveBeenCalled();
+      expect(repository.findReceipt).not.toHaveBeenCalled();
+      expect(repository.createReceipt).not.toHaveBeenCalled();
+      expect(pass).toMatchObject({
+        passId: 'mark-pending',
+        status: 'CANCELLED',
+        lapNumber: null,
+      });
+    });
+
+    it('refuses a pending cancellation from a referee', async () => {
+      arrangeCancel();
+      roles.assertHasAnyRole.mockRejectedValue(new Error('Insufficient role.'));
+
+      await expect(
+        service.cancelPendingFinish(
+          USER_ID,
+          EVENT_ID,
+          'mark-pending',
+          cancelDto(),
+        ),
+      ).rejects.toThrow('Insufficient role.');
+      expect(roles.assertHasAnyRole).toHaveBeenCalledWith(USER_ID, [
+        RoleCode.ADMINISTRATOR,
+      ]);
+      expect(repository.withTransaction).not.toHaveBeenCalled();
+      expect(repository.updateMark).not.toHaveBeenCalled();
+    });
+
+    it('refuses a reason that is blank', async () => {
+      arrangeCancel();
+
+      await expect(
+        service.cancelPendingFinish(
+          USER_ID,
+          EVENT_ID,
+          'mark-pending',
+          cancelDto({ reason: '   ' }),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.REASON_REQUIRED });
+      expect(repository.updateMark).not.toHaveBeenCalled();
+    });
+
+    it('refuses a mark that is no longer pending', async () => {
+      arrangeCancel({ marks: [pendingMarkRow({ status: 'BOUND' })] });
+
+      await expect(
+        service.cancelPendingFinish(
+          USER_ID,
+          EVENT_ID,
+          'mark-pending',
+          cancelDto(),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.INVALID_STATE });
+      expect(repository.updateMark).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('quickUndo', () => {
+    function arrangeUndo(
+      overrides: {
+        attempt?: TimingAttemptRow;
+        lock?: TimingCaptureLockRow | null;
+        marks?: TimingMarkRow[];
+        audit?: TimingAuditRow[];
+        receipt?: TimingReceiptRow | null;
+      } = {},
+    ): void {
+      repository.findAttempt.mockResolvedValue(
+        overrides.attempt ?? attemptRow({ id: ATTEMPT_ID }),
+      );
+      repository.getCaptureLock.mockResolvedValue(
+        overrides.lock === undefined ? lockRow() : overrides.lock,
+      );
+      const written = new Map(
+        (overrides.marks ?? []).map((mark) => [mark.id, mark]),
+      );
+      repository.listMarks.mockResolvedValue(overrides.marks ?? []);
+      repository.listAudit.mockResolvedValue(overrides.audit ?? []);
+      repository.findReceipt.mockResolvedValue(overrides.receipt ?? null);
+      repository.updateMark.mockImplementation(
+        (_tx: unknown, markId: string, input: UpdateMarkInput) => {
+          const current = written.get(markId) ?? markRow({ id: markId });
+          const updated = applyMarkUpdate(current, input);
+          written.set(markId, updated);
+          return Promise.resolve(updated);
+        },
+      );
+      repository.createReceipt.mockImplementation(
+        (_tx: unknown, input: CreateReceiptInput): TimingReceiptRow => ({
+          attemptId: input.attemptId,
+          workstationInstanceId: input.workstationInstanceId,
+          deviceSequence: input.deviceSequence,
+          status: input.status,
+          reason: input.reason,
+          createdAt: NOW,
+        }),
+      );
+      repository.insertAudit.mockImplementation(
+        (_tx: unknown, input: InsertAuditInput) => ({
+          auditId: 'audit-1',
+          actorUserId: input.actorUserId,
+          action: input.action,
+          targetType: input.targetType,
+          targetId: input.targetId,
+          oldValues: null,
+          newValues: null,
+          reason: input.reason,
+          createdAt: NOW,
+        }),
+      );
+    }
+
+    it('cancels the last pass creation of this workstation, not a bound finish or another workstation', async () => {
+      arrangeUndo({
+        marks: [
+          markRow({
+            id: 'mark-pass-1',
+            lapNumber: 1,
+            deviceSequence: 3,
+            officialElapsedMs: 30_000,
+            officialAt: new Date(NOW.getTime() + 30_000),
+          }),
+          markRow({
+            id: 'mark-pass-2',
+            lapNumber: 2,
+            deviceSequence: 8,
+            officialElapsedMs: 60_000,
+            officialAt: new Date(NOW.getTime() + 60_000),
+          }),
+          // A bind keeps the pending capture's sequence (9) and becomes PASS.
+          markRow({
+            id: 'mark-bound-pending',
+            lapNumber: 3,
+            deviceSequence: 9,
+            officialElapsedMs: 90_000,
+            officialAt: new Date(NOW.getTime() + 90_000),
+          }),
+          markRow({
+            id: 'mark-other-workstation',
+            lapNumber: 4,
+            deviceSequence: 12,
+            workstationInstanceId: 'workstation-b',
+            officialElapsedMs: 120_000,
+            officialAt: new Date(NOW.getTime() + 120_000),
+          }),
+        ],
+        audit: [
+          auditRow({
+            auditId: 'audit-1',
+            targetId: 'mark-pass-1',
+            newValues: {
+              workstationInstanceId: WORKSTATION,
+              deviceSequence: 3,
+            },
+          }),
+          auditRow({
+            auditId: 'audit-2',
+            targetId: 'mark-pass-2',
+            newValues: {
+              workstationInstanceId: WORKSTATION,
+              deviceSequence: 8,
+            },
+          }),
+          auditRow({
+            auditId: 'audit-3',
+            action: 'PENDING_FINISH_CAPTURE',
+            targetId: 'mark-bound-pending',
+            newValues: {
+              workstationInstanceId: WORKSTATION,
+              deviceSequence: 9,
+            },
+          }),
+          auditRow({
+            auditId: 'audit-4',
+            action: 'PENDING_BIND',
+            targetId: 'mark-bound-pending',
+            newValues: {
+              workstationInstanceId: WORKSTATION,
+              deviceSequence: 10,
+            },
+          }),
+          auditRow({
+            auditId: 'audit-5',
+            targetId: 'mark-other-workstation',
+            newValues: {
+              workstationInstanceId: 'workstation-b',
+              deviceSequence: 12,
+            },
+          }),
+        ],
+      });
+
+      const pass = await service.quickUndo(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        undoDto(),
+        'key-13',
+      );
+
+      expect(roles.assertHasAnyRole).toHaveBeenCalledWith(
+        USER_ID,
+        TIMING_OPERATE_ROLES,
+      );
+      expect(repository.updateMark.mock.calls).toEqual([
+        [TX, 'mark-pass-2', { status: 'CANCELLED', lapNumber: null }],
+        [TX, 'mark-bound-pending', { lapNumber: 2 }],
+        [TX, 'mark-other-workstation', { lapNumber: 3 }],
+      ]);
+      expect(pass).toEqual({
+        passId: 'mark-pass-2',
+        attemptId: ATTEMPT_ID,
+        enrollmentId: 'enrollment-a',
+        lapNumber: null,
+        rawCapturedAt: NOW.toISOString(),
+        officialAt: new Date(NOW.getTime() + 60_000).toISOString(),
+        officialElapsedMs: 60_000,
+        status: 'CANCELLED',
+      });
+      const [, receiptInput] = callArguments<[unknown, CreateReceiptInput]>(
+        repository.createReceipt,
+      );
+      expect(receiptInput).toEqual({
+        attemptId: ATTEMPT_ID,
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 13,
+        status: 'APPLIED',
+        reason: null,
+      });
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        action: 'QUICK_UNDO',
+        targetType: 'PASS',
+        targetId: 'mark-pass-2',
+        reason: null,
+        oldValues: { status: 'BOUND', lapNumber: 2, deviceSequence: 8 },
+        newValues: { status: 'CANCELLED', lapNumber: null, deviceSequence: 13 },
+      });
+    });
+
+    it('refuses an undo when this workstation created no pass', async () => {
+      arrangeUndo({
+        marks: [
+          pendingMarkRow(),
+          markRow({ id: 'mark-bound-pending', deviceSequence: 9 }),
+        ],
+        audit: [
+          auditRow({
+            auditId: 'audit-1',
+            action: 'PENDING_FINISH_CAPTURE',
+            targetId: 'mark-pending',
+            newValues: {
+              workstationInstanceId: WORKSTATION,
+              deviceSequence: 4,
+            },
+          }),
+          auditRow({
+            auditId: 'audit-2',
+            action: 'PENDING_BIND',
+            targetId: 'mark-bound-pending',
+            newValues: {
+              workstationInstanceId: WORKSTATION,
+              deviceSequence: 10,
+            },
+          }),
+        ],
+      });
+
+      await expect(
+        service.quickUndo(USER_ID, EVENT_ID, ATTEMPT_ID, undoDto(), 'key-13'),
+      ).rejects.toMatchObject({
+        code: TimingErrorCode.INVALID_STATE,
+        details: { attemptId: ATTEMPT_ID, workstationInstanceId: WORKSTATION },
+      });
+      expect(repository.updateMark).not.toHaveBeenCalled();
+      expect(repository.createReceipt).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('refuses an undo sequence that already has a receipt', async () => {
+      arrangeUndo({
+        marks: [markRow({ id: 'mark-pass-1', deviceSequence: 3 })],
+        receipt: { ...receiptRow(), deviceSequence: 13 },
+      });
+
+      await expect(
+        service.quickUndo(USER_ID, EVENT_ID, ATTEMPT_ID, undoDto(), 'key-13'),
+      ).rejects.toMatchObject({ code: TimingErrorCode.CONFLICT });
+      expect(repository.findReceipt).toHaveBeenCalledWith(
+        TX,
+        ATTEMPT_ID,
+        WORKSTATION,
+        13,
+      );
+      expect(repository.updateMark).not.toHaveBeenCalled();
+    });
+
+    it('refuses an undo on a closed attempt and from a workstation without capture', async () => {
+      arrangeUndo({
+        attempt: attemptRow({
+          id: ATTEMPT_ID,
+          status: 'COMPLETED',
+          closedAt: NOW,
+        }),
+      });
+
+      await expect(
+        service.quickUndo(USER_ID, EVENT_ID, ATTEMPT_ID, undoDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.ATTEMPT_CLOSED });
+      expect(repository.withTransaction).not.toHaveBeenCalled();
+
+      arrangeUndo({
+        lock: { ...lockRow(), workstationInstanceId: 'workstation-b' },
+      });
+
+      await expect(
+        service.quickUndo(USER_ID, EVENT_ID, ATTEMPT_ID, undoDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.CAPTURE_NOT_HELD });
+      expect(repository.withTransaction).not.toHaveBeenCalled();
+    });
+
+    it('refuses an undo of an attempt of another event', async () => {
+      arrangeUndo({
+        attempt: attemptRow({ id: ATTEMPT_ID, eventId: 'event-b' }),
+      });
+
+      await expect(
+        service.quickUndo(USER_ID, EVENT_ID, ATTEMPT_ID, undoDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.NOT_FOUND });
+      expect(repository.withTransaction).not.toHaveBeenCalled();
+    });
+
+    it('writes the cancellation, its receipt and its audit in one transaction', async () => {
+      arrangeUndo({
+        marks: [markRow({ id: 'mark-pass-1', deviceSequence: 3 })],
+        audit: [auditRow({ auditId: 'audit-1', targetId: 'mark-pass-1' })],
+      });
+
+      await service.quickUndo(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        undoDto(),
+        'key-13',
+      );
+
+      const transactionOf = (mock: jest.Mock): unknown =>
+        callArguments<[unknown]>(mock)[0];
+      expect(transactionOf(repository.updateMark)).toBe(TX);
+      expect(transactionOf(repository.createReceipt)).toBe(TX);
+      expect(transactionOf(repository.insertAudit)).toBe(TX);
+      expect(repository.updateMark.mock.invocationCallOrder[0]).toBeLessThan(
+        repository.createReceipt.mock.invocationCallOrder[0],
+      );
+      expect(repository.createReceipt.mock.invocationCallOrder[0]).toBeLessThan(
+        repository.insertAudit.mock.invocationCallOrder[0],
+      );
     });
   });
 });

@@ -15,13 +15,16 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { TIMING_OPERATE_ROLE_CODES } from '../auth/role-codes';
+import { RoleCode, TIMING_OPERATE_ROLE_CODES } from '../auth/role-codes';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
 import {
+  BindPendingFinishDto,
+  CancelPendingFinishDto,
   CaptureTimingPassDto,
   OpenClockEpochDto,
+  QuickUndoTimingPassDto,
   StartTimingAttemptDto,
 } from './timing.dto';
 import { TimingExceptionFilter } from './timing.exception.filter';
@@ -121,6 +124,75 @@ export class TimingController {
     return this.timingService.capturePass(
       req.session?.userSub,
       eventId,
+      dto,
+      idempotencyKey,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/pending-finishes/:pendingFinishId/bind`: give
+   * one unbound finish a participant of its own attempt.
+   */
+  @Post('pending-finishes/:pendingFinishId/bind')
+  @HttpCode(HttpStatus.OK)
+  bindPendingFinish(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('pendingFinishId', new ParseUUIDPipe({ version: '4' }))
+    pendingFinishId: string,
+    @Body() dto: BindPendingFinishDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<TimingPassView> {
+    return this.timingService.bindPendingFinish(
+      req.session?.userSub,
+      eventId,
+      pendingFinishId,
+      dto,
+      idempotencyKey,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/pending-finishes/:pendingFinishId/cancel`: an
+   * administrator retires an unbound finish with a reason. The method-level
+   * `@Roles` overrides the class-level timing roles, so a referee is refused.
+   */
+  @Post('pending-finishes/:pendingFinishId/cancel')
+  @HttpCode(HttpStatus.OK)
+  @Roles(RoleCode.ADMINISTRATOR)
+  cancelPendingFinish(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('pendingFinishId', new ParseUUIDPipe({ version: '4' }))
+    pendingFinishId: string,
+    @Body() dto: CancelPendingFinishDto,
+  ): Promise<TimingPassView> {
+    return this.timingService.cancelPendingFinish(
+      req.session?.userSub,
+      eventId,
+      pendingFinishId,
+      dto,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/attempts/:attemptId/undo`: withdraw the last
+   * pass this workstation created in the attempt.
+   */
+  @Post('attempts/:attemptId/undo')
+  @HttpCode(HttpStatus.OK)
+  quickUndo(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('attemptId', new ParseUUIDPipe({ version: '4' }))
+    attemptId: string,
+    @Body() dto: QuickUndoTimingPassDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<TimingPassView> {
+    return this.timingService.quickUndo(
+      req.session?.userSub,
+      eventId,
+      attemptId,
       dto,
       idempotencyKey,
     );

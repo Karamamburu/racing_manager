@@ -333,6 +333,8 @@ export type UpdateMarkInput = {
   enrollmentId?: string | null;
   registrationId?: string | null;
   startNumber?: number | null;
+  /** A bind turns a `PENDING_FINISH` mark into a `PASS`; nothing else moves it. */
+  kind?: TimingMarkKind;
   lapNumber?: number | null;
   status?: TimingMarkStatus;
   officialAt?: Date;
@@ -648,6 +650,9 @@ export function buildMarkUpdate(
   }
   if (input.startNumber !== undefined) {
     data.startNumber = input.startNumber;
+  }
+  if (input.kind !== undefined) {
+    data.kind = input.kind;
   }
   if (input.lapNumber !== undefined) {
     data.lapNumber = input.lapNumber;
@@ -1154,6 +1159,23 @@ export class TimingRepository {
         },
       },
       select: PARTICIPANT_SELECT,
+    });
+  }
+
+  /**
+   * The frozen participant of one attempt that carries a start number. A bind
+   * by number resolves inside the addressed attempt only, so a number frozen in
+   * another attempt is not a target of this one.
+   */
+  async findParticipantByStartNumber(
+    attemptId: string,
+    startNumber: number,
+    tx?: TimingTx,
+  ): Promise<TimingParticipantRow | null> {
+    return this.db(tx).timingSessionParticipant.findFirst({
+      where: { sessionId: attemptId, startNumber },
+      select: PARTICIPANT_SELECT,
+      orderBy: { enrollmentId: 'asc' },
     });
   }
 

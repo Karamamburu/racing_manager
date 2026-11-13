@@ -99,6 +99,28 @@ describe('buildMarkUpdate', () => {
       deviceSequence: 4,
     });
   });
+
+  it('turns a bound pending finish into a pass without its raw capture', () => {
+    const update = buildMarkUpdate({
+      enrollmentId: 'enrollment-a',
+      registrationId: 'registration-a',
+      startNumber: 12,
+      kind: 'PASS',
+      status: 'BOUND',
+    });
+
+    expect(update).toEqual({
+      enrollmentId: 'enrollment-a',
+      registrationId: 'registration-a',
+      startNumber: 12,
+      kind: 'PASS',
+      status: 'BOUND',
+    });
+    // The raw capture, its official instant and its creation sequence stay.
+    expect(update).not.toHaveProperty('officialAt');
+    expect(update).not.toHaveProperty('officialElapsedMs');
+    expect(update).not.toHaveProperty('deviceSequence');
+  });
 });
 
 describe('toCaptureLockRow', () => {

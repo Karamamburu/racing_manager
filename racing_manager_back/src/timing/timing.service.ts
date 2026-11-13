@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { ResultOutcome } from '../../generated/prisma';
-import { TIMING_OPERATE_ROLE_CODES } from '../auth/role-codes';
+import { RoleCode, TIMING_OPERATE_ROLE_CODES } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
 import {
   currentPlacement,
@@ -24,6 +24,7 @@ import {
   classifyParticipantState,
   classifyRouting,
   nextAttemptNumber,
+  normalizeReason,
   orderByOfficialInstant,
   resolveElapsedMs,
   TIMING_MAX_TOTAL_MS,
@@ -31,8 +32,11 @@ import {
   type TimingRoutingNoneReason,
 } from './timing.domain';
 import type {
+  BindPendingFinishDto,
+  CancelPendingFinishDto,
   CaptureTimingPassDto,
   OpenClockEpochDto,
+  QuickUndoTimingPassDto,
   StartTimingAttemptDto,
 } from './timing.dto';
 import {
@@ -45,6 +49,7 @@ import {
   type TimingAgeCategoryRow,
   type TimingAgeSectionRow,
   type TimingAttemptRow,
+  type TimingAuditRow,
   type TimingClassCompetitionRow,
   type TimingClockEpochRow,
   type TimingEnrollmentRow,
@@ -75,16 +80,22 @@ import type {
 } from './timing.views';
 
 /**
- * MANUAL-TIMING read surface, Start press, number/tile capture, attempt record
- * and clock epoch.
+ * MANUAL-TIMING read surface, Start press, number/tile/pending capture, bind,
+ * pending cancellation, quick undo, attempt record and clock epoch.
  *
  * The service owns every refusal: it loads the event-wide facts the rules read,
  * asks the pure domain helpers, and only then writes. A refused Start press
- * creates nothing, so there is no "prepared" attempt; a refused capture writes
- * neither a mark nor a receipt.
+ * creates nothing, so there is no "prepared" attempt.
  *
- * Bind, cancel, undo, corrections, closure, the lock lifecycle and the role
- * grant belong to later waves and are not implemented here.
+ * AD-3 receipt semantics (fixed by the capture wave and kept here): a receipt
+ * exists only for a mutation that was applied. A refused capture, bind or undo
+ * writes neither a mark, a receipt nor an audit row, so its `deviceSequence`
+ * stays unconsumed and the client's outbox may retry the same sequence with a
+ * corrected payload. A receipt row, once written, is final; a second request on
+ * a used sequence is a `CONFLICT`, never a second mutation.
+ *
+ * Corrections, closure, the lock lifecycle and the role grant belong to later
+ * waves and are not implemented here.
  */
 
 /** Why a roster row is out of timing: displayed in a multi-stage race section. */
@@ -197,6 +208,12 @@ type StartRefusalContext = {
   missingNumbers: readonly TileSource[];
   holderWorkstationInstanceId: string | null;
   workstationInstanceId: string;
+};
+
+/** One unbound pending finish and the running attempt it belongs to. */
+type PendingFinishContext = {
+  mark: TimingMarkRow;
+  attempt: TimingAttemptRow;
 };
 
 @Injectable()
@@ -657,6 +674,424 @@ export class TimingService {
   }
 
   /**
+   * `POST /events/:eventId/timing/pending-finishes/:pendingFinishId/bind`:
+   * give one captured instant a participant of its own attempt.
+   *
+   * The instant was captured when the pending mark was created, so the bind
+   * needs no clock epoch: it keeps `rawCapturedAt`, `rawElapsedMs`, `officialAt`,
+   * `officialElapsedMs`, `clockEpochId` and the creation `deviceSequence`, and
+   * only its identity and state change. Lap order follows the official instant
+   * (U-14), so a bind may renumber passes captured after it.
+   *
+   * A refused bind changes nothing: the mark stays `PENDING` and its bind
+   * sequence stays unconsumed, exactly like a refused capture.
+   */
+  async bindPendingFinish(
+    authentikId: string | undefined,
+    eventId: string,
+    pendingFinishId: string,
+    dto: BindPendingFinishDto,
+    idempotencyKey?: string,
+  ): Promise<TimingPassView> {
+    await this.rolesService.assertHasAnyRole(
+      authentikId,
+      TIMING_OPERATE_ROLE_CODES,
+    );
+    if (dto.pendingFinishId !== pendingFinishId) {
+      throw timingError(
+        TimingErrorCode.INVALID_STATE,
+        'The body addresses another pending finish than the route.',
+        { pendingFinishId, bodyPendingFinishId: dto.pendingFinishId },
+      );
+    }
+    const pending = await this.loadPendingFinish(pendingFinishId, eventId);
+    const lock = await this.repository.getCaptureLock(eventId);
+    if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
+      throw timingError(
+        TimingErrorCode.CAPTURE_NOT_HELD,
+        'This workstation does not hold capture.',
+        {
+          workstationInstanceId: dto.workstationInstanceId,
+          holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
+        },
+      );
+    }
+
+    const actorUserId = await this.requireUserId(authentikId);
+    const key = normalizeIdempotencyKey(idempotencyKey);
+    return this.repository.withTransaction(async (tx) => {
+      // AD-3: a bind is a capture mutation, so its sequence is receipted once.
+      const receipt = await this.repository.findReceipt(
+        tx,
+        pending.attempt.id,
+        dto.workstationInstanceId,
+        dto.deviceSequence,
+      );
+      if (receipt !== null) {
+        throw timingError(
+          TimingErrorCode.CONFLICT,
+          'This device sequence already has a receipt on the attempt.',
+          {
+            attemptId: pending.attempt.id,
+            workstationInstanceId: dto.workstationInstanceId,
+            deviceSequence: dto.deviceSequence,
+            receiptStatus: receipt.status,
+            receiptReason: receipt.reason,
+          },
+        );
+      }
+      // Re-read under the transaction: another bind of the same mark, or a
+      // cancellation, must not be overwritten by this one.
+      const current = await this.loadPendingFinish(
+        pendingFinishId,
+        eventId,
+        tx,
+      );
+      const marks = await this.repository.listMarks(current.attempt.id, tx);
+      const participant = await this.resolveBindTarget(
+        current.attempt.id,
+        dto,
+        tx,
+      );
+      assertCaptureEligible(
+        participant,
+        boundPassCount(marks, participant.enrollmentId),
+      );
+
+      const bound = await this.repository.updateMark(tx, current.mark.id, {
+        enrollmentId: participant.enrollmentId,
+        registrationId: participant.registrationId,
+        startNumber: participant.startNumber,
+        kind: 'PASS',
+        status: 'BOUND',
+      });
+      const applied = await this.reindexLaps(
+        tx,
+        current.attempt.id,
+        participant.enrollmentId,
+        marks,
+        bound,
+      );
+      await this.repository.createReceipt(tx, {
+        attemptId: current.attempt.id,
+        workstationInstanceId: dto.workstationInstanceId,
+        deviceSequence: dto.deviceSequence,
+        status: 'APPLIED',
+        reason: null,
+      });
+      await this.repository.insertAudit(tx, {
+        attemptId: current.attempt.id,
+        actorUserId,
+        action: 'PENDING_BIND',
+        targetType: 'PASS',
+        targetId: applied.id,
+        oldValues: {
+          kind: current.mark.kind,
+          status: current.mark.status,
+          enrollmentId: current.mark.enrollmentId,
+          registrationId: current.mark.registrationId,
+          startNumber: current.mark.startNumber,
+          lapNumber: current.mark.lapNumber,
+        },
+        newValues: {
+          kind: 'PASS',
+          status: 'BOUND',
+          enrollmentId: participant.enrollmentId,
+          registrationId: participant.registrationId,
+          startNumber: participant.startNumber,
+          lapNumber: applied.lapNumber,
+          officialAt: applied.officialAt.toISOString(),
+          officialElapsedMs: applied.officialElapsedMs,
+          workstationInstanceId: dto.workstationInstanceId,
+          deviceSequence: dto.deviceSequence,
+          bindOfSequence: current.mark.deviceSequence,
+          idempotencyKey: key,
+        },
+        reason: null,
+      });
+      return toPassView(applied);
+    });
+  }
+
+  /**
+   * `POST /events/:eventId/timing/pending-finishes/:pendingFinishId/cancel`:
+   * retire an unbound finish with a reason so completion is no longer blocked.
+   *
+   * Administrator only (E-10, U-30). It touches no clock, holds no capture lock
+   * and writes no receipt: the mark is a correction of the record, not a
+   * capture mutation of a workstation. The cancelled mark stays in history.
+   */
+  async cancelPendingFinish(
+    authentikId: string | undefined,
+    eventId: string,
+    pendingFinishId: string,
+    dto: CancelPendingFinishDto,
+  ): Promise<TimingPassView> {
+    await this.rolesService.assertHasAnyRole(authentikId, [
+      RoleCode.ADMINISTRATOR,
+    ]);
+    const reason = normalizeReason(dto.reason);
+    // Refuse before opening the transaction; the mark is re-read under it.
+    await this.loadPendingFinish(pendingFinishId, eventId);
+    const actorUserId = await this.requireUserId(authentikId);
+
+    const cancelled = await this.repository.withTransaction(async (tx) => {
+      const current = await this.loadPendingFinish(
+        pendingFinishId,
+        eventId,
+        tx,
+      );
+      const updated = await this.repository.updateMark(tx, current.mark.id, {
+        status: 'CANCELLED',
+      });
+      await this.repository.insertAudit(tx, {
+        attemptId: current.attempt.id,
+        actorUserId,
+        action: 'PENDING_CANCEL',
+        targetType: 'PASS',
+        targetId: current.mark.id,
+        oldValues: {
+          kind: current.mark.kind,
+          status: current.mark.status,
+          officialAt: current.mark.officialAt.toISOString(),
+          officialElapsedMs: current.mark.officialElapsedMs,
+          workstationInstanceId: current.mark.workstationInstanceId,
+          deviceSequence: current.mark.deviceSequence,
+        },
+        newValues: { kind: current.mark.kind, status: 'CANCELLED' },
+        reason,
+      });
+      return updated;
+    });
+    return toPassView(cancelled);
+  }
+
+  /**
+   * `POST /events/:eventId/timing/attempts/:attemptId/undo`: withdraw the last
+   * pass this workstation created in the attempt, with no reason (E-11).
+   *
+   * AD-3 keeps a mark's creation sequence when a bind gives it a participant, so
+   * `kind`, `status` and `deviceSequence` alone cannot tell a creation from a
+   * bind; the `PASS_CAPTURE` audit row written in the same transaction can.
+   * The undone pass is soft-cancelled and its participant's remaining passes are
+   * renumbered by official instant.
+   */
+  async quickUndo(
+    authentikId: string | undefined,
+    eventId: string,
+    attemptId: string,
+    dto: QuickUndoTimingPassDto,
+    idempotencyKey?: string,
+  ): Promise<TimingPassView> {
+    await this.rolesService.assertHasAnyRole(
+      authentikId,
+      TIMING_OPERATE_ROLE_CODES,
+    );
+    const attempt = await this.repository.findAttempt(attemptId);
+    if (attempt === null || attempt.eventId !== eventId) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'Timing attempt not found.',
+        { attemptId },
+      );
+    }
+    if (attempt.status !== 'RUNNING') {
+      throw timingError(
+        TimingErrorCode.ATTEMPT_CLOSED,
+        'Undo accepts only a running attempt.',
+        { attemptId, status: attempt.status },
+      );
+    }
+    const lock = await this.repository.getCaptureLock(eventId);
+    if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
+      throw timingError(
+        TimingErrorCode.CAPTURE_NOT_HELD,
+        'This workstation does not hold capture.',
+        {
+          workstationInstanceId: dto.workstationInstanceId,
+          holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
+        },
+      );
+    }
+
+    const actorUserId = await this.requireUserId(authentikId);
+    const key = normalizeIdempotencyKey(idempotencyKey);
+    return this.repository.withTransaction(async (tx) => {
+      const receipt = await this.repository.findReceipt(
+        tx,
+        attemptId,
+        dto.workstationInstanceId,
+        dto.deviceSequence,
+      );
+      if (receipt !== null) {
+        throw timingError(
+          TimingErrorCode.CONFLICT,
+          'This device sequence already has a receipt on the attempt.',
+          {
+            attemptId,
+            workstationInstanceId: dto.workstationInstanceId,
+            deviceSequence: dto.deviceSequence,
+            receiptStatus: receipt.status,
+            receiptReason: receipt.reason,
+          },
+        );
+      }
+      const marks = await this.repository.listMarks(attemptId, tx);
+      const audit = await this.repository.listAudit(attemptId, tx);
+      const target = lastPassCreation(marks, audit, dto.workstationInstanceId);
+      if (target === null || target.enrollmentId === null) {
+        throw timingError(
+          TimingErrorCode.INVALID_STATE,
+          'This workstation has no pass creation to undo in the attempt.',
+          {
+            attemptId,
+            workstationInstanceId: dto.workstationInstanceId,
+          },
+        );
+      }
+
+      const cancelled = await this.repository.updateMark(tx, target.id, {
+        status: 'CANCELLED',
+        lapNumber: null,
+      });
+      await this.renumberPasses(
+        tx,
+        target.enrollmentId,
+        marks.filter((mark) => mark.id !== target.id),
+      );
+      await this.repository.createReceipt(tx, {
+        attemptId,
+        workstationInstanceId: dto.workstationInstanceId,
+        deviceSequence: dto.deviceSequence,
+        status: 'APPLIED',
+        reason: null,
+      });
+      await this.repository.insertAudit(tx, {
+        attemptId,
+        actorUserId,
+        action: 'QUICK_UNDO',
+        targetType: 'PASS',
+        targetId: target.id,
+        oldValues: {
+          status: target.status,
+          enrollmentId: target.enrollmentId,
+          lapNumber: target.lapNumber,
+          officialAt: target.officialAt.toISOString(),
+          officialElapsedMs: target.officialElapsedMs,
+          workstationInstanceId: target.workstationInstanceId,
+          deviceSequence: target.deviceSequence,
+        },
+        newValues: {
+          status: 'CANCELLED',
+          lapNumber: null,
+          workstationInstanceId: dto.workstationInstanceId,
+          deviceSequence: dto.deviceSequence,
+          idempotencyKey: key,
+        },
+        reason: null,
+      });
+      return toPassView(cancelled);
+    });
+  }
+
+  /**
+   * One unbound pending finish of the event's running attempt. The mark must
+   * name a `PENDING_FINISH` that is still `PENDING`; a cancelled mark is state,
+   * not a missing resource, and a wrong kind is no pending finish at all.
+   */
+  private async loadPendingFinish(
+    pendingFinishId: string,
+    eventId: string,
+    tx?: TimingTx,
+  ): Promise<PendingFinishContext> {
+    const mark = await this.repository.findMark(pendingFinishId, tx);
+    if (mark === null) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'Pending finish not found.',
+        { pendingFinishId },
+      );
+    }
+    const attempt = await this.repository.findAttempt(mark.attemptId, tx);
+    if (attempt === null || attempt.eventId !== eventId) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'The pending finish belongs to another event.',
+        { pendingFinishId, attemptId: mark.attemptId },
+      );
+    }
+    if (mark.kind !== 'PENDING_FINISH') {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'The addressed mark is not a pending finish.',
+        { pendingFinishId, kind: mark.kind },
+      );
+    }
+    if (mark.status !== 'PENDING') {
+      throw timingError(
+        TimingErrorCode.INVALID_STATE,
+        'The pending finish is no longer unbound.',
+        { pendingFinishId, status: mark.status },
+      );
+    }
+    if (attempt.status !== 'RUNNING') {
+      throw timingError(
+        TimingErrorCode.ATTEMPT_CLOSED,
+        'A pending finish changes only while its attempt runs.',
+        { attemptId: attempt.id, status: attempt.status },
+      );
+    }
+    return { mark, attempt };
+  }
+
+  /**
+   * The participant a bind names. Exactly one of the two identity fields is
+   * present (the DTO guarantees it), and the target must be frozen in this
+   * attempt: a number or enrollment of another attempt is not a target here.
+   */
+  private async resolveBindTarget(
+    attemptId: string,
+    dto: BindPendingFinishDto,
+    tx: TimingTx,
+  ): Promise<TimingParticipantRow> {
+    if (dto.enrollmentId !== undefined) {
+      const participant = await this.repository.findParticipant(
+        attemptId,
+        dto.enrollmentId,
+        tx,
+      );
+      if (participant === null) {
+        throw timingError(
+          TimingErrorCode.NOT_FOUND,
+          'The enrollment is not a frozen participant of this attempt.',
+          { attemptId, enrollmentId: dto.enrollmentId },
+        );
+      }
+      return participant;
+    }
+    if (dto.startNumber === undefined) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'The bind names no participant.',
+        { attemptId },
+      );
+    }
+    const participant = await this.repository.findParticipantByStartNumber(
+      attemptId,
+      dto.startNumber,
+      tx,
+    );
+    if (participant === null) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'No frozen participant of this attempt carries the number.',
+        { attemptId, startNumber: dto.startNumber },
+      );
+    }
+    return participant;
+  }
+
+  /**
    * Resolves what one commit writes: a frozen participant of the addressed
    * attempt, or nothing for an unbound finish. Exclusion and N are checked on
    * the frozen row the capture actually targets, so a number that routed to an
@@ -828,8 +1263,8 @@ export class TimingService {
 
   /**
    * U-14: renumbers one participant's bound passes 1..k in official-instant
-   * order and writes only the rows whose number changed, so the N-th pass is
-   * always the participant's total.
+   * order, including the pass the caller just bound, and writes only the rows
+   * whose number changed, so the N-th pass is always the participant's total.
    */
   private async reindexLaps(
     tx: TimingTx,
@@ -838,31 +1273,58 @@ export class TimingService {
     marks: readonly TimingMarkRow[],
     created: TimingMarkRow,
   ): Promise<TimingMarkRow> {
-    const passes = marks
-      .filter(
-        (mark) => mark.status === 'BOUND' && mark.enrollmentId === enrollmentId,
-      )
-      .map((mark) => ({ passId: mark.id, officialAt: mark.officialAt, mark }));
-    passes.push({
-      passId: created.id,
-      officialAt: created.officialAt,
-      mark: created,
-    });
-    const byId = new Map(passes.map((pass) => [pass.passId, pass.mark]));
-    let applied = created;
-    for (const lap of assignLapNumbers(passes)) {
-      const mark = byId.get(lap.passId);
+    const passes = new Map<string, TimingMarkRow>();
+    for (const mark of marks) {
+      if (mark.status === 'BOUND' && mark.enrollmentId === enrollmentId) {
+        passes.set(mark.id, mark);
+      }
+    }
+    passes.set(created.id, created);
+    const written = await this.writeLapNumbers(tx, passes);
+    return written.get(created.id) ?? created;
+  }
+
+  /**
+   * U-14 after a cancellation or an undo: renumbers the remaining bound passes
+   * of one participant 1..k in official-instant order.
+   */
+  private async renumberPasses(
+    tx: TimingTx,
+    enrollmentId: string,
+    marks: readonly TimingMarkRow[],
+  ): Promise<void> {
+    const passes = new Map<string, TimingMarkRow>();
+    for (const mark of marks) {
+      if (mark.status === 'BOUND' && mark.enrollmentId === enrollmentId) {
+        passes.set(mark.id, mark);
+      }
+    }
+    await this.writeLapNumbers(tx, passes);
+  }
+
+  /** Assigns lap numbers 1..k and writes only the rows whose number changed. */
+  private async writeLapNumbers(
+    tx: TimingTx,
+    passes: ReadonlyMap<string, TimingMarkRow>,
+  ): Promise<Map<string, TimingMarkRow>> {
+    const written = new Map(passes);
+    const laps = assignLapNumbers(
+      [...written.values()].map((mark) => ({
+        passId: mark.id,
+        officialAt: mark.officialAt,
+      })),
+    );
+    for (const lap of laps) {
+      const mark = written.get(lap.passId);
       if (mark === undefined || mark.lapNumber === lap.lapNumber) {
         continue;
       }
       const updated = await this.repository.updateMark(tx, lap.passId, {
         lapNumber: lap.lapNumber,
       });
-      if (lap.passId === created.id) {
-        applied = updated;
-      }
+      written.set(lap.passId, updated);
     }
-    return applied;
+    return written;
   }
 
   private async loadEventContext(
@@ -1352,6 +1814,47 @@ function boundPassCount(
   return marks.filter(
     (mark) => mark.status === 'BOUND' && mark.enrollmentId === enrollmentId,
   ).length;
+}
+
+/**
+ * E-11: the last pass this workstation *created* in the attempt.
+ *
+ * A bind gives an existing pending-finish mark a participant while AD-3 keeps
+ * that mark's capture sequence, so `kind: PASS`, `status: BOUND` and the highest
+ * `deviceSequence` also match a freshly bound finish. The audit row a capture
+ * writes in its own transaction is the only creation proof on the record, so
+ * only a mark named by this workstation's `PASS_CAPTURE` is a candidate. A
+ * correction, a rebind or another workstation's capture is never named.
+ */
+function lastPassCreation(
+  marks: readonly TimingMarkRow[],
+  audit: readonly TimingAuditRow[],
+  workstationInstanceId: string,
+): TimingMarkRow | null {
+  const created = new Set<string>();
+  for (const row of audit) {
+    if (row.action !== 'PASS_CAPTURE') continue;
+    if (row.newValues?.workstationInstanceId !== workstationInstanceId) {
+      continue;
+    }
+    created.add(row.targetId);
+  }
+  const candidates = marks.filter(
+    (mark) =>
+      created.has(mark.id) &&
+      mark.kind === 'PASS' &&
+      mark.status === 'BOUND' &&
+      mark.workstationInstanceId === workstationInstanceId,
+  );
+  candidates.sort((left, right) => {
+    const sequence = (right.deviceSequence ?? -1) - (left.deviceSequence ?? -1);
+    if (sequence !== 0) return sequence;
+    const instant = right.officialAt.getTime() - left.officialAt.getTime();
+    if (instant !== 0) return instant;
+    if (left.id === right.id) return 0;
+    return left.id < right.id ? 1 : -1;
+  });
+  return candidates[0] ?? null;
 }
 
 /** The routing facts of one candidate row; the attempt status is always running. */
