@@ -3,12 +3,14 @@ import { randomUUID } from 'node:crypto';
 import {
   Prisma,
   type AgeSplitSectionKind,
+  type ClassHeatResultStatus,
   type EnrollmentStatus,
   type EventStatus,
   type GenderType,
   type RegistrationStatus,
   type ResultOutcome,
   type StartPurposeType,
+  type TimingAttemptKind,
   type TimingMarkKind,
   type TimingMarkStatus,
   type TimingReceiptStatus,
@@ -127,7 +129,7 @@ export type TimingClassCompetitionRow = {
   capturedRegistrationIds: string[];
 };
 
-/** One attempt of a category, with its frozen roster size. */
+/** One attempt of a category or of one heat, with its frozen roster size. */
 export type TimingAttemptRow = {
   id: string;
   eventId: string;
@@ -135,6 +137,14 @@ export type TimingAttemptRow = {
   formatId: number;
   gender: GenderType;
   attemptNumber: number;
+  /** `CATEGORY` for a protocol category; `HEAT` for one stage heat (AD-14). */
+  attemptKind: TimingAttemptKind;
+  /** The race a heat attempt times; null on a category attempt. */
+  classCompetitionId: string | null;
+  /** The CMS stage a heat attempt times; null on a category attempt. */
+  stageId: string | null;
+  /** The heat number inside the stage; null on a category attempt. */
+  heatNumber: number | null;
   status: TimingSessionStatus;
   officialStartedAt: Date;
   clientStartedAt: Date;
@@ -189,6 +199,33 @@ export type TimingFormatRow = {
   sortOrder: number;
 };
 
+/**
+ * One active enrollment of a race start, resolved from a heat slot's
+ * registration. The timing service freezes it into a heat attempt roster; the
+ * exclusion reasons stay with the service (AD-15).
+ */
+export type TimingHeatRosterEnrollmentRow = {
+  enrollmentId: string;
+  registrationId: string;
+  startNumber: number | null;
+  enrollmentStatus: EnrollmentStatus;
+  registrationStatus: RegistrationStatus;
+};
+
+/**
+ * One `class_heat_times` row a heat closure publishes or finds: the total and
+ * its status only, never a per-lap row (AD-16, FR-57).
+ */
+export type TimingHeatTimeRow = {
+  id: string;
+  classCompetitionId: string;
+  stageId: string;
+  heatNumber: number;
+  registrationId: string;
+  timeMilliseconds: number | null;
+  status: ClassHeatResultStatus;
+};
+
 /** One raw capture: a bound pass, an unbound finish or a cancelled mark. */
 export type TimingMarkRow = {
   id: string;
@@ -209,6 +246,31 @@ export type TimingMarkRow = {
   idempotencyKey: string;
   createdAt: Date;
   updatedAt: Date;
+};
+
+/**
+ * One queued anonymous split of the event: a pending `ANONYMOUS_SPLIT` mark
+ * plus the attempt facts the surface queue labels it with (AD-17). The block
+ * key and the label are derived by the service, not here.
+ */
+export type TimingAnonymousSplitRow = {
+  splitId: string;
+  attemptId: string;
+  attemptKind: TimingAttemptKind;
+  attemptStatus: TimingSessionStatus;
+  eventId: string;
+  startId: string;
+  formatId: number;
+  gender: GenderType;
+  classCompetitionId: string | null;
+  stageId: string | null;
+  heatNumber: number | null;
+  officialStartedAt: Date;
+  clockEpochId: string;
+  /** The capture instant the queue orders and displays; the official one. */
+  capturedAt: Date;
+  officialElapsedMs: number;
+  status: TimingMarkStatus;
 };
 
 /** One monotonic clock anchor of an attempt and workstation. */
@@ -291,10 +353,49 @@ export type CreateAttemptInput = {
   formatId: number;
   gender: GenderType;
   attemptNumber: number;
+  /** Defaults to `CATEGORY`; a heat attempt sets all three heat fields. */
+  attemptKind?: TimingAttemptKind;
+  classCompetitionId?: string | null;
+  stageId?: string | null;
+  heatNumber?: number | null;
   officialStartedAt: Date;
   clientStartedAt: Date;
   startedByUserId: string | null;
   participants: TimingParticipantInput[];
+};
+
+/** The one heat-time publication write: total and `OK`, no per-lap row. */
+export type CreateHeatTimeInput = {
+  classCompetitionId: string;
+  stageId: string;
+  heatNumber: number;
+  registrationId: string;
+  timeMilliseconds: number;
+};
+
+/**
+ * An anonymous split capture: the shared mark clock facts with no participant,
+ * no lap and no identity. The mark kind and the pending status are fixed by
+ * `buildAnonymousSplitCreate`, never by the caller.
+ */
+export type CreateAnonymousSplitInput = {
+  attemptId: string;
+  clockEpochId: string;
+  rawCapturedAt: Date;
+  rawElapsedMs: number;
+  officialAt: Date;
+  officialElapsedMs: number;
+  workstationInstanceId: string;
+  deviceSequence: number | null;
+  idempotencyKey: string;
+};
+
+/** The participant an anonymous split is assigned to; the service refusals stay there. */
+export type AssignAnonymousSplitInput = {
+  enrollmentId: string;
+  registrationId: string;
+  startNumber: number | null;
+  deviceSequence: number | null;
 };
 
 /** The one write that closes an attempt. */
@@ -378,6 +479,17 @@ export type CreateReceiptInput = {
   reason: string | null;
 };
 
+/**
+ * A definitively refused capture-side action: the sequence still owes a final
+ * receipt, so the refusal is recorded as `REJECTED` (AD-18, FR-54).
+ */
+export type CreateRejectedReceiptInput = {
+  attemptId: string;
+  workstationInstanceId: string;
+  deviceSequence: number;
+  reason: string;
+};
+
 export type InsertAuditInput = {
   attemptId: string;
   actorUserId: string | null;
@@ -405,6 +517,10 @@ const ATTEMPT_SELECT = {
   formatId: true,
   gender: true,
   attemptNumber: true,
+  attemptKind: true,
+  classCompetitionId: true,
+  stageId: true,
+  heatNumber: true,
   status: true,
   officialStartedAt: true,
   clientStartedAt: true,
@@ -417,7 +533,7 @@ const ATTEMPT_SELECT = {
   _count: { select: { participants: true } },
 } satisfies Prisma.TimingSessionSelect;
 
-type AttemptQueryRow = Prisma.TimingSessionGetPayload<{
+export type AttemptQueryRow = Prisma.TimingSessionGetPayload<{
   select: typeof ATTEMPT_SELECT;
 }>;
 
@@ -570,6 +686,59 @@ type ResultWithSplitsQueryRow = Prisma.ResultGetPayload<{
   select: typeof RESULT_WITH_SPLITS_SELECT;
 }>;
 
+const HEAT_TIME_SELECT = {
+  id: true,
+  classCompetitionId: true,
+  stageId: true,
+  heatNumber: true,
+  registrationId: true,
+  timeMilliseconds: true,
+  status: true,
+} satisfies Prisma.ClassHeatTimeSelect;
+
+/**
+ * One pending anonymous split with the attempt facts the queue labels it with.
+ * The attempt is read, never filtered to one status: the closure gate keeps a
+ * pending split's attempt open, and a stale row stays visible either way.
+ */
+const ANONYMOUS_SPLIT_SELECT = {
+  id: true,
+  sessionId: true,
+  clockEpochId: true,
+  officialAt: true,
+  officialElapsedMs: true,
+  status: true,
+  session: {
+    select: {
+      attemptKind: true,
+      status: true,
+      eventId: true,
+      startId: true,
+      formatId: true,
+      gender: true,
+      classCompetitionId: true,
+      stageId: true,
+      heatNumber: true,
+      officialStartedAt: true,
+    },
+  },
+} satisfies Prisma.TimingMarkSelect;
+
+export type AnonymousSplitQueryRow = Prisma.TimingMarkGetPayload<{
+  select: typeof ANONYMOUS_SPLIT_SELECT;
+}>;
+
+const HEAT_ENROLLMENT_SELECT = {
+  id: true,
+  registrationId: true,
+  status: true,
+  registration: { select: { startNumber: true, status: true } },
+} satisfies Prisma.EnrollmentSelect;
+
+export type HeatEnrollmentQueryRow = Prisma.EnrollmentGetPayload<{
+  select: typeof HEAT_ENROLLMENT_SELECT;
+}>;
+
 /** The column list every conditional capture-lock statement returns. */
 const CAPTURE_LOCK_COLUMNS = Prisma.sql`
   event_id,
@@ -672,6 +841,130 @@ export function buildMarkUpdate(
   return data;
 }
 
+/**
+ * Maps a start press onto the attempt create payload. A category attempt keeps
+ * `CATEGORY` and the three heat fields null; a heat attempt carries all three.
+ * Exported for the unit spec: the service never calls it directly.
+ */
+export function buildAttemptCreateData(
+  input: CreateAttemptInput,
+): Prisma.TimingSessionUncheckedCreateInput {
+  return {
+    eventId: input.eventId,
+    startId: input.startId,
+    formatId: input.formatId,
+    gender: input.gender,
+    attemptNumber: input.attemptNumber,
+    attemptKind: input.attemptKind ?? 'CATEGORY',
+    classCompetitionId: input.classCompetitionId ?? null,
+    stageId: input.stageId ?? null,
+    heatNumber: input.heatNumber ?? null,
+    status: 'RUNNING',
+    officialStartedAt: input.officialStartedAt,
+    clientStartedAt: input.clientStartedAt,
+    startedByUserId: input.startedByUserId,
+    participants: {
+      create: input.participants.map((participant) => ({
+        enrollmentId: participant.enrollmentId,
+        registrationId: participant.registrationId,
+        startNumber: participant.startNumber,
+        sectionId: participant.sectionId,
+        requiredLaps: participant.requiredLaps,
+        initialOutcome: participant.initialOutcome,
+        excludedReason: participant.excludedReason ?? null,
+      })),
+    },
+  };
+}
+
+/**
+ * Maps a heat publication onto one `class_heat_times` create payload: the total
+ * elapsed value and `OK`, with no lap row and no event-lap mapping (FR-57).
+ * Exported for the unit spec: the service never calls it directly.
+ */
+export function buildHeatTimeCreateData(
+  input: CreateHeatTimeInput,
+): Prisma.ClassHeatTimeUncheckedCreateInput {
+  return {
+    classCompetitionId: input.classCompetitionId,
+    stageId: input.stageId,
+    heatNumber: input.heatNumber,
+    registrationId: input.registrationId,
+    timeMilliseconds: input.timeMilliseconds,
+    status: 'OK',
+  };
+}
+
+/**
+ * Maps an anonymous capture onto the shared mark write: kind `ANONYMOUS_SPLIT`,
+ * status `PENDING`, no participant, no lap and no identity. Exported for the
+ * unit spec: the service never calls it directly.
+ */
+export function buildAnonymousSplitCreate(
+  input: CreateAnonymousSplitInput,
+): CreateMarkInput {
+  return {
+    attemptId: input.attemptId,
+    clockEpochId: input.clockEpochId,
+    enrollmentId: null,
+    registrationId: null,
+    startNumber: null,
+    kind: 'ANONYMOUS_SPLIT',
+    rawCapturedAt: input.rawCapturedAt,
+    rawElapsedMs: input.rawElapsedMs,
+    officialAt: input.officialAt,
+    officialElapsedMs: input.officialElapsedMs,
+    lapNumber: null,
+    status: 'PENDING',
+    workstationInstanceId: input.workstationInstanceId,
+    deviceSequence: input.deviceSequence,
+    idempotencyKey: input.idempotencyKey,
+  };
+}
+
+/**
+ * Maps an assignment onto the shared mark correction: the split becomes the
+ * participant's bound pass and keeps its raw capture and official instant.
+ * Exported for the unit spec: the service never calls it directly.
+ */
+export function buildAnonymousSplitAssignment(
+  input: AssignAnonymousSplitInput,
+): UpdateMarkInput {
+  return {
+    enrollmentId: input.enrollmentId,
+    registrationId: input.registrationId,
+    startNumber: input.startNumber,
+    kind: 'PASS',
+    status: 'BOUND',
+    deviceSequence: input.deviceSequence,
+  };
+}
+
+/**
+ * Maps a cancellation onto the shared mark correction: the split stays a
+ * non-authoritative record and leaves the queue. Exported for the unit spec:
+ * the service never calls it directly.
+ */
+export function buildAnonymousSplitCancellation(): UpdateMarkInput {
+  return { status: 'CANCELLED' };
+}
+
+/**
+ * Maps a refused capture-side action onto its final `REJECTED` receipt input.
+ * Exported for the unit spec: the service never calls it directly.
+ */
+export function toRejectedReceiptInput(
+  input: CreateRejectedReceiptInput,
+): CreateReceiptInput {
+  return {
+    attemptId: input.attemptId,
+    workstationInstanceId: input.workstationInstanceId,
+    deviceSequence: input.deviceSequence,
+    status: 'REJECTED',
+    reason: input.reason,
+  };
+}
+
 /** Maps one raw capture-lock row; exported for the unit spec. */
 export function toCaptureLockRow(row: RawCaptureLockRow): TimingCaptureLockRow {
   return {
@@ -684,7 +977,11 @@ export function toCaptureLockRow(row: RawCaptureLockRow): TimingCaptureLockRow {
   };
 }
 
-function toAttemptRow(row: AttemptQueryRow): TimingAttemptRow {
+/**
+ * Maps one attempt row. Exported for the unit spec: the service never calls it
+ * directly.
+ */
+export function toAttemptRow(row: AttemptQueryRow): TimingAttemptRow {
   return {
     id: row.id,
     eventId: row.eventId,
@@ -692,6 +989,10 @@ function toAttemptRow(row: AttemptQueryRow): TimingAttemptRow {
     formatId: row.formatId,
     gender: row.gender,
     attemptNumber: row.attemptNumber,
+    attemptKind: row.attemptKind,
+    classCompetitionId: row.classCompetitionId,
+    stageId: row.stageId,
+    heatNumber: row.heatNumber,
     status: row.status,
     officialStartedAt: row.officialStartedAt,
     clientStartedAt: row.clientStartedAt,
@@ -702,6 +1003,43 @@ function toAttemptRow(row: AttemptQueryRow): TimingAttemptRow {
     participantCount: row._count.participants,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+/** Maps one resolved heat-roster enrollment; exported for the unit spec. */
+export function toHeatRosterEnrollmentRow(
+  row: HeatEnrollmentQueryRow,
+): TimingHeatRosterEnrollmentRow {
+  return {
+    enrollmentId: row.id,
+    registrationId: row.registrationId,
+    startNumber: row.registration.startNumber,
+    enrollmentStatus: row.status,
+    registrationStatus: row.registration.status,
+  };
+}
+
+/** Maps one queued anonymous split with its attempt facts; exported for the unit spec. */
+export function toAnonymousSplitRow(
+  row: AnonymousSplitQueryRow,
+): TimingAnonymousSplitRow {
+  return {
+    splitId: row.id,
+    attemptId: row.sessionId,
+    attemptKind: row.session.attemptKind,
+    attemptStatus: row.session.status,
+    eventId: row.session.eventId,
+    startId: row.session.startId,
+    formatId: row.session.formatId,
+    gender: row.session.gender,
+    classCompetitionId: row.session.classCompetitionId,
+    stageId: row.session.stageId,
+    heatNumber: row.session.heatNumber,
+    officialStartedAt: row.session.officialStartedAt,
+    clockEpochId: row.clockEpochId,
+    capturedAt: row.officialAt,
+    officialElapsedMs: row.officialElapsedMs,
+    status: row.status,
   };
 }
 
@@ -962,6 +1300,35 @@ export class TimingRepository {
     return rows.map(toEnrollmentRow);
   }
 
+  /**
+   * The active enrollments of one race start for the given registrations. A heat
+   * start resolves its slots through this read and freezes the result (AD-15);
+   * a slot with no row here has no enrollment in the race's start and is
+   * excluded by the service.
+   */
+  async listEnrollmentsForRegistrations(
+    eventId: string,
+    startId: string,
+    registrationIds: readonly string[],
+    tx?: TimingTx,
+  ): Promise<TimingHeatRosterEnrollmentRow[]> {
+    const unique = [...new Set(registrationIds)];
+    if (unique.length === 0) {
+      return [];
+    }
+    const rows = await this.db(tx).enrollment.findMany({
+      where: {
+        eventId,
+        startId,
+        status: 'REGISTERED',
+        registrationId: { in: unique },
+      },
+      select: HEAT_ENROLLMENT_SELECT,
+      orderBy: [{ registrationId: 'asc' }, { id: 'asc' }],
+    });
+    return rows.map(toHeatRosterEnrollmentRow);
+  }
+
   async listAgeCategories(
     eventId: string,
     tx?: TimingTx,
@@ -1036,7 +1403,12 @@ export class TimingRepository {
     });
   }
 
-  /** Every attempt of one category, newest attempt first. */
+  /**
+   * Every attempt of one category, newest attempt first. A heat attempt shares
+   * the event, start, format and gender of its race, so the kind filter keeps
+   * this list, the running check and the attempt numbering category-only
+   * (AD-14).
+   */
   async findAttemptsForCategory(
     eventId: string,
     startId: string,
@@ -1045,9 +1417,67 @@ export class TimingRepository {
     tx?: TimingTx,
   ): Promise<TimingAttemptRow[]> {
     const rows = await this.db(tx).timingSession.findMany({
-      where: { eventId, startId, formatId, gender },
+      where: { eventId, startId, formatId, gender, attemptKind: 'CATEGORY' },
       select: ATTEMPT_SELECT,
       orderBy: [{ attemptNumber: 'desc' }],
+    });
+    return rows.map(toAttemptRow);
+  }
+
+  /** Every attempt of one heat, newest attempt first. */
+  async findHeatAttempts(
+    classCompetitionId: string,
+    stageId: string,
+    heatNumber: number,
+    tx?: TimingTx,
+  ): Promise<TimingAttemptRow[]> {
+    const rows = await this.db(tx).timingSession.findMany({
+      where: {
+        attemptKind: 'HEAT',
+        classCompetitionId,
+        stageId,
+        heatNumber,
+      },
+      select: ATTEMPT_SELECT,
+      orderBy: [{ attemptNumber: 'desc' }],
+    });
+    return rows.map(toAttemptRow);
+  }
+
+  /** The running attempt of one heat, if any; the partial index allows one. */
+  async findRunningHeatAttempt(
+    classCompetitionId: string,
+    stageId: string,
+    heatNumber: number,
+    tx?: TimingTx,
+  ): Promise<TimingAttemptRow | null> {
+    const row = await this.db(tx).timingSession.findFirst({
+      where: {
+        attemptKind: 'HEAT',
+        classCompetitionId,
+        stageId,
+        heatNumber,
+        status: 'RUNNING',
+      },
+      select: ATTEMPT_SELECT,
+    });
+    return row === null ? null : toAttemptRow(row);
+  }
+
+  /** Every heat attempt of one race, stage and heat ascending. */
+  async findAttemptsForRace(
+    eventId: string,
+    classCompetitionId: string,
+    tx?: TimingTx,
+  ): Promise<TimingAttemptRow[]> {
+    const rows = await this.db(tx).timingSession.findMany({
+      where: { eventId, attemptKind: 'HEAT', classCompetitionId },
+      select: ATTEMPT_SELECT,
+      orderBy: [
+        { stageId: 'asc' },
+        { heatNumber: 'asc' },
+        { attemptNumber: 'desc' },
+      ],
     });
     return rows.map(toAttemptRow);
   }
@@ -1072,7 +1502,7 @@ export class TimingRepository {
     gender: GenderType,
   ): Promise<number> {
     const row = await tx.timingSession.findFirst({
-      where: { eventId, startId, formatId, gender },
+      where: { eventId, startId, formatId, gender, attemptKind: 'CATEGORY' },
       orderBy: { attemptNumber: 'desc' },
       select: { attemptNumber: true },
     });
@@ -1085,28 +1515,7 @@ export class TimingRepository {
     input: CreateAttemptInput,
   ): Promise<TimingAttemptRow> {
     const row = await tx.timingSession.create({
-      data: {
-        eventId: input.eventId,
-        startId: input.startId,
-        formatId: input.formatId,
-        gender: input.gender,
-        attemptNumber: input.attemptNumber,
-        status: 'RUNNING',
-        officialStartedAt: input.officialStartedAt,
-        clientStartedAt: input.clientStartedAt,
-        startedByUserId: input.startedByUserId,
-        participants: {
-          create: input.participants.map((participant) => ({
-            enrollmentId: participant.enrollmentId,
-            registrationId: participant.registrationId,
-            startNumber: participant.startNumber,
-            sectionId: participant.sectionId,
-            requiredLaps: participant.requiredLaps,
-            initialOutcome: participant.initialOutcome,
-            excludedReason: participant.excludedReason ?? null,
-          })),
-        },
-      },
+      data: buildAttemptCreateData(input),
       select: ATTEMPT_SELECT,
     });
     return toAttemptRow(row);
@@ -1399,6 +1808,51 @@ export class TimingRepository {
     return rows.map(toMarkRow);
   }
 
+  /**
+   * Every pending anonymous split of the event, oldest capture first (AD-17).
+   * The queue is one read model over the event's marks, not a second table.
+   */
+  async listAnonymousSplits(
+    eventId: string,
+    tx?: TimingTx,
+  ): Promise<TimingAnonymousSplitRow[]> {
+    const rows = await this.db(tx).timingMark.findMany({
+      where: {
+        kind: 'ANONYMOUS_SPLIT',
+        status: 'PENDING',
+        session: { is: { eventId } },
+      },
+      select: ANONYMOUS_SPLIT_SELECT,
+      orderBy: [{ officialAt: 'asc' }, { id: 'asc' }],
+    });
+    return rows.map(toAnonymousSplitRow);
+  }
+
+  /** Writes one anonymous split of the attempt through the shared mark write. */
+  async createAnonymousSplit(
+    tx: TimingTx,
+    input: CreateAnonymousSplitInput,
+  ): Promise<TimingMarkRow> {
+    return this.createMark(tx, buildAnonymousSplitCreate(input));
+  }
+
+  /** Turns a queued anonymous split into the participant's bound pass. */
+  async assignAnonymousSplit(
+    tx: TimingTx,
+    splitId: string,
+    input: AssignAnonymousSplitInput,
+  ): Promise<TimingMarkRow> {
+    return this.updateMark(tx, splitId, buildAnonymousSplitAssignment(input));
+  }
+
+  /** Retires an anonymous split; the row stays as a non-authoritative mark. */
+  async cancelAnonymousSplit(
+    tx: TimingTx,
+    splitId: string,
+  ): Promise<TimingMarkRow> {
+    return this.updateMark(tx, splitId, buildAnonymousSplitCancellation());
+  }
+
   async createMark(
     tx: TimingTx,
     input: CreateMarkInput,
@@ -1650,6 +2104,18 @@ export class TimingRepository {
     return toReceiptRow(row);
   }
 
+  /**
+   * Records a definitively refused capture-side action as its final `REJECTED`
+   * receipt, so the sequence is resolved instead of staying unconfirmed
+   * (AD-18, FR-54). The refusal decision itself is the service's.
+   */
+  async createRejectedReceipt(
+    tx: TimingTx,
+    input: CreateRejectedReceiptInput,
+  ): Promise<TimingReceiptRow> {
+    return this.createReceipt(tx, toRejectedReceiptInput(input));
+  }
+
   async findReceipt(
     tx: TimingTx,
     attemptId: string,
@@ -1852,6 +2318,57 @@ export class TimingRepository {
         lapTimeMs: split.lapTimeMs,
         cumulativeMs: split.cumulativeMs,
       })),
+    });
+  }
+
+  /** One participant's heat time of a stage heat, if it already exists. */
+  async findHeatTime(
+    classCompetitionId: string,
+    stageId: string,
+    heatNumber: number,
+    registrationId: string,
+    tx?: TimingTx,
+  ): Promise<TimingHeatTimeRow | null> {
+    return this.db(tx).classHeatTime.findUnique({
+      where: {
+        classCompetitionId_stageId_heatNumber_registrationId: {
+          classCompetitionId,
+          stageId,
+          heatNumber,
+          registrationId,
+        },
+      },
+      select: HEAT_TIME_SELECT,
+    });
+  }
+
+  /** Every heat time of one stage heat, registration ascending. */
+  async listHeatTimesForHeat(
+    classCompetitionId: string,
+    stageId: string,
+    heatNumber: number,
+    tx?: TimingTx,
+  ): Promise<TimingHeatTimeRow[]> {
+    return this.db(tx).classHeatTime.findMany({
+      where: { classCompetitionId, stageId, heatNumber },
+      select: HEAT_TIME_SELECT,
+      orderBy: [{ registrationId: 'asc' }],
+    });
+  }
+
+  /**
+   * Writes one published heat time: total elapsed value and `OK`, with no
+   * `ClassHeatLapTime` row and no CMS call (AD-16). An existing row is never
+   * overwritten here; the service decides whether it is a conflict, and the
+   * create fails on the unique key if it raced one in.
+   */
+  async createHeatTime(
+    tx: TimingTx,
+    input: CreateHeatTimeInput,
+  ): Promise<TimingHeatTimeRow> {
+    return tx.classHeatTime.create({
+      data: buildHeatTimeCreateData(input),
+      select: HEAT_TIME_SELECT,
     });
   }
 
