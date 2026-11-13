@@ -8,6 +8,10 @@ import type {
 import { RoleCode, TIMING_OPERATE_ROLE_CODES } from '../auth/role-codes';
 import { RolesService } from '../auth/roles.service';
 import {
+  ClassCompetitionsService,
+  type ClassCompetitionView,
+} from '../class-competitions/class-competitions.service';
+import {
   currentPlacement,
   racePlacementForRow,
 } from '../class-competitions/race-scope';
@@ -20,6 +24,10 @@ import {
 import { CATEGORY_FINISHED_MESSAGE } from '../events/category-finish';
 import { isPastCompletedEvent } from '../events/event-status';
 import type { ResultResponse } from '../results/results.service';
+import {
+  AnonymousSplitService,
+  attemptBlockKey,
+} from './anonymous-split.service';
 import {
   assertCanAddPass,
   assertWithinBounds,
@@ -53,6 +61,7 @@ import type {
   OpenClockEpochDto,
   QuickUndoTimingPassDto,
   RebindTimingPassDto,
+  StartHeatAttemptDto,
   StartTimingAttemptDto,
   TakeCaptureDto,
   TransferCaptureDto,
@@ -75,6 +84,7 @@ import {
   type TimingClosureReportRecord,
   type TimingEnrollmentRow,
   type TimingEventRow,
+  type TimingHeatRosterEnrollmentRow,
   type TimingMarkRow,
   type TimingParticipantInput,
   type TimingParticipantRow,
@@ -99,6 +109,8 @@ import type {
   TimingLapSplitDto,
   TimingParticipantTileView,
   TimingPassView,
+  TimingStageGroupView,
+  TimingStageState,
   TimingSurfaceView,
 } from './timing.views';
 
@@ -139,9 +151,45 @@ export const EXCLUDED_RACE_SECTION = 'RACE_SECTION';
 /** Why a roster row is out of timing: it already carried a result outcome. */
 export const EXCLUDED_EXISTING_OUTCOME = 'EXISTING_OUTCOME';
 
+/** Why a heat slot is out of timing: the race start has no enrollment for it. */
+export const EXCLUDED_NO_ENROLLMENT = 'NO_ENROLLMENT';
+
+/** Why a heat slot is out of timing: its registration is withdrawn. */
+export const EXCLUDED_HEAT_WITHDRAWN = 'WITHDRAWN';
+
+/** Why a heat slot is out of timing: it already holds a heat time. */
+export const EXCLUDED_EXISTING_HEAT_TIME = 'EXISTING_HEAT_TIME';
+
+/** A stage whose heats are not formed yet offers no Start control. */
+const HEAT_STAGE_PENDING_MESSAGE = 'Заезды этапа ещё не сформированы.';
+
+/** A stage that is already complete shows its heats without a Start control. */
+const HEAT_STAGE_CLOSED_MESSAGE = 'Этап уже завершён.';
+
+/** A race that is `DONE` accepts no heat start. */
+const HEAT_RACE_DONE_MESSAGE = 'Гонка завершена.';
+
+/** A heat Start reason that has no product message; unreachable today. */
+const HEAT_START_FALLBACK_MESSAGE = 'Запуск этого заезда недоступен.';
+
 /** The one message the surface shows when an event offers no timing surface. */
 export const TIMING_NOT_AVAILABLE_MESSAGE =
   'Для этого мероприятия хронометраж недоступен.';
+
+/** The user-facing reason of a refused heat Start, keyed by domain code. */
+const HEAT_START_REFUSAL_MESSAGES: Partial<Record<TimingErrorCode, string>> = {
+  [TimingErrorCode.NOT_AVAILABLE]: TIMING_NOT_AVAILABLE_MESSAGE,
+  [TimingErrorCode.CATEGORY_FINISHED]: HEAT_RACE_DONE_MESSAGE,
+  [TimingErrorCode.NO_TIMEABLE_PARTICIPANT]:
+    'В заезде нет участников, доступных для хронометража.',
+  [TimingErrorCode.MISSING_START_NUMBER]:
+    'У участника заезда не указан стартовый номер.',
+  [TimingErrorCode.ATTEMPT_RUNNING]: 'Этот заезд уже запущен.',
+  [TimingErrorCode.ATTEMPT_CLOSED]:
+    'Заезд уже закрыт. Новый старт возможен только после отмены.',
+  [TimingErrorCode.CAPTURE_NOT_HELD]:
+    'Это рабочее место не удерживает захват хронометража.',
+};
 
 /** The user-facing reason of a refused Start press, keyed by domain code. */
 const START_REFUSAL_MESSAGES: Partial<Record<TimingErrorCode, string>> = {
@@ -238,6 +286,32 @@ type CategoryContext = CategoryGroup & {
   attempts: TimingAttemptRow[];
 };
 
+/** One race whose heats can be timed, with the start that owns them (AD-15). */
+type HeatRacePlan = {
+  race: ClassCompetitionView;
+  start: TimingStartRow;
+  formatId: number;
+  gender: TimingGender;
+  /** Protocol order of the section the race displays (FR-51). */
+  sectionOrder: number;
+};
+
+/** The stage headers and heat blocks one race contributes to the surface. */
+type HeatRaceSurface = HeatRacePlan & {
+  stageGroups: TimingStageGroupView[];
+  blocks: TimingCategoryBlockView[];
+};
+
+/** One heat slot resolved against the race start and its existing heat times. */
+type ResolvedHeatSlot = {
+  registrationId: string;
+  firstName: string;
+  lastName: string;
+  startNumber: number | null;
+  enrollmentId: string | null;
+  excludedReason: string | null;
+};
+
 /** The additive proof the domain error carries to the filter and the surface. */
 type StartRefusalContext = {
   missingNumbers: readonly TileSource[];
@@ -317,6 +391,8 @@ export class TimingService {
   constructor(
     private readonly repository: TimingRepository,
     private readonly rolesService: RolesService,
+    private readonly classCompetitionsService: ClassCompetitionsService,
+    private readonly anonymousSplitService: AnonymousSplitService,
   ) {}
 
   /** `GET /events/:eventId/timing`: every timeable category, read-only. */
@@ -331,16 +407,25 @@ export class TimingService {
     const now = new Date();
     const context = await this.loadEventContext(eventId, now);
     const groups = this.groupCategories(context);
-    const categories: TimingCategoryBlockView[] = [];
+    const categoryBlocks: TimingCategoryBlockView[] = [];
     for (const group of groups) {
       const category = await this.loadCategory(context, group);
-      categories.push(await this.buildBlock(context, category, now));
+      categoryBlocks.push(await this.buildBlock(context, category, now));
     }
+    const raceSurfaces = await this.loadHeatSurfaces(context, now);
     const lock = await this.repository.getCaptureLock(eventId);
+    const anonymousSplits = await this.anonymousSplitService.listQueue(eventId);
     return {
       eventId,
       captureWorkstationInstanceId: lock?.workstationInstanceId ?? null,
-      categories,
+      categories: assembleSurfaceBlocks(
+        context,
+        groups,
+        categoryBlocks,
+        raceSurfaces,
+      ),
+      stageGroups: raceSurfaces.flatMap((surface) => surface.stageGroups),
+      anonymousSplits,
     };
   }
 
@@ -510,6 +595,211 @@ export class TimingService {
     const block = await this.buildBlock(
       context,
       { ...category, attempts: [attempt, ...category.attempts] },
+      now,
+    );
+    return { attempt: block, epoch: toClockEpochView(epoch, now) };
+  }
+
+  /**
+   * `POST /events/:eventId/timing/heat-attempts`: open one heat of a seeded
+   * stage (E-10, AD-15).
+   *
+   * The heat identity is race + stage + heat; its roster is the heat's start
+   * list resolved to the active enrollments of the race's start, frozen exactly
+   * like a category roster, and N is that start's `lapCount`. Every refusal
+   * happens before the transaction, and the transaction locks the heat key and
+   * re-reads the attempts under the lock, so a simultaneous press creates no
+   * second running attempt and no "prepared" attempt is ever written.
+   */
+  async startHeatAttempt(
+    authentikId: string | undefined,
+    eventId: string,
+    dto: StartHeatAttemptDto,
+  ): Promise<StartTimingAttemptResult> {
+    await this.rolesService.assertHasAnyRole(
+      authentikId,
+      TIMING_OPERATE_ROLE_CODES,
+    );
+    const now = new Date();
+    const context = await this.loadEventContext(eventId, now);
+    const race = await this.findRaceView(eventId, dto.classCompetitionId);
+    const plan = toHeatRacePlan(context, race);
+    if (plan === null) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'The race has no timing start on this event.',
+        { classCompetitionId: dto.classCompetitionId },
+      );
+    }
+    const stage = race.stages.find((item) => item.stageId === dto.stageId);
+    if (stage === undefined) {
+      throw timingError(TimingErrorCode.NOT_FOUND, 'The stage was not found.', {
+        classCompetitionId: dto.classCompetitionId,
+        stageId: dto.stageId,
+      });
+    }
+    if (!stage.heats.some((heat) => heat.heatNumber === dto.heatNumber)) {
+      throw timingError(TimingErrorCode.NOT_FOUND, 'The heat was not found.', {
+        classCompetitionId: dto.classCompetitionId,
+        stageId: dto.stageId,
+        heatNumber: dto.heatNumber,
+      });
+    }
+    if (stage.status !== 'SEEDED') {
+      throw timingError(
+        TimingErrorCode.INVALID_STATE,
+        'A heat starts only in a seeded stage.',
+        {
+          classCompetitionId: dto.classCompetitionId,
+          stageId: dto.stageId,
+          stageState: stage.status,
+        },
+      );
+    }
+    if (race.status === 'DONE') {
+      throw timingError(
+        TimingErrorCode.CATEGORY_FINISHED,
+        'The race is done and accepts no heat start.',
+        { classCompetitionId: dto.classCompetitionId, status: race.status },
+      );
+    }
+    if (!context.eventRecordable) {
+      throw timingError(
+        TimingErrorCode.NOT_AVAILABLE,
+        TIMING_NOT_AVAILABLE_MESSAGE,
+        { eventId },
+      );
+    }
+    const lock = await this.repository.getCaptureLock(eventId);
+    if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
+      throw timingError(
+        TimingErrorCode.CAPTURE_NOT_HELD,
+        'This workstation does not hold capture.',
+        {
+          workstationInstanceId: dto.workstationInstanceId,
+          holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
+        },
+      );
+    }
+    const previous = await this.repository.findHeatAttempts(
+      race.id,
+      stage.stageId,
+      dto.heatNumber,
+    );
+    this.assertHeatCanStart(previous, dto);
+
+    const slots = await this.resolveHeatSlots(
+      context,
+      plan,
+      stage.stageId,
+      dto.heatNumber,
+    );
+    const timeable = slots.filter((slot) => slot.excludedReason === null);
+    if (timeable.length === 0) {
+      throw timingError(
+        TimingErrorCode.NO_TIMEABLE_PARTICIPANT,
+        'The heat has no timeable participant.',
+        {
+          classCompetitionId: dto.classCompetitionId,
+          stageId: dto.stageId,
+          heatNumber: dto.heatNumber,
+        },
+      );
+    }
+    const missingNumbers = timeable.filter((slot) => slot.startNumber === null);
+    if (missingNumbers.length > 0) {
+      throw timingError(
+        TimingErrorCode.MISSING_START_NUMBER,
+        'A timeable heat participant has no start number.',
+        {
+          participants: missingNumbers.map((slot) => ({
+            enrollmentId: slot.enrollmentId,
+            registrationId: slot.registrationId,
+            fullName: formatPersonName(slot.firstName, slot.lastName),
+          })),
+        },
+      );
+    }
+    const participants = slots
+      .filter((slot) => slot.enrollmentId !== null)
+      .map((slot) => toParticipantInput(toHeatTileSource(slot, plan)));
+
+    const actorUserId = await this.requireUserId(authentikId);
+    const heatKey = heatAttemptLockKey(
+      eventId,
+      race.id,
+      stage.stageId,
+      dto.heatNumber,
+    );
+    const { attempt, epoch } = await this.repository.withTransaction(
+      async (tx) => {
+        await this.repository.lockCategory(tx, heatKey);
+        // AD-14: the partial heat-running index is the last guard; under the
+        // heat lock a simultaneous press reads the winner and is refused before
+        // it can reach the index.
+        const current = await this.repository.findHeatAttempts(
+          race.id,
+          stage.stageId,
+          dto.heatNumber,
+          tx,
+        );
+        this.assertHeatCanStart(current, dto);
+        const created = await this.repository.createAttempt(tx, {
+          eventId,
+          startId: plan.start.id,
+          formatId: plan.formatId,
+          gender: plan.gender,
+          attemptKind: 'HEAT',
+          classCompetitionId: race.id,
+          stageId: stage.stageId,
+          heatNumber: dto.heatNumber,
+          attemptNumber: nextAttemptNumber(
+            current.map((row) => row.attemptNumber),
+          ),
+          officialStartedAt: now,
+          clientStartedAt: new Date(dto.clientStartedAt),
+          startedByUserId: actorUserId,
+          participants,
+        });
+        const clockEpoch = await this.repository.createClockEpoch(tx, {
+          attemptId: created.id,
+          workstationInstanceId: dto.workstationInstanceId,
+          officialElapsedAnchorMs: 0,
+          openedByUserId: actorUserId,
+          openedAt: now,
+        });
+        await this.repository.insertAudit(tx, {
+          attemptId: created.id,
+          actorUserId,
+          action: 'START',
+          targetType: 'ATTEMPT',
+          targetId: created.id,
+          oldValues: null,
+          newValues: {
+            attemptKind: 'HEAT',
+            classCompetitionId: race.id,
+            stageId: stage.stageId,
+            heatNumber: dto.heatNumber,
+            attemptNumber: created.attemptNumber,
+            officialStartedAt: created.officialStartedAt.toISOString(),
+            clientStartedAt: dto.clientStartedAt,
+            participantCount: participants.length,
+            workstationInstanceId: dto.workstationInstanceId,
+          },
+          reason: null,
+        });
+        return { attempt: created, epoch: clockEpoch };
+      },
+    );
+
+    const block = await this.buildHeatBlock(
+      context,
+      plan,
+      stage.stageId,
+      stage.status,
+      stageLabel(stage),
+      dto.heatNumber,
+      [attempt, ...previous],
       now,
     );
     return { attempt: block, epoch: toClockEpochView(epoch, now) };
@@ -2391,9 +2681,10 @@ export class TimingService {
   }
 
   /**
-   * The three closure gates in the surface's order: an unbound pending finish,
-   * an issued sequence without a final receipt, then a participant below N.
-   * Force-completion and cancellation skip the third gate only.
+   * The closure gates in the surface's order: an unassigned anonymous split of
+   * the closing attempt, an unbound pending finish, an issued sequence without
+   * a final receipt, then a participant below N. Force-completion and
+   * cancellation skip the last gate only (FR-14, AD-18).
    */
   private async assertClosureGates(
     tx: TimingTx,
@@ -2404,6 +2695,21 @@ export class TimingService {
     statuses: ReadonlyMap<string, EnrollmentStatus>,
     input: ClosureInput,
   ): Promise<void> {
+    const anonymousSplitIds = (
+      await this.repository.listAnonymousSplits(attempt.eventId, tx)
+    )
+      .filter((split) => split.attemptId === attempt.id)
+      .map((split) => split.splitId);
+    if (anonymousSplitIds.length > 0) {
+      // FR-14: only assignment, cancellation or quick undo clears a split; a
+      // completion, force-completion or cancellation of the attempt itself is
+      // refused and names every queued split.
+      throw timingError(
+        TimingErrorCode.PENDING_REMAINS,
+        'An unassigned anonymous split still blocks closure.',
+        { attemptId: attempt.id, anonymousSplitIds },
+      );
+    }
     const receipts = await this.repository.listAttemptReceipts(attempt.id, tx);
     const coverage = closureReceiptCoverage(marks, receipts, input);
     const below = input.requireEveryParticipantAtN
@@ -2920,6 +3226,287 @@ export class TimingService {
     return written;
   }
 
+  /**
+   * Every race of the event that can carry heats, with its stage headers and
+   * heat blocks, in protocol order (FR-51). A race without a start, whose start
+   * does not run its format, or whose gender is not a protocol gender is not a
+   * heat candidate and contributes nothing.
+   */
+  private async loadHeatSurfaces(
+    context: EventContext,
+    now: Date,
+  ): Promise<HeatRaceSurface[]> {
+    const races = await this.classCompetitionsService.list(context.event.id);
+    const plans = races
+      .map((race) => toHeatRacePlan(context, race))
+      .filter((plan): plan is HeatRacePlan => plan !== null)
+      .sort((left, right) => compareHeatRacePlans(context, left, right));
+    const surfaces: HeatRaceSurface[] = [];
+    for (const plan of plans) {
+      surfaces.push(await this.buildHeatRaceSurface(context, plan, now));
+    }
+    return surfaces;
+  }
+
+  /** The stage headers and heat blocks of one race, stages in CMS order. */
+  private async buildHeatRaceSurface(
+    context: EventContext,
+    plan: HeatRacePlan,
+    now: Date,
+  ): Promise<HeatRaceSurface> {
+    const attempts = await this.repository.findAttemptsForRace(
+      context.event.id,
+      plan.race.id,
+    );
+    const attemptsByHeat = new Map<string, TimingAttemptRow[]>();
+    for (const attempt of attempts) {
+      if (attempt.stageId === null || attempt.heatNumber === null) {
+        continue;
+      }
+      const key = heatSurfaceKey(attempt.stageId, attempt.heatNumber);
+      const bucket = attemptsByHeat.get(key);
+      if (bucket === undefined) {
+        attemptsByHeat.set(key, [attempt]);
+      } else {
+        bucket.push(attempt);
+      }
+    }
+    const stageGroups: TimingStageGroupView[] = [];
+    const blocks: TimingCategoryBlockView[] = [];
+    for (const stage of plan.race.stages) {
+      const stageState = toTimingStageState(stage.status);
+      const label = stageLabel(stage);
+      const heatBlocks: TimingCategoryBlockView[] = [];
+      const heats = [...stage.heats].sort(
+        (left, right) => left.heatNumber - right.heatNumber,
+      );
+      for (const heat of heats) {
+        heatBlocks.push(
+          await this.buildHeatBlock(
+            context,
+            plan,
+            stage.stageId,
+            stageState,
+            label,
+            heat.heatNumber,
+            attemptsByHeat.get(
+              heatSurfaceKey(stage.stageId, heat.heatNumber),
+            ) ?? [],
+            now,
+          ),
+        );
+      }
+      stageGroups.push({
+        blockKey: stageGroupBlockKey(plan.race.id, stage.stageId),
+        raceId: plan.race.id,
+        raceTitle: raceTitle(plan.race),
+        stageId: stage.stageId,
+        stageLabel: label,
+        stageState,
+        heatBlockKeys: heatBlocks.map((block) => block.blockKey ?? ''),
+        blockReason: heatStageGroupBlockReason(
+          plan.race.status,
+          stageState,
+          heatBlocks.length,
+        ),
+      });
+      blocks.push(...heatBlocks);
+    }
+    return { ...plan, stageGroups, blocks };
+  }
+
+  /**
+   * One heat block: a frozen roster and marks for an existing attempt, or the
+   * heat's slots resolved to the race start before the first Start press.
+   */
+  private async buildHeatBlock(
+    context: EventContext,
+    plan: HeatRacePlan,
+    stageId: string,
+    stageState: TimingStageState,
+    label: string,
+    heatNumber: number,
+    attempts: readonly TimingAttemptRow[],
+    now: Date,
+  ): Promise<TimingCategoryBlockView> {
+    const latest = attempts[0] ?? null;
+    const frozen =
+      latest === null
+        ? null
+        : await this.repository.listParticipantRoster(latest.id);
+    const roster =
+      frozen === null
+        ? (await this.resolveHeatSlots(context, plan, stageId, heatNumber)).map(
+            (slot) => toHeatTileSource(slot, plan),
+          )
+        : frozen.map(toTileSource);
+    const timeable = roster.filter((row) => row.excludedReason === null);
+    const missingNumbers = timeable.filter((row) => row.startNumber === null);
+    const { startControlEnabled, blockReason } = heatStartState({
+      eventRecordable: context.eventRecordable,
+      raceDone: plan.race.status === 'DONE',
+      stageState,
+      previousAttemptStatus: latest?.status ?? null,
+      timeableCount: timeable.length,
+      participantsWithoutNumber: missingNumbers.length,
+    });
+    const marks =
+      latest === null ? [] : await this.repository.listMarks(latest.id);
+    const pendingFinishes =
+      latest === null
+        ? []
+        : await this.repository.listPendingFinishes(latest.id);
+    const statistics = passStatistics(marks);
+
+    return {
+      startId: plan.start.id,
+      formatId: plan.formatId,
+      gender: plan.gender,
+      state: toCategoryState(latest),
+      lapCount: plan.start.lapCount,
+      attemptId: latest?.id ?? null,
+      officialStartedAt: latest?.officialStartedAt.toISOString() ?? null,
+      elapsedMs:
+        latest !== null && latest.status === 'RUNNING'
+          ? runningElapsedMs(latest, now)
+          : null,
+      startControlEnabled,
+      blockReason,
+      participants: roster.map((row) =>
+        toTileView(
+          row,
+          statistics.get(row.enrollmentId) ?? NO_PASSES,
+          latest?.status ?? null,
+        ),
+      ),
+      pendingFinishes: pendingFinishes.map((mark) => toPassView(mark)),
+      lastAttempts: attempts.map((attempt) => toAttemptRef(attempt)),
+      kind: 'HEAT',
+      blockKey: attemptBlockKey({
+        attemptKind: 'HEAT',
+        startId: plan.start.id,
+        formatId: plan.formatId,
+        gender: plan.gender,
+        classCompetitionId: plan.race.id,
+        stageId,
+        heatNumber,
+      }),
+      classCompetitionId: plan.race.id,
+      stageId,
+      stageLabel: label,
+      stageState,
+      heatNumber,
+      heatLabel: `Заезд ${heatNumber}`,
+    };
+  }
+
+  /**
+   * The heat's slots resolved against the active enrollments of the race start
+   * and the heat times that already exist (AD-15, F-11). A slot with no
+   * enrollment, a withdrawn registration or an existing heat time is excluded
+   * with its reason and never blocks the start while one participant remains.
+   */
+  private async resolveHeatSlots(
+    context: EventContext,
+    plan: HeatRacePlan,
+    stageId: string,
+    heatNumber: number,
+  ): Promise<ResolvedHeatSlot[]> {
+    const stage = plan.race.stages.find((item) => item.stageId === stageId);
+    const heat = stage?.heats.find((item) => item.heatNumber === heatNumber);
+    if (heat === undefined) {
+      return [];
+    }
+    const registrationIds = heat.slots.map((slot) => slot.registrationId);
+    const [enrollments, heatTimes] = await Promise.all([
+      this.repository.listEnrollmentsForRegistrations(
+        context.event.id,
+        plan.start.id,
+        registrationIds,
+      ),
+      this.repository.listHeatTimesForHeat(plan.race.id, stageId, heatNumber),
+    ]);
+    const enrollmentByRegistration = new Map(
+      enrollments.map((row) => [row.registrationId, row]),
+    );
+    const withHeatTime = new Set(heatTimes.map((row) => row.registrationId));
+    return [...heat.slots]
+      .sort((left, right) => left.position - right.position)
+      .map((slot) => {
+        const enrollment =
+          enrollmentByRegistration.get(slot.registrationId) ?? null;
+        return {
+          registrationId: slot.registrationId,
+          firstName: slot.firstName,
+          lastName: slot.lastName,
+          startNumber:
+            enrollment === null ? slot.startNumber : enrollment.startNumber,
+          enrollmentId: enrollment?.enrollmentId ?? null,
+          excludedReason: heatSlotExclusion(
+            enrollment,
+            withHeatTime.has(slot.registrationId),
+          ),
+        };
+      });
+  }
+
+  /** The race view of one event, or a `NOT_FOUND` naming the race. */
+  private async findRaceView(
+    eventId: string,
+    classCompetitionId: string,
+  ): Promise<ClassCompetitionView> {
+    const races = await this.classCompetitionsService.list(eventId);
+    const race = races.find((item) => item.id === classCompetitionId);
+    if (race === undefined) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'The race was not found on this event.',
+        { eventId, classCompetitionId },
+      );
+    }
+    return race;
+  }
+
+  /**
+   * The two prior-attempt refusals of a heat Start, in the category order: a
+   * running attempt then a completed or incomplete one. A cancelled attempt
+   * frees the heat for a new start.
+   */
+  private assertHeatCanStart(
+    attempts: readonly TimingAttemptRow[],
+    dto: StartHeatAttemptDto,
+  ): void {
+    const latest = attempts[0] ?? null;
+    if (attempts.some((attempt) => attempt.status === 'RUNNING')) {
+      throw timingError(
+        TimingErrorCode.ATTEMPT_RUNNING,
+        'The heat is already running.',
+        {
+          classCompetitionId: dto.classCompetitionId,
+          stageId: dto.stageId,
+          heatNumber: dto.heatNumber,
+          previousAttemptId: latest?.id ?? null,
+        },
+      );
+    }
+    if (
+      latest !== null &&
+      (latest.status === 'COMPLETED' || latest.status === 'INCOMPLETE')
+    ) {
+      throw timingError(
+        TimingErrorCode.ATTEMPT_CLOSED,
+        'The heat attempt is already closed.',
+        {
+          classCompetitionId: dto.classCompetitionId,
+          stageId: dto.stageId,
+          heatNumber: dto.heatNumber,
+          previousAttemptId: latest.id,
+          previousAttemptStatus: latest.status,
+        },
+      );
+    }
+  }
+
   private async loadEventContext(
     eventId: string,
     now: Date,
@@ -3226,6 +3813,285 @@ function protocolCategoryKey(
   gender: TimingGender,
 ): string {
   return `${eventId}:${startId}:${formatId}:${gender}`;
+}
+
+/** The advisory-lock key of one heat attempt. */
+function heatAttemptLockKey(
+  eventId: string,
+  classCompetitionId: string,
+  stageId: string,
+  heatNumber: number,
+): string {
+  return `heat:${eventId}:${classCompetitionId}:${stageId}:${heatNumber}`;
+}
+
+/** The lookup key of one heat inside a race. */
+function heatSurfaceKey(stageId: string, heatNumber: number): string {
+  return `${stageId}:${heatNumber}`;
+}
+
+/** The stable collapse identity of one stage header (AD-20). */
+function stageGroupBlockKey(
+  classCompetitionId: string,
+  stageId: string,
+): string {
+  return `stage:${classCompetitionId}:${stageId}`;
+}
+
+/**
+ * One race as a heat candidate: it needs a start the event knows, that start
+ * must run its format, and its gender must be a protocol gender (AD-15).
+ */
+function toHeatRacePlan(
+  context: EventContext,
+  race: ClassCompetitionView,
+): HeatRacePlan | null {
+  if (race.startId === null || race.formatId === null) {
+    return null;
+  }
+  const start = context.startsById.get(race.startId);
+  if (start === undefined || !start.formatIds.includes(race.formatId)) {
+    return null;
+  }
+  if (race.gender !== 'M' && race.gender !== 'F') {
+    return null;
+  }
+  return {
+    race,
+    start,
+    formatId: race.formatId,
+    gender: race.gender,
+    sectionOrder: raceSectionOrder(race.sectionId),
+  };
+}
+
+/**
+ * FR-51 race order inside one protocol category: the protocol order of the
+ * section each race displays, then its title and id as a stable tie-break.
+ */
+function compareHeatRacePlans(
+  context: EventContext,
+  left: HeatRacePlan,
+  right: HeatRacePlan,
+): number {
+  const categoryDifference = compareCategories(
+    context,
+    {
+      startId: left.start.id,
+      formatId: left.formatId,
+      gender: left.gender,
+      rows: [],
+    },
+    {
+      startId: right.start.id,
+      formatId: right.formatId,
+      gender: right.gender,
+      rows: [],
+    },
+  );
+  if (categoryDifference !== 0) {
+    return categoryDifference;
+  }
+  if (left.sectionOrder !== right.sectionOrder) {
+    return left.sectionOrder - right.sectionOrder;
+  }
+  const titleDifference = raceTitle(left.race).localeCompare(
+    raceTitle(right.race),
+  );
+  if (titleDifference !== 0) {
+    return titleDifference;
+  }
+  if (left.race.id === right.race.id) {
+    return 0;
+  }
+  return left.race.id < right.race.id ? -1 : 1;
+}
+
+/** The protocol order of the section a race displays. */
+function raceSectionOrder(sectionId: string): number {
+  if (sectionId === 'CATEGORY') return -1;
+  if (sectionId === 'REMAINDER') return 1_000_000;
+  if (sectionId === 'NO_BIRTH_YEAR') return 1_000_001;
+  const match = /^CATEGORY_(\d+)$/.exec(sectionId);
+  return match === null ? Number.MAX_SAFE_INTEGER : Number(match[1]);
+}
+
+/**
+ * FR-51 block order: each race's heat blocks sit directly after the category
+ * block of its own start, format and gender, or at that category's position
+ * when it has no timeable block of its own.
+ */
+function assembleSurfaceBlocks(
+  context: EventContext,
+  groups: readonly CategoryGroup[],
+  categoryBlocks: readonly TimingCategoryBlockView[],
+  raceSurfaces: readonly HeatRaceSurface[],
+): TimingCategoryBlockView[] {
+  const slots = new Map<
+    string,
+    {
+      group: CategoryGroup;
+      block: TimingCategoryBlockView | null;
+      races: HeatRaceSurface[];
+    }
+  >();
+  groups.forEach((group, index) => {
+    slots.set(
+      protocolCategoryKey(
+        context.event.id,
+        group.startId,
+        group.formatId,
+        group.gender,
+      ),
+      { group, block: categoryBlocks[index] ?? null, races: [] },
+    );
+  });
+  for (const surface of raceSurfaces) {
+    const key = protocolCategoryKey(
+      context.event.id,
+      surface.start.id,
+      surface.formatId,
+      surface.gender,
+    );
+    const existing = slots.get(key);
+    if (existing === undefined) {
+      slots.set(key, {
+        group: {
+          startId: surface.start.id,
+          formatId: surface.formatId,
+          gender: surface.gender,
+          rows: [],
+        },
+        block: null,
+        races: [surface],
+      });
+    } else {
+      existing.races.push(surface);
+    }
+  }
+  const blocks: TimingCategoryBlockView[] = [];
+  const ordered = [...slots.values()].sort((left, right) =>
+    compareCategories(context, left.group, right.group),
+  );
+  for (const slot of ordered) {
+    if (slot.block !== null) {
+      blocks.push(slot.block);
+    }
+    for (const surface of slot.races) {
+      blocks.push(...surface.blocks);
+    }
+  }
+  return blocks;
+}
+
+/** The displayed name of a stage: its CMS label, else its id. */
+function stageLabel(stage: ClassCompetitionView['stages'][number]): string {
+  const label = stage.label?.trim() ?? '';
+  return label.length > 0 ? label : stage.stageId;
+}
+
+/** The displayed name of a race: its frozen title, else its subtitle or id. */
+function raceTitle(race: ClassCompetitionView): string {
+  const title = race.title.trim();
+  if (title.length > 0) return title;
+  const subtitle = race.subtitle?.trim() ?? '';
+  return subtitle.length > 0 ? subtitle : race.id;
+}
+
+/** Narrows the CMS stage status to the surface's stage state. */
+function toTimingStageState(status: string): TimingStageState {
+  return status === 'SEEDED' || status === 'COMPLETED' ? status : 'PENDING';
+}
+
+/** Why a stage header is untimeable, or `null` when its heats are shown. */
+function heatStageGroupBlockReason(
+  raceStatus: string,
+  stageState: TimingStageState,
+  heatBlockCount: number,
+): string | null {
+  if (raceStatus === 'DONE') return HEAT_RACE_DONE_MESSAGE;
+  if (stageState === 'PENDING') return HEAT_STAGE_PENDING_MESSAGE;
+  if (stageState === 'COMPLETED' && heatBlockCount === 0) {
+    return HEAT_STAGE_CLOSED_MESSAGE;
+  }
+  return null;
+}
+
+/** The Start control of one heat: the stated blocker or an enabled control. */
+function heatStartState(input: {
+  eventRecordable: boolean;
+  raceDone: boolean;
+  stageState: TimingStageState;
+  previousAttemptStatus: TimingAttemptRow['status'] | null;
+  timeableCount: number;
+  participantsWithoutNumber: number;
+}): { startControlEnabled: boolean; blockReason: string | null } {
+  if (input.raceDone) {
+    return { startControlEnabled: false, blockReason: HEAT_RACE_DONE_MESSAGE };
+  }
+  if (input.stageState !== 'SEEDED') {
+    return {
+      startControlEnabled: false,
+      blockReason:
+        input.stageState === 'PENDING'
+          ? HEAT_STAGE_PENDING_MESSAGE
+          : HEAT_STAGE_CLOSED_MESSAGE,
+    };
+  }
+  const refusal = canStartAttempt({
+    eventRecordable: input.eventRecordable,
+    categoryFinished: false,
+    participantCount: input.timeableCount,
+    participantsWithoutNumber: input.participantsWithoutNumber,
+    previousAttemptStatus: input.previousAttemptStatus,
+    // The read surface does not refuse on capture: the client compares this
+    // workstation with the holder, and the Start route enforces it.
+    captureHeldByThisWorkstation: true,
+  });
+  return {
+    startControlEnabled: refusal === null,
+    blockReason: refusal === null ? null : heatStartRefusalMessage(refusal),
+  };
+}
+
+/** The Start refusal message of a heat block. */
+function heatStartRefusalMessage(code: TimingErrorCode): string {
+  return HEAT_START_REFUSAL_MESSAGES[code] ?? HEAT_START_FALLBACK_MESSAGE;
+}
+
+/** The exclusion reason of one heat slot, or `null` when it is timeable. */
+function heatSlotExclusion(
+  enrollment: TimingHeatRosterEnrollmentRow | null,
+  hasHeatTime: boolean,
+): string | null {
+  if (enrollment === null) return EXCLUDED_NO_ENROLLMENT;
+  if (
+    enrollment.registrationStatus === 'WITHDRAWN' ||
+    enrollment.registrationStatus === 'CANCELLED'
+  ) {
+    return EXCLUDED_HEAT_WITHDRAWN;
+  }
+  if (hasHeatTime) return EXCLUDED_EXISTING_HEAT_TIME;
+  return null;
+}
+
+/** One resolved heat slot as the tile the heat block shows before Start. */
+function toHeatTileSource(
+  slot: ResolvedHeatSlot,
+  plan: HeatRacePlan,
+): TileSource {
+  return {
+    // A slot without an enrollment cannot be captured; the registration id
+    // keeps the excluded tile addressable for display without inventing one.
+    enrollmentId: slot.enrollmentId ?? slot.registrationId,
+    registrationId: slot.registrationId,
+    startNumber: slot.startNumber,
+    fullName: formatPersonName(slot.firstName, slot.lastName),
+    sectionId: plan.race.sectionId,
+    requiredLaps: plan.start.lapCount,
+    excludedReason: slot.excludedReason,
+    initialOutcome: null,
+  };
 }
 
 /** The active enrollment rows of one protocol category. */

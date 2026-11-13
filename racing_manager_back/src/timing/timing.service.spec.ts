@@ -1,7 +1,12 @@
 import { ForbiddenException } from '@nestjs/common';
 import { TIMING_OPERATE_ROLE_CODES, RoleCode } from '../auth/role-codes';
 import type { RolesService } from '../auth/roles.service';
+import type {
+  ClassCompetitionView,
+  ClassCompetitionsService,
+} from '../class-competitions/class-competitions.service';
 import type { EnrollmentStatus } from '../../generated/prisma';
+import type { AnonymousSplitService } from './anonymous-split.service';
 import { TIMING_MAX_TOTAL_MS, type TimingLapSplit } from './timing.domain';
 import type {
   BindPendingFinishDto,
@@ -15,6 +20,7 @@ import type {
   ForceReleaseCaptureDto,
   QuickUndoTimingPassDto,
   RebindTimingPassDto,
+  StartHeatAttemptDto,
   TakeCaptureDto,
   TransferCaptureDto,
 } from './timing.dto';
@@ -41,7 +47,10 @@ import type {
   TimingEnrollmentRow,
   TimingEventRow,
   TimingFormatRow,
+  TimingHeatRosterEnrollmentRow,
+  TimingHeatTimeRow,
   TimingMarkRow,
+  TimingAnonymousSplitRow,
   TimingParticipantRosterRow,
   TimingParticipantRow,
   TimingPublishedResultRow,
@@ -55,6 +64,7 @@ import type {
 } from './timing.repository';
 import { TimingRepository } from './timing.repository';
 import { TimingService } from './timing.service';
+import type { TimingAnonymousSplitView } from './timing.views';
 
 /**
  * Unit tests for the timing surface, the Start press, number/tile capture, the
@@ -107,6 +117,24 @@ function createRepositoryFake() {
     ),
     findAttemptsForCategory: jest.fn(
       (): Promise<TimingAttemptRow[]> => Promise.resolve([]),
+    ),
+    findHeatAttempts: jest.fn(
+      (): Promise<TimingAttemptRow[]> => Promise.resolve([]),
+    ),
+    findRunningHeatAttempt: jest.fn(
+      (): Promise<TimingAttemptRow | null> => Promise.resolve(null),
+    ),
+    findAttemptsForRace: jest.fn(
+      (): Promise<TimingAttemptRow[]> => Promise.resolve([]),
+    ),
+    listEnrollmentsForRegistrations: jest.fn(
+      (): Promise<TimingHeatRosterEnrollmentRow[]> => Promise.resolve([]),
+    ),
+    listHeatTimesForHeat: jest.fn(
+      (): Promise<TimingHeatTimeRow[]> => Promise.resolve([]),
+    ),
+    listAnonymousSplits: jest.fn(
+      (): Promise<TimingAnonymousSplitRow[]> => Promise.resolve([]),
     ),
     findLatestAttemptNumber: jest.fn((): Promise<number> => Promise.resolve(0)),
     createAttempt: jest.fn(),
@@ -217,6 +245,20 @@ function createRepositoryFake() {
 
 function createRolesFake() {
   return { assertHasAnyRole: jest.fn((): Promise<void> => Promise.resolve()) };
+}
+
+function createClassCompetitionsFake() {
+  return {
+    list: jest.fn((): Promise<ClassCompetitionView[]> => Promise.resolve([])),
+  };
+}
+
+function createAnonymousSplitFake() {
+  return {
+    listQueue: jest.fn(
+      (): Promise<TimingAnonymousSplitView[]> => Promise.resolve([]),
+    ),
+  };
 }
 
 /** One recorded call of a `jest.fn()`, typed at the assertion site. */
@@ -645,18 +687,155 @@ function resultRow(
 
 const TIMING_OPERATE_ROLES = TIMING_OPERATE_ROLE_CODES;
 
+/** One race view of the class-competitions façade, with no stages by default. */
+function raceView(
+  overrides: Partial<ClassCompetitionView> = {},
+): ClassCompetitionView {
+  return {
+    id: 'race-1',
+    eventId: EVENT_ID,
+    startId: START_A,
+    formatId: 1,
+    gender: 'M',
+    sectionId: 'CATEGORY',
+    sectionKind: 'CATEGORY',
+    title: 'Гонка 1',
+    subtitle: null,
+    targetGroupIds: [],
+    targetWholeCategory: true,
+    capturedEnrollmentIds: [],
+    youngestBound: null,
+    status: 'IN_PROGRESS',
+    stages: [],
+    classification: [],
+    ...overrides,
+  };
+}
+
+type RaceStageView = ClassCompetitionView['stages'][number];
+type RaceHeatView = RaceStageView['heats'][number];
+type RaceSlotView = RaceHeatView['slots'][number];
+
+function stageView(
+  overrides: Partial<RaceStageView> & Pick<RaceStageView, 'stageId'>,
+): RaceStageView {
+  return {
+    kind: 'HEAT',
+    label: null,
+    status: 'SEEDED',
+    sourceStageId: null,
+    qualifierStatus: null,
+    heats: [],
+    entries: [],
+    ...overrides,
+  };
+}
+
+function heatView(
+  overrides: Partial<RaceHeatView> & Pick<RaceHeatView, 'heatNumber'>,
+): RaceHeatView {
+  return { slots: [], ...overrides };
+}
+
+function slotView(
+  overrides: Partial<RaceSlotView> & Pick<RaceSlotView, 'registrationId'>,
+): RaceSlotView {
+  return {
+    position: 1,
+    firstName: 'Иван',
+    lastName: 'Петров',
+    startNumber: 10,
+    registrationStatus: 'REGISTERED',
+    timeMilliseconds: null,
+    resultStatus: null,
+    laps: [],
+    ...overrides,
+  };
+}
+
+function heatEnrollmentRow(
+  overrides: Partial<TimingHeatRosterEnrollmentRow> &
+    Pick<TimingHeatRosterEnrollmentRow, 'registrationId'>,
+): TimingHeatRosterEnrollmentRow {
+  return {
+    enrollmentId: `enrollment-${overrides.registrationId}`,
+    startNumber: 10,
+    enrollmentStatus: 'REGISTERED',
+    registrationStatus: 'REGISTERED',
+    ...overrides,
+  };
+}
+
+function heatTimeRow(
+  overrides: Partial<TimingHeatTimeRow> &
+    Pick<TimingHeatTimeRow, 'registrationId'>,
+): TimingHeatTimeRow {
+  return {
+    id: `heat-time-${overrides.registrationId}`,
+    classCompetitionId: 'race-1',
+    stageId: 'stage-1',
+    heatNumber: 1,
+    timeMilliseconds: 90_000,
+    status: 'OK',
+    ...overrides,
+  };
+}
+
+function anonymousSplitRow(
+  overrides: Partial<TimingAnonymousSplitRow> &
+    Pick<TimingAnonymousSplitRow, 'splitId'>,
+): TimingAnonymousSplitRow {
+  return {
+    attemptId: ATTEMPT_ID,
+    attemptKind: 'CATEGORY',
+    attemptStatus: 'RUNNING',
+    eventId: EVENT_ID,
+    startId: START_A,
+    formatId: 1,
+    gender: 'M',
+    classCompetitionId: null,
+    stageId: null,
+    heatNumber: null,
+    officialStartedAt: NOW,
+    clockEpochId: 'epoch-1',
+    capturedAt: new Date(NOW.getTime() + 20_000),
+    officialElapsedMs: 20_000,
+    status: 'PENDING',
+    ...overrides,
+  };
+}
+
+function startHeatDto(
+  overrides: Partial<StartHeatAttemptDto> = {},
+): StartHeatAttemptDto {
+  return {
+    classCompetitionId: 'race-1',
+    stageId: 'stage-1',
+    heatNumber: 1,
+    workstationInstanceId: WORKSTATION,
+    clientStartedAt: NOW.toISOString(),
+    ...overrides,
+  };
+}
+
 describe('TimingService', () => {
   let repository: RepositoryFake;
   let roles: ReturnType<typeof createRolesFake>;
+  let classCompetitions: ReturnType<typeof createClassCompetitionsFake>;
+  let anonymousSplits: ReturnType<typeof createAnonymousSplitFake>;
   let service: TimingService;
 
   beforeEach(() => {
     jest.useFakeTimers({ now: NOW });
     repository = createRepositoryFake();
     roles = createRolesFake();
+    classCompetitions = createClassCompetitionsFake();
+    anonymousSplits = createAnonymousSplitFake();
     service = new TimingService(
       repository as unknown as TimingRepository,
       roles as unknown as RolesService,
+      classCompetitions as unknown as ClassCompetitionsService,
+      anonymousSplits as unknown as AnonymousSplitService,
     );
   });
 
@@ -957,6 +1136,417 @@ describe('TimingService', () => {
         'attempt-1',
       ]);
       expect(block.participants[0].state).toBe('INCOMPLETE');
+    });
+
+    it('builds a stage group and ascending heat blocks from a seeded race', async () => {
+      arrangeStarts([startRow({ id: START_A })], [formatRow(1, 1)]);
+      classCompetitions.list.mockResolvedValue([
+        raceView({
+          stages: [
+            stageView({
+              stageId: 'stage-1',
+              label: 'Квалификация',
+              status: 'SEEDED',
+              heats: [
+                heatView({
+                  heatNumber: 2,
+                  slots: [slotView({ registrationId: 'reg-2' })],
+                }),
+                heatView({
+                  heatNumber: 1,
+                  slots: [slotView({ registrationId: 'reg-1' })],
+                }),
+              ],
+            }),
+          ],
+        }),
+      ]);
+      repository.listEnrollmentsForRegistrations.mockResolvedValue([
+        heatEnrollmentRow({
+          registrationId: 'reg-1',
+          enrollmentId: 'enrollment-1',
+        }),
+        heatEnrollmentRow({
+          registrationId: 'reg-2',
+          enrollmentId: 'enrollment-2',
+          startNumber: 12,
+        }),
+      ]);
+
+      const surface = await service.getSurface(USER_ID, EVENT_ID);
+
+      expect(surface.stageGroups).toHaveLength(1);
+      expect(surface.stageGroups?.[0]).toMatchObject({
+        raceId: 'race-1',
+        raceTitle: 'Гонка 1',
+        stageId: 'stage-1',
+        stageLabel: 'Квалификация',
+        stageState: 'SEEDED',
+        blockReason: null,
+      });
+      const heatBlocks = surface.categories.filter(
+        (block) => block.kind === 'HEAT',
+      );
+      expect(
+        heatBlocks.map((block) => [block.heatNumber, block.heatLabel]),
+      ).toEqual([
+        [1, 'Заезд 1'],
+        [2, 'Заезд 2'],
+      ]);
+      expect(surface.stageGroups?.[0].heatBlockKeys).toEqual(
+        heatBlocks.map((block) => block.blockKey),
+      );
+      expect(heatBlocks[0]).toMatchObject({
+        startId: START_A,
+        formatId: 1,
+        gender: 'M',
+        lapCount: 3,
+        state: 'NOT_STARTED',
+        startControlEnabled: true,
+        blockReason: null,
+        classCompetitionId: 'race-1',
+        stageId: 'stage-1',
+        stageState: 'SEEDED',
+      });
+      expect(heatBlocks[0].blockKey).toBe('heat:race-1:stage-1:1');
+      expect(heatBlocks[0].participants[0]).toMatchObject({
+        enrollmentId: 'enrollment-1',
+        requiredLaps: 3,
+        state: 'WAITING',
+      });
+      expect(repository.createAttempt).not.toHaveBeenCalled();
+    });
+
+    it('shows a PENDING stage without heats as untimeable and offers no heat block', async () => {
+      arrangeStarts([startRow({ id: START_A })], [formatRow(1, 1)]);
+      classCompetitions.list.mockResolvedValue([
+        raceView({
+          stages: [stageView({ stageId: 'stage-1', status: 'PENDING' })],
+        }),
+      ]);
+
+      const surface = await service.getSurface(USER_ID, EVENT_ID);
+
+      expect(
+        surface.categories.filter((block) => block.kind === 'HEAT'),
+      ).toEqual([]);
+      expect(surface.stageGroups?.[0]).toMatchObject({
+        stageState: 'PENDING',
+        heatBlockKeys: [],
+      });
+      expect(surface.stageGroups?.[0].blockReason).toBe(
+        'Заезды этапа ещё не сформированы.',
+      );
+    });
+
+    it('shows a COMPLETED stage heat closed with no Start control', async () => {
+      arrangeStarts([startRow({ id: START_A })], [formatRow(1, 1)]);
+      classCompetitions.list.mockResolvedValue([
+        raceView({
+          stages: [
+            stageView({
+              stageId: 'stage-1',
+              status: 'COMPLETED',
+              heats: [
+                heatView({
+                  heatNumber: 1,
+                  slots: [slotView({ registrationId: 'reg-1' })],
+                }),
+              ],
+            }),
+          ],
+        }),
+      ]);
+      repository.listEnrollmentsForRegistrations.mockResolvedValue([
+        heatEnrollmentRow({ registrationId: 'reg-1' }),
+      ]);
+
+      const surface = await service.getSurface(USER_ID, EVENT_ID);
+      const block = surface.categories.find((item) => item.kind === 'HEAT');
+
+      expect(block).toMatchObject({
+        startControlEnabled: false,
+        blockReason: 'Этап уже завершён.',
+        stageState: 'COMPLETED',
+      });
+    });
+
+    it('offers no heat block for a race with no start or on a legacy event', async () => {
+      arrangeStarts([startRow({ id: START_A })], [formatRow(1, 1)]);
+      classCompetitions.list.mockResolvedValue([
+        raceView({
+          startId: null,
+          formatId: null,
+          stages: [
+            stageView({
+              stageId: 'stage-1',
+              status: 'SEEDED',
+              heats: [
+                heatView({
+                  heatNumber: 1,
+                  slots: [slotView({ registrationId: 'reg-1' })],
+                }),
+              ],
+            }),
+          ],
+        }),
+      ]);
+
+      const surface = await service.getSurface(USER_ID, EVENT_ID);
+
+      expect(
+        surface.categories.filter((block) => block.kind === 'HEAT'),
+      ).toEqual([]);
+      expect(surface.stageGroups).toEqual([]);
+    });
+
+    it('places a race after its category block by section, stage and heat order', async () => {
+      arrangeStarts(
+        [
+          startRow({ id: START_A, formatIds: [1] }),
+          startRow({ id: START_B, sortOrder: 2, formatIds: [1] }),
+        ],
+        [formatRow(1, 1)],
+      );
+      repository.listEnrollmentRows.mockResolvedValue([
+        enrollmentRow({
+          enrollmentId: 'enrollment-a-m',
+          startId: START_A,
+          formatId: 1,
+          gender: 'M',
+          birthYear: 2000,
+        }),
+        enrollmentRow({
+          enrollmentId: 'enrollment-a-f',
+          startId: START_A,
+          formatId: 1,
+          gender: 'F',
+          birthYear: 2000,
+        }),
+        enrollmentRow({
+          enrollmentId: 'enrollment-b-m',
+          startId: START_B,
+          formatId: 1,
+          gender: 'M',
+          birthYear: 2000,
+        }),
+      ]);
+      classCompetitions.list.mockResolvedValue([
+        raceView({
+          id: 'race-two',
+          sectionId: 'CATEGORY_2',
+          stages: [
+            stageView({
+              stageId: 'stage-1',
+              heats: [heatView({ heatNumber: 1 })],
+            }),
+          ],
+        }),
+        raceView({
+          id: 'race-one',
+          sectionId: 'CATEGORY_1',
+          stages: [
+            stageView({
+              stageId: 'stage-1',
+              heats: [heatView({ heatNumber: 2 }), heatView({ heatNumber: 1 })],
+            }),
+          ],
+        }),
+        raceView({
+          id: 'race-b',
+          startId: START_B,
+          sectionId: 'CATEGORY',
+          stages: [
+            stageView({
+              stageId: 'stage-1',
+              heats: [heatView({ heatNumber: 1 })],
+            }),
+          ],
+        }),
+      ]);
+
+      const surface = await service.getSurface(USER_ID, EVENT_ID);
+
+      expect(
+        surface.categories.map((block) =>
+          block.kind === 'HEAT'
+            ? `${block.classCompetitionId}:${block.heatNumber}`
+            : `category:${block.startId}:${block.gender}`,
+        ),
+      ).toEqual([
+        `category:${START_A}:M`,
+        'race-one:1',
+        'race-one:2',
+        'race-two:1',
+        `category:${START_A}:F`,
+        `category:${START_B}:M`,
+        'race-b:1',
+      ]);
+      expect(
+        surface.stageGroups?.map((group) => `${group.raceId}:${group.stageId}`),
+      ).toEqual(['race-one:stage-1', 'race-two:stage-1', 'race-b:stage-1']);
+    });
+
+    it('excludes no-enrollment, withdrawn and existing-heat-time slots and takes N from the start', async () => {
+      arrangeStarts(
+        [startRow({ id: START_A, lapCount: 4 })],
+        [formatRow(1, 1)],
+      );
+      classCompetitions.list.mockResolvedValue([
+        raceView({
+          sectionId: 'CATEGORY_1',
+          stages: [
+            stageView({
+              stageId: 'stage-1',
+              heats: [
+                heatView({
+                  heatNumber: 1,
+                  slots: [
+                    slotView({ registrationId: 'reg-active', position: 1 }),
+                    slotView({ registrationId: 'reg-withdrawn', position: 2 }),
+                    slotView({ registrationId: 'reg-existing', position: 3 }),
+                    slotView({ registrationId: 'reg-missing', position: 4 }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+        }),
+      ]);
+      repository.listEnrollmentsForRegistrations.mockResolvedValue([
+        heatEnrollmentRow({
+          registrationId: 'reg-active',
+          enrollmentId: 'enrollment-active',
+          startNumber: 10,
+        }),
+        heatEnrollmentRow({
+          registrationId: 'reg-withdrawn',
+          enrollmentId: 'enrollment-withdrawn',
+          startNumber: 11,
+          registrationStatus: 'WITHDRAWN',
+        }),
+        heatEnrollmentRow({
+          registrationId: 'reg-existing',
+          enrollmentId: 'enrollment-existing',
+          startNumber: 12,
+        }),
+      ]);
+      repository.listHeatTimesForHeat.mockResolvedValue([
+        heatTimeRow({ registrationId: 'reg-existing' }),
+      ]);
+
+      const surface = await service.getSurface(USER_ID, EVENT_ID);
+      const block = surface.categories.find((item) => item.kind === 'HEAT');
+
+      expect(block?.lapCount).toBe(4);
+      expect(block?.startControlEnabled).toBe(true);
+      expect(block?.blockReason).toBeNull();
+      expect(
+        block?.participants.map((tile) => [
+          tile.registrationId,
+          tile.state,
+          tile.excludedReason,
+          tile.requiredLaps,
+        ]),
+      ).toEqual([
+        ['reg-active', 'WAITING', null, 4],
+        ['reg-withdrawn', 'EXCLUDED', 'WITHDRAWN', 4],
+        ['reg-existing', 'EXCLUDED', 'EXISTING_HEAT_TIME', 4],
+        ['reg-missing', 'EXCLUDED', 'NO_ENROLLMENT', 4],
+      ]);
+    });
+
+    it('uses the frozen heat roster and marks once an attempt exists', async () => {
+      arrangeStarts([startRow({ id: START_A })], [formatRow(1, 1)]);
+      classCompetitions.list.mockResolvedValue([
+        raceView({
+          stages: [
+            stageView({
+              stageId: 'stage-1',
+              heats: [heatView({ heatNumber: 1 })],
+            }),
+          ],
+        }),
+      ]);
+      repository.findAttemptsForRace.mockResolvedValue([
+        attemptRow({
+          id: 'heat-attempt-1',
+          attemptKind: 'HEAT',
+          classCompetitionId: 'race-1',
+          stageId: 'stage-1',
+          heatNumber: 1,
+        }),
+      ]);
+      repository.listParticipantRoster.mockResolvedValue([
+        rosterRow({
+          enrollmentId: 'enrollment-frozen',
+          startNumber: 21,
+          sectionId: 'CATEGORY_1',
+          requiredLaps: 3,
+        }),
+      ]);
+      repository.listMarks.mockResolvedValue([
+        markRow({
+          id: 'frozen-pass-1',
+          attemptId: 'heat-attempt-1',
+          enrollmentId: 'enrollment-frozen',
+          registrationId: 'registration-enrollment-frozen',
+          startNumber: 21,
+          lapNumber: 1,
+        }),
+        markRow({
+          id: 'frozen-pass-2',
+          attemptId: 'heat-attempt-1',
+          enrollmentId: 'enrollment-frozen',
+          registrationId: 'registration-enrollment-frozen',
+          startNumber: 21,
+          lapNumber: 2,
+          deviceSequence: 2,
+          officialAt: new Date(NOW.getTime() + 60_000),
+          officialElapsedMs: 60_000,
+        }),
+      ]);
+
+      const surface = await service.getSurface(USER_ID, EVENT_ID);
+      const block = surface.categories.find((item) => item.kind === 'HEAT');
+
+      expect(block).toMatchObject({
+        attemptId: 'heat-attempt-1',
+        state: 'RUNNING',
+        elapsedMs: 0,
+        startControlEnabled: false,
+        blockReason: 'Этот заезд уже запущен.',
+      });
+      expect(block?.participants).toHaveLength(1);
+      expect(block?.participants[0]).toMatchObject({
+        enrollmentId: 'enrollment-frozen',
+        startNumber: 21,
+        passCount: 2,
+        requiredLaps: 3,
+        state: 'RACING',
+      });
+      expect(repository.listEnrollmentsForRegistrations).not.toHaveBeenCalled();
+    });
+
+    it('reads the anonymous split queue beside the categories', async () => {
+      arrangeStarts([startRow({ id: START_A })], [formatRow(1, 1)]);
+      anonymousSplits.listQueue.mockResolvedValue([
+        {
+          splitId: 'split-1',
+          attemptId: ATTEMPT_ID,
+          blockKey: `category:${START_A}:1:M`,
+          attemptLabel: 'Старт · Формат 1 · M',
+          capturedAt: NOW.toISOString(),
+          officialElapsedMs: 20_000,
+          status: 'QUEUED',
+        },
+      ]);
+
+      const surface = await service.getSurface(USER_ID, EVENT_ID);
+
+      expect(anonymousSplits.listQueue).toHaveBeenCalledWith(EVENT_ID);
+      expect(surface.anonymousSplits).toHaveLength(1);
+      expect(surface.anonymousSplits?.[0].splitId).toBe('split-1');
     });
   });
 
@@ -1319,6 +1909,346 @@ describe('TimingService', () => {
       ).rejects.toMatchObject({ code: TimingErrorCode.ATTEMPT_RUNNING });
       expect(repository.lockCategory).toHaveBeenCalled();
       expect(repository.createAttempt).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('startHeatAttempt', () => {
+    function arrangeSeededHeat(options: {
+      slots: RaceSlotView[];
+      enrollments?: TimingHeatRosterEnrollmentRow[];
+      heatTimes?: TimingHeatTimeRow[];
+      attempts?: TimingAttemptRow[];
+      race?: Partial<ClassCompetitionView>;
+      stage?: Partial<RaceStageView>;
+      lapCount?: number;
+      event?: TimingEventRow;
+      lock?: TimingCaptureLockRow | null;
+    }): void {
+      repository.findEvent.mockResolvedValue(options.event ?? eventRow());
+      repository.listStarts.mockResolvedValue([
+        startRow({ id: START_A, lapCount: options.lapCount ?? 3 }),
+      ]);
+      repository.listFormats.mockResolvedValue([formatRow(1, 1)]);
+      classCompetitions.list.mockResolvedValue([
+        raceView({
+          ...options.race,
+          stages: [
+            stageView({
+              stageId: 'stage-1',
+              status: 'SEEDED',
+              heats: [heatView({ heatNumber: 1, slots: options.slots })],
+              ...options.stage,
+            }),
+          ],
+        }),
+      ]);
+      repository.listEnrollmentsForRegistrations.mockResolvedValue(
+        options.enrollments ?? [],
+      );
+      repository.listHeatTimesForHeat.mockResolvedValue(
+        options.heatTimes ?? [],
+      );
+      repository.findHeatAttempts.mockResolvedValue(options.attempts ?? []);
+      repository.getCaptureLock.mockResolvedValue(
+        options.lock === undefined ? lockRow() : options.lock,
+      );
+      repository.createAttempt.mockImplementation(
+        (_tx: unknown, input: CreateAttemptInput) =>
+          Promise.resolve(
+            attemptRow({
+              id: 'heat-attempt-1',
+              attemptKind: 'HEAT',
+              classCompetitionId: input.classCompetitionId ?? null,
+              stageId: input.stageId ?? null,
+              heatNumber: input.heatNumber ?? null,
+              startId: input.startId,
+              formatId: input.formatId,
+              gender: input.gender,
+              attemptNumber: input.attemptNumber,
+              participantCount: input.participants.length,
+            }),
+          ),
+      );
+      repository.createClockEpoch.mockResolvedValue(
+        clockEpochRow({ id: 'epoch-heat', attemptId: 'heat-attempt-1' }),
+      );
+      repository.listParticipantRoster.mockResolvedValue([
+        rosterRow({ enrollmentId: 'enrollment-active', startNumber: 10 }),
+      ]);
+    }
+
+    it('freezes the heat roster, opens the first epoch and audits START', async () => {
+      arrangeSeededHeat({
+        slots: [
+          slotView({ registrationId: 'reg-active', position: 1 }),
+          slotView({ registrationId: 'reg-withdrawn', position: 2 }),
+          slotView({ registrationId: 'reg-existing', position: 3 }),
+          slotView({ registrationId: 'reg-missing', position: 4 }),
+        ],
+        enrollments: [
+          heatEnrollmentRow({
+            registrationId: 'reg-active',
+            enrollmentId: 'enrollment-active',
+            startNumber: 10,
+          }),
+          heatEnrollmentRow({
+            registrationId: 'reg-withdrawn',
+            enrollmentId: 'enrollment-withdrawn',
+            startNumber: 11,
+            registrationStatus: 'WITHDRAWN',
+          }),
+          heatEnrollmentRow({
+            registrationId: 'reg-existing',
+            enrollmentId: 'enrollment-existing',
+            startNumber: 12,
+          }),
+        ],
+        heatTimes: [heatTimeRow({ registrationId: 'reg-existing' })],
+      });
+
+      const result = await service.startHeatAttempt(
+        USER_ID,
+        EVENT_ID,
+        startHeatDto(),
+      );
+
+      expect(repository.lockCategory).toHaveBeenCalledWith(
+        TX,
+        'heat:event-a:race-1:stage-1:1',
+      );
+      const [tx, input] = callArguments<[unknown, CreateAttemptInput]>(
+        repository.createAttempt,
+      );
+      expect(tx).toBe(TX);
+      expect(input).toMatchObject({
+        eventId: EVENT_ID,
+        startId: START_A,
+        formatId: 1,
+        gender: 'M',
+        attemptKind: 'HEAT',
+        classCompetitionId: 'race-1',
+        stageId: 'stage-1',
+        heatNumber: 1,
+        attemptNumber: 1,
+        officialStartedAt: NOW,
+      });
+      expect(
+        input.participants.map((row) => [
+          row.registrationId,
+          row.excludedReason,
+        ]),
+      ).toEqual([
+        ['reg-active', null],
+        ['reg-withdrawn', 'WITHDRAWN'],
+        ['reg-existing', 'EXISTING_HEAT_TIME'],
+      ]);
+      const [, epochInput] = callArguments<[unknown, CreateClockEpochInput]>(
+        repository.createClockEpoch,
+      );
+      expect(epochInput).toMatchObject({
+        attemptId: 'heat-attempt-1',
+        workstationInstanceId: WORKSTATION,
+        officialElapsedAnchorMs: 0,
+      });
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        action: 'START',
+        targetType: 'ATTEMPT',
+        targetId: 'heat-attempt-1',
+      });
+      expect(auditInput.newValues).toMatchObject({
+        attemptKind: 'HEAT',
+        classCompetitionId: 'race-1',
+        stageId: 'stage-1',
+        heatNumber: 1,
+        attemptNumber: 1,
+        participantCount: 3,
+      });
+      expect(result.attempt.kind).toBe('HEAT');
+      expect(result.attempt.attemptId).toBe('heat-attempt-1');
+      expect(result.attempt.state).toBe('RUNNING');
+      expect(result.epoch).toMatchObject({
+        attemptId: 'heat-attempt-1',
+        officialElapsedAnchorMs: 0,
+        serverNow: NOW.toISOString(),
+      });
+    });
+
+    it('refuses a heat start when a timeable participant has no number', async () => {
+      arrangeSeededHeat({
+        slots: [slotView({ registrationId: 'reg-1' })],
+        enrollments: [
+          heatEnrollmentRow({ registrationId: 'reg-1', startNumber: null }),
+        ],
+      });
+
+      await expect(
+        service.startHeatAttempt(USER_ID, EVENT_ID, startHeatDto()),
+      ).rejects.toMatchObject({
+        code: TimingErrorCode.MISSING_START_NUMBER,
+        details: {
+          participants: [{ registrationId: 'reg-1' }],
+        },
+      });
+      expect(repository.createAttempt).not.toHaveBeenCalled();
+    });
+
+    it('refuses a heat start when no participant is timeable', async () => {
+      arrangeSeededHeat({
+        slots: [slotView({ registrationId: 'reg-1' })],
+        enrollments: [
+          heatEnrollmentRow({
+            registrationId: 'reg-1',
+            registrationStatus: 'WITHDRAWN',
+          }),
+        ],
+      });
+
+      await expect(
+        service.startHeatAttempt(USER_ID, EVENT_ID, startHeatDto()),
+      ).rejects.toMatchObject({
+        code: TimingErrorCode.NO_TIMEABLE_PARTICIPANT,
+      });
+      expect(repository.createAttempt).not.toHaveBeenCalled();
+    });
+
+    it('refuses an unknown race, stage or heat without creating anything', async () => {
+      arrangeSeededHeat({
+        slots: [slotView({ registrationId: 'reg-1' })],
+        enrollments: [heatEnrollmentRow({ registrationId: 'reg-1' })],
+      });
+      classCompetitions.list.mockResolvedValue([]);
+      await expect(
+        service.startHeatAttempt(USER_ID, EVENT_ID, startHeatDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.NOT_FOUND });
+
+      arrangeSeededHeat({
+        slots: [slotView({ registrationId: 'reg-1' })],
+        enrollments: [heatEnrollmentRow({ registrationId: 'reg-1' })],
+      });
+      await expect(
+        service.startHeatAttempt(
+          USER_ID,
+          EVENT_ID,
+          startHeatDto({ stageId: 'stage-x' }),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.NOT_FOUND });
+
+      await expect(
+        service.startHeatAttempt(
+          USER_ID,
+          EVENT_ID,
+          startHeatDto({ heatNumber: 2 }),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.NOT_FOUND });
+      expect(repository.createAttempt).not.toHaveBeenCalled();
+    });
+
+    it('refuses an unseeded stage and a done race', async () => {
+      arrangeSeededHeat({
+        slots: [slotView({ registrationId: 'reg-1' })],
+        enrollments: [heatEnrollmentRow({ registrationId: 'reg-1' })],
+        stage: { status: 'PENDING' },
+      });
+      await expect(
+        service.startHeatAttempt(USER_ID, EVENT_ID, startHeatDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.INVALID_STATE });
+
+      arrangeSeededHeat({
+        slots: [slotView({ registrationId: 'reg-1' })],
+        enrollments: [heatEnrollmentRow({ registrationId: 'reg-1' })],
+        race: { status: 'DONE' },
+      });
+      await expect(
+        service.startHeatAttempt(USER_ID, EVENT_ID, startHeatDto()),
+      ).rejects.toMatchObject({
+        code: TimingErrorCode.CATEGORY_FINISHED,
+      });
+      expect(repository.createAttempt).not.toHaveBeenCalled();
+    });
+
+    it('refuses a cancelled event and a workstation without capture', async () => {
+      arrangeSeededHeat({
+        slots: [slotView({ registrationId: 'reg-1' })],
+        enrollments: [heatEnrollmentRow({ registrationId: 'reg-1' })],
+        event: eventRow({ status: 'CANCELLED' }),
+      });
+      await expect(
+        service.startHeatAttempt(USER_ID, EVENT_ID, startHeatDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.NOT_AVAILABLE });
+
+      arrangeSeededHeat({
+        slots: [slotView({ registrationId: 'reg-1' })],
+        enrollments: [heatEnrollmentRow({ registrationId: 'reg-1' })],
+        lock: null,
+      });
+      await expect(
+        service.startHeatAttempt(USER_ID, EVENT_ID, startHeatDto()),
+      ).rejects.toMatchObject({
+        code: TimingErrorCode.CAPTURE_NOT_HELD,
+      });
+      expect(repository.createAttempt).not.toHaveBeenCalled();
+    });
+
+    it('refuses a running heat and a completed previous heat attempt', async () => {
+      arrangeSeededHeat({
+        slots: [slotView({ registrationId: 'reg-1' })],
+        enrollments: [heatEnrollmentRow({ registrationId: 'reg-1' })],
+        attempts: [
+          attemptRow({
+            id: 'heat-attempt-running',
+            attemptKind: 'HEAT',
+            classCompetitionId: 'race-1',
+            stageId: 'stage-1',
+            heatNumber: 1,
+            status: 'RUNNING',
+          }),
+        ],
+      });
+      await expect(
+        service.startHeatAttempt(USER_ID, EVENT_ID, startHeatDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.ATTEMPT_RUNNING });
+
+      arrangeSeededHeat({
+        slots: [slotView({ registrationId: 'reg-1' })],
+        enrollments: [heatEnrollmentRow({ registrationId: 'reg-1' })],
+        attempts: [
+          attemptRow({
+            id: 'heat-attempt-completed',
+            attemptKind: 'HEAT',
+            classCompetitionId: 'race-1',
+            stageId: 'stage-1',
+            heatNumber: 1,
+            status: 'COMPLETED',
+          }),
+        ],
+      });
+      await expect(
+        service.startHeatAttempt(USER_ID, EVENT_ID, startHeatDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.ATTEMPT_CLOSED });
+      expect(repository.createAttempt).not.toHaveBeenCalled();
+    });
+
+    it('lets a heat start beside a running category attempt of the same race', async () => {
+      arrangeSeededHeat({
+        slots: [slotView({ registrationId: 'reg-1' })],
+        enrollments: [heatEnrollmentRow({ registrationId: 'reg-1' })],
+      });
+      repository.findAttemptsForCategory.mockResolvedValue([
+        attemptRow({ id: 'category-attempt', status: 'RUNNING' }),
+      ]);
+
+      const result = await service.startHeatAttempt(
+        USER_ID,
+        EVENT_ID,
+        startHeatDto(),
+      );
+
+      expect(repository.createAttempt).toHaveBeenCalledTimes(1);
+      expect(result.attempt.kind).toBe('HEAT');
+      expect(result.attempt.attemptId).toBe('heat-attempt-1');
     });
   });
 
@@ -4379,6 +5309,65 @@ describe('TimingService', () => {
       expect(repository.updateAttemptStatus).not.toHaveBeenCalled();
       expect(repository.releaseCaptureLock).not.toHaveBeenCalled();
       expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('refuses completion, force-completion and cancellation while an anonymous split is queued', async () => {
+      arrangeClosure();
+      repository.listAnonymousSplits.mockResolvedValue([
+        anonymousSplitRow({ splitId: 'split-1' }),
+      ]);
+
+      for (const close of [
+        () =>
+          service.completeAttempt(
+            USER_ID,
+            EVENT_ID,
+            ATTEMPT_ID,
+            completeAttemptDto({ lastIssuedSequence: 0 }),
+          ),
+        () =>
+          service.forceCompleteAttempt(
+            USER_ID,
+            EVENT_ID,
+            ATTEMPT_ID,
+            forceCompleteDto(),
+          ),
+        () =>
+          service.cancelAttempt(
+            USER_ID,
+            EVENT_ID,
+            ATTEMPT_ID,
+            cancelAttemptDto(),
+          ),
+      ]) {
+        const refusal = await close().catch((error: unknown) => error);
+        expect(refusal).toMatchObject({
+          code: TimingErrorCode.PENDING_REMAINS,
+          details: {
+            attemptId: ATTEMPT_ID,
+            anonymousSplitIds: ['split-1'],
+          },
+        });
+      }
+      expect(repository.updateAttemptStatus).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('ignores an anonymous split queued on another attempt', async () => {
+      arrangeClosure();
+      repository.listAnonymousSplits.mockResolvedValue([
+        anonymousSplitRow({ splitId: 'split-other', attemptId: 'attempt-2' }),
+      ]);
+
+      const record = await service.completeAttempt(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        completeAttemptDto({ lastIssuedSequence: 0 }),
+      );
+
+      expect(record.state).toBe('COMPLETED');
+      expect(repository.updateAttemptStatus).toHaveBeenCalledTimes(1);
     });
 
     it('refuses completion when the workstation has an unreceipted sequence', async () => {
