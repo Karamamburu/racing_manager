@@ -1,7 +1,7 @@
 import { ClockCircleOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
 import { Button, Card, Col, Empty, Grid, Modal, Result, Row, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { canChangeEventStatus, canCreateEvents, canManageCreatedEvent, isAdministrator } from '../../features/auth/canCreateEvents';
@@ -24,6 +24,7 @@ import {
   categoryIsFinished,
   categoryReadyToFinish,
   groupParticipants,
+  protocolBlockKey,
   type ClassificationSection,
   type GenderGroup,
 } from '../../features/events/protocolGroups';
@@ -31,6 +32,8 @@ import {
   collectProtocolFilterValues,
   emptyProtocolFilters,
   filterProtocolGroups,
+  type FilteredClassificationSection,
+  type FilteredGenderGroup,
   type ProtocolFilters as ProtocolFiltersValue,
 } from '../../features/events/protocolFilters';
 import {
@@ -57,6 +60,8 @@ import {
 import { AppShell } from '../../shared/layout';
 import type {
   AgeGroupId,
+  AgeSplitRef,
+  EventDetails,
   EventFormatRef,
   EventParticipant,
   ParticipantLapSplit,
@@ -158,6 +163,116 @@ function simpleSectionBound(
   if (sectionId === 'NO_BIRTH_YEAR') return 1_000_001;
   const category = split?.categories.find((item) => item.id === sectionId);
   return category ? categoryYoungestBound(category.groupIds) : 1_000_002;
+}
+
+/**
+ * FR-51/U-13/U-14: the blocks one protocol category displays — its races, the
+ * age sections that still hold a row after the filters and one fallback block
+ * when nothing else is left — ordered by the protocol bound. `visibleRows`
+ * drives what a block shows; `rows` keeps the full category set for its
+ * category-level actions.
+ */
+function buildSectionViews(
+  section: FilteredClassificationSection,
+  sectionCompetitions: ClassCompetitionView[],
+  split: AgeSplitRef | null,
+): ProtocolSectionView[] {
+  const sectionViews: ProtocolSectionView[] = [];
+  const wholeRace =
+    sectionCompetitions.find((item) => item.targetWholeCategory) ?? null;
+  if (wholeRace) {
+    sectionViews.push({
+      key: `race-${wholeRace.id}`,
+      title: wholeRace.title || section.title,
+      subtitle: wholeRace.subtitle,
+      rows: section.visibleRows,
+      allRows: section.rows,
+      competition: wholeRace,
+      sectionId: wholeRace.sectionId,
+      bound: wholeRace.youngestBound ?? 0,
+    });
+  } else {
+    for (const competition of sectionCompetitions) {
+      sectionViews.push({
+        key: `race-${competition.id}`,
+        title: competition.title || section.title,
+        subtitle: competition.subtitle,
+        rows: section.visibleRows.filter((row) => row.raceId === competition.id),
+        allRows: section.rows.filter((row) => row.raceId === competition.id),
+        competition,
+        sectionId: competition.sectionId,
+        bound: competition.youngestBound ?? 0,
+      });
+    }
+    for (const ageSection of section.ageSections) {
+      const rows = ageSection.visibleRows.filter((row) => row.raceId == null);
+      if (rows.length === 0) continue;
+      sectionViews.push({
+        key: `simple-${ageSection.key}`,
+        title: ageSection.title ?? section.title,
+        subtitle: ageSection.subtitle,
+        rows,
+        allRows: ageSection.rows.filter((row) => row.raceId == null),
+        competition: null,
+        sectionId: ageSection.key,
+        bound: simpleSectionBound(ageSection.key, split),
+      });
+    }
+    if (sectionViews.length === 0) {
+      sectionViews.push({
+        key: `simple-${section.key}`,
+        title: section.title,
+        subtitle: null,
+        rows: section.visibleRows,
+        allRows: section.rows,
+        competition: null,
+        sectionId: 'CATEGORY',
+        bound: 0,
+      });
+    }
+  }
+  sectionViews.sort(
+    (left, right) =>
+      left.bound - right.bound ||
+      (left.competition ? 0 : 1) - (right.competition ? 0 : 1) ||
+      left.title.localeCompare(right.title),
+  );
+  return sectionViews;
+}
+
+/**
+ * FR-43/E-20/F-29: the block keys the protocol renders right now. A block that
+ * a search or a city/team filter dropped leaves this list, so `EventPage` drops
+ * its collapse state and renders it expanded when it comes back.
+ */
+function renderedProtocolBlockKeys(
+  groups: FilteredGenderGroup[],
+  classCompetitions: ClassCompetitionView[],
+  event: EventDetails | null,
+): string[] {
+  if (!event) return [];
+  const keys: string[] = [];
+  for (const group of groups) {
+    for (const section of group.sections) {
+      const sample = section.rows[0];
+      const split =
+        event.ageSplits?.find(
+          (item) =>
+            item.startId === (sample?.startId ?? '') &&
+            item.formatId === (sample?.format?.id ?? null) &&
+            item.gender === (sample?.gender ?? ''),
+        ) ?? null;
+      const sectionViews = buildSectionViews(
+        section,
+        competitionsForRows(section.rows, classCompetitions),
+        split,
+      );
+      for (const view of sectionViews) {
+        keys.push(protocolBlockKey(group.key, section.key, view.key));
+      }
+    }
+  }
+  return keys;
 }
 
 type ProtocolParticipant = EventParticipant & { reachedStage?: string | null };
@@ -576,6 +691,45 @@ export function EventPage() {
     );
   };
 
+  /**
+   * FR-43/E-20/F-29: collapse state follows the blocks the protocol really
+   * renders. When a search or a city/team filter drops a block, its key leaves
+   * `renderedBlockKeySignature` and the effect drops only that key, so the
+   * block returns expanded while a sibling that stayed rendered keeps its
+   * state. The signature is a plain string, so an unrelated render never
+   * re-runs the effect.
+   */
+  const event = eventQuery.data;
+  const classCompetitions = classCompetitionsQuery.data ?? [];
+  const participantGroups = event
+    ? groupParticipants(
+        event.registrations ?? [],
+        event.formats,
+        event.starts,
+        event.ageSplits ?? [],
+      )
+    : [];
+  const filteredParticipantGroups = filterProtocolGroups(
+    participantGroups,
+    protocolFilters,
+  );
+  const renderedBlockKeySignature = renderedProtocolBlockKeys(
+    filteredParticipantGroups,
+    classCompetitions,
+    event ?? null,
+  ).join('|');
+  useEffect(() => {
+    const rendered = new Set(
+      renderedBlockKeySignature.length > 0
+        ? renderedBlockKeySignature.split('|')
+        : [],
+    );
+    setCollapsedBlockKeys((current) => {
+      const next = current.filter((key) => rendered.has(key));
+      return next.length === current.length ? current : next;
+    });
+  }, [renderedBlockKeySignature]);
+
   if (eventQuery.isLoading) {
     return (
       <AppShell title="Мероприятие" subtitle="Загружаем карточку...">
@@ -586,7 +740,7 @@ export function EventPage() {
     );
   }
 
-  if (eventQuery.isError || !eventQuery.data) {
+  if (eventQuery.isError || !event) {
     return (
       <AppShell title="Мероприятие не найдено" subtitle="Проверьте ссылку или вернитесь к списку событий">
         <Result
@@ -603,7 +757,6 @@ export function EventPage() {
     );
   }
 
-  const event = eventQuery.data;
   const session = sessionQuery.data;
   const canManage = canManageCreatedEvent({
     roles: session?.roles,
@@ -871,7 +1024,6 @@ export function EventPage() {
   const canRunBracket =
     canCreateEvents(session?.roles) && event.status !== 'CANCELLED' && !pastCompleted;
   const registrationClosed = isRegistrationWindowClosed(event);
-  const classCompetitions = classCompetitionsQuery.data ?? [];
   const participantColumns = getParticipantColumns({
     canAssignNumbers,
     canAssignResults,
@@ -885,18 +1037,8 @@ export function EventPage() {
     onAssignOutcome: assignOutcome,
     onAssignResult: assignFinishTime,
   });
-  const participantGroups = groupParticipants(
-    registrations,
-    event.formats,
-    event.starts,
-    event.ageSplits ?? [],
-  );
   const cityOptions = collectProtocolFilterValues(registrations, 'city');
   const teamOptions = collectProtocolFilterValues(registrations, 'team');
-  const filteredParticipantGroups = filterProtocolGroups(
-    participantGroups,
-    protocolFilters,
-  );
   const showProtocolToolbar =
     event.registrations !== null && registrations.length > 0;
   const ageSplitValue =
@@ -1220,9 +1362,6 @@ export function EventPage() {
                         section.rows,
                         classCompetitions,
                       );
-                      const wholeRace =
-                        sectionCompetitions.find((item) => item.targetWholeCategory) ??
-                        null;
                       const bracketInProgress = sectionCompetitions.some(
                         (item) => item.status !== 'DONE',
                       );
@@ -1238,75 +1377,27 @@ export function EventPage() {
                           .filter((row) => row.raceId != null)
                           .map((row) => row.id),
                       );
-                      const sectionViews: ProtocolSectionView[] = [];
-                      if (wholeRace) {
-                        sectionViews.push({
-                          key: `race-${wholeRace.id}`,
-                          title: wholeRace.title || section.title,
-                          subtitle: wholeRace.subtitle,
-                          rows: section.visibleRows,
-                          allRows: section.rows,
-                          competition: wholeRace,
-                          sectionId: wholeRace.sectionId,
-                          bound: wholeRace.youngestBound ?? 0,
-                        });
-                      } else {
-                        for (const competition of sectionCompetitions) {
-                          sectionViews.push({
-                            key: `race-${competition.id}`,
-                            title: competition.title || section.title,
-                            subtitle: competition.subtitle,
-                            rows: section.visibleRows.filter(
-                              (row) => row.raceId === competition.id,
-                            ),
-                            allRows: section.rows.filter(
-                              (row) => row.raceId === competition.id,
-                            ),
-                            competition,
-                            sectionId: competition.sectionId,
-                            bound: competition.youngestBound ?? 0,
-                          });
-                        }
-                        for (const ageSection of section.ageSections) {
-                          const rows = ageSection.visibleRows.filter(
-                            (row) => row.raceId == null,
-                          );
-                          if (rows.length === 0) continue;
-                          sectionViews.push({
-                            key: `simple-${ageSection.key}`,
-                            title: ageSection.title ?? section.title,
-                            subtitle: ageSection.subtitle,
-                            rows,
-                            allRows: ageSection.rows.filter(
-                              (row) => row.raceId == null,
-                            ),
-                            competition: null,
-                            sectionId: ageSection.key,
-                            bound: simpleSectionBound(ageSection.key, split),
-                          });
-                        }
-                        if (sectionViews.length === 0) {
-                          sectionViews.push({
-                            key: `simple-${section.key}`,
-                            title: section.title,
-                            subtitle: null,
-                            rows: section.visibleRows,
-                            allRows: section.rows,
-                            competition: null,
-                            sectionId: 'CATEGORY',
-                            bound: 0,
-                          });
-                        }
-                      }
-                      sectionViews.sort(
-                        (left, right) =>
-                          left.bound - right.bound ||
-                          (left.competition ? 0 : 1) -
-                            (right.competition ? 0 : 1) ||
-                          left.title.localeCompare(right.title),
+                      const sectionViews = buildSectionViews(
+                        section,
+                        sectionCompetitions,
+                        split,
                       );
                       const compactActive =
                         compactProtocol && !fullProtocolKeys.includes(section.key);
+                      // AD-20: a block is identified by gender + category + its own
+                      // section or race, so two `CATEGORY_1` blocks never share state.
+                      const blockViews = sectionViews.map((view) => {
+                        const blockKey = protocolBlockKey(
+                          group.key,
+                          section.key,
+                          view.key,
+                        );
+                        return {
+                          view,
+                          blockKey,
+                          collapsed: collapsedBlockKeys.includes(blockKey),
+                        };
+                      });
                       const ageSplitSelection: AgeSplitCategory | null =
                         resolveAgeSplitSelection({
                           roles: session?.roles,
@@ -1322,7 +1413,10 @@ export function EventPage() {
                               ?.resolvedLabel ?? section.title,
                           formatName: sample?.format?.name ?? '',
                         });
-                      const renderTable = (view: ProtocolSectionView) => {
+                      const renderTable = (
+                        view: ProtocolSectionView,
+                        blockKey: string,
+                      ) => {
                         const raced = view.rows.some((row) =>
                           racedRegistrationIds.has(row.id),
                         );
@@ -1358,7 +1452,7 @@ export function EventPage() {
                             });
                         return (
                           <Table
-                            key={view.key}
+                            key={blockKey}
                             className={
                               compactActive
                                 ? 'protocol-table protocol-table--compact'
@@ -1453,9 +1547,9 @@ export function EventPage() {
                                 {categoryFinished ? <Tag>Гонка завершена</Tag> : null}
                               </Space>
                             </div>
-                            {sectionViews.map((view) => (
+                            {blockViews.map(({ view, blockKey, collapsed }) => (
                               <div
-                                key={view.key}
+                                key={blockKey}
                                 style={{
                                   display: 'flex',
                                   flexDirection: 'column',
@@ -1478,25 +1572,25 @@ export function EventPage() {
                                     <Button
                                       type="text"
                                       size="small"
-                                      aria-expanded={!collapsedBlockKeys.includes(view.key)}
+                                      aria-expanded={!collapsed}
                                       aria-label={
-                                        collapsedBlockKeys.includes(view.key)
+                                        collapsed
                                           ? 'Развернуть категорию'
                                           : 'Свернуть категорию'
                                       }
                                       title={
-                                        collapsedBlockKeys.includes(view.key)
+                                        collapsed
                                           ? 'Развернуть категорию'
                                           : 'Свернуть категорию'
                                       }
                                       icon={
-                                        collapsedBlockKeys.includes(view.key) ? (
+                                        collapsed ? (
                                           <RightOutlined />
                                         ) : (
                                           <DownOutlined />
                                         )
                                       }
-                                      onClick={() => toggleBlockCollapsed(view.key)}
+                                      onClick={() => toggleBlockCollapsed(blockKey)}
                                     />
                                     <Space size={8} align="baseline" wrap>
                                       <Typography.Text strong>{view.title}</Typography.Text>
@@ -1529,7 +1623,7 @@ export function EventPage() {
                                     />
                                   ) : null}
                                 </div>
-                                {!collapsedBlockKeys.includes(view.key) ? (
+                                {!collapsed ? (
                                   <>
                                     {view.competition && classCompetitionsQuery.isSuccess ? (
                                       <ClassCompetitionPanel
@@ -1549,7 +1643,7 @@ export function EventPage() {
                                     {view.competition &&
                                     view.competition.status !== 'DONE'
                                       ? null
-                                      : renderTable(view)}
+                                      : renderTable(view, blockKey)}
                                   </>
                                 ) : null}
                               </div>

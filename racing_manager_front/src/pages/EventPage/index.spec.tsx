@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { useClassCompetitionsQuery } from '../../features/class-competitions/useClassCompetitionsQuery';
+import type { ClassCompetitionView } from '../../features/class-competitions/types';
 import { categoryTitle } from '../../features/events/ageCategories';
 import {
   categoryReadyToFinish,
@@ -381,7 +382,10 @@ describe('resolveAgeSplitGroupCounts', () => {
 
 const TIMING_SURFACE_TEXT = 'Хронометраж мероприятия';
 
-function eventDetails(registrations: EventParticipant[]): EventDetails {
+function eventDetails(
+  registrations: EventParticipant[],
+  ageSplits: AgeSplitRef[] = [],
+): EventDetails {
   return {
     id: 'event-1',
     name: 'Кубок города',
@@ -404,6 +408,7 @@ function eventDetails(registrations: EventParticipant[]): EventDetails {
     registrations,
     registeredCount: registrations.length,
     finishedCategories: [],
+    ageSplits,
   };
 }
 
@@ -419,17 +424,20 @@ function mockSession(session: {
   } as unknown as ReturnType<typeof useSessionQuery>);
 }
 
-function mockEvent(registrations: EventParticipant[]) {
+function mockEvent(
+  registrations: EventParticipant[],
+  ageSplits: AgeSplitRef[] = [],
+) {
   vi.mocked(useEventDetailsQuery).mockReturnValue({
-    data: eventDetails(registrations),
+    data: eventDetails(registrations, ageSplits),
     isLoading: false,
     isError: false,
   } as unknown as ReturnType<typeof useEventDetailsQuery>);
 }
 
-function mockCompetitions() {
+function mockCompetitions(competitions: ClassCompetitionView[] = []) {
   vi.mocked(useClassCompetitionsQuery).mockReturnValue({
-    data: [],
+    data: competitions,
     isSuccess: true,
     isError: false,
     isLoading: false,
@@ -460,6 +468,27 @@ function protocolRow(fullName: string): HTMLElement {
   const row = cell.closest('tr');
   if (!row) throw new Error(`no protocol row for ${fullName}`);
   return row;
+}
+
+function protocolBlock(fullName: string): HTMLElement {
+  let node: HTMLElement | null = protocolRow(fullName);
+  while (node && !node.querySelector('button[aria-expanded]')) {
+    node = node.parentElement;
+  }
+  if (!node) throw new Error(`no protocol block for ${fullName}`);
+  return node;
+}
+
+function blockCollapseToggle(block: HTMLElement): HTMLButtonElement {
+  const toggle = block.querySelector('button[aria-expanded]');
+  if (!(toggle instanceof HTMLButtonElement)) {
+    throw new Error('no protocol block collapse toggle');
+  }
+  return toggle;
+}
+
+function blockIsExpanded(block: HTMLElement): boolean {
+  return blockCollapseToggle(block).getAttribute('aria-expanded') === 'true';
 }
 
 const reader = { authenticated: true, userId: 'user-reader', roles: [] };
@@ -634,3 +663,268 @@ describe('EventPage protocol splits', () => {
     expect(within(row).getByText('00:00:01')).not.toBeNull();
   });
 });
+
+const administrator = {
+  authenticated: true,
+  userId: 'admin-1',
+  roles: ['ADMINISTRATOR'],
+};
+
+const splitBothGenders: AgeSplitRef[] = [
+  { ...split, gender: 'M' },
+  { ...split, gender: 'F' },
+];
+
+const siblingRows: EventParticipant[] = [
+  participant({
+    id: 'm-cat-1',
+    fullName: 'Иван Первый',
+    gender: 'M',
+    sectionId: 'CATEGORY_1',
+    startNumber: 1,
+  }),
+  participant({
+    id: 'm-cat-2',
+    fullName: 'Пётр Второй',
+    gender: 'M',
+    sectionId: 'CATEGORY_2',
+    startNumber: 2,
+  }),
+  participant({
+    id: 'f-cat-1',
+    fullName: 'Анна Третья',
+    gender: 'F',
+    sectionId: 'CATEGORY_1',
+    startNumber: 3,
+  }),
+];
+
+const raceCompetition: ClassCompetitionView = {
+  id: 'race-1',
+  eventId: 'event-1',
+  startId: 'start-a',
+  formatId: 1,
+  gender: 'M',
+  sectionId: 'CATEGORY_1',
+  sectionKind: 'CATEGORY',
+  title: 'Категория 1',
+  subtitle: null,
+  targetGroupIds: ['AGE_24_40'],
+  targetWholeCategory: false,
+  capturedEnrollmentIds: [],
+  youngestBound: 24,
+  status: 'DONE',
+  stages: [],
+  classification: [],
+};
+
+const raceRows: EventParticipant[] = [
+  participant({
+    id: 'm-race',
+    fullName: 'Иван Гонщик',
+    gender: 'M',
+    sectionId: 'CATEGORY_1',
+    raceId: 'race-1',
+    startNumber: 1,
+  }),
+  participant({
+    id: 'm-simple',
+    fullName: 'Пётр Простой',
+    gender: 'M',
+    sectionId: 'CATEGORY_2',
+    startNumber: 2,
+  }),
+];
+
+/**
+ * A phone viewport clears every breakpoint, so Grid.md is false and the page
+ * offers the compact/full protocol control. The antd breakpoint observer
+ * re-reads matchMedia on the first render after the previous unmount.
+ */
+function mockPhoneViewport(): () => void {
+  const previous = window.matchMedia;
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })) as unknown as typeof window.matchMedia;
+  return () => {
+    window.matchMedia = previous;
+  };
+}
+
+function renderProtocol(
+  registrations: EventParticipant[],
+  ageSplits: AgeSplitRef[],
+  competitions: ClassCompetitionView[] = [],
+) {
+  mockSession(administrator);
+  mockEvent(registrations, ageSplits);
+  mockCompetitions(competitions);
+  renderEventPage();
+}
+
+describe('EventPage per-block protocol collapse', () => {
+  it('collapses only the block whose section id another gender also shows', () => {
+    renderProtocol(siblingRows, splitBothGenders);
+
+    const menBlock = protocolBlock('Иван Первый');
+    const menSiblingBlock = protocolBlock('Пётр Второй');
+    const womenBlock = protocolBlock('Анна Третья');
+
+    fireEvent.click(blockCollapseToggle(menBlock));
+
+    expect(blockIsExpanded(menBlock)).toBe(false);
+    expect(
+      within(menBlock).getByRole('button', { name: 'Развернуть категорию' }),
+    ).not.toBeNull();
+    expect(within(menBlock).queryByText('Иван Первый')).toBeNull();
+
+    expect(blockIsExpanded(menSiblingBlock)).toBe(true);
+    expect(within(menSiblingBlock).getByText('Пётр Второй')).not.toBeNull();
+
+    expect(blockIsExpanded(womenBlock)).toBe(true);
+    expect(
+      within(womenBlock).getByRole('button', { name: 'Свернуть категорию' }),
+    ).not.toBeNull();
+    expect(within(womenBlock).getByText('Анна Третья')).not.toBeNull();
+  });
+
+  it('expands back only the block that was collapsed', () => {
+    renderProtocol(siblingRows, splitBothGenders);
+
+    const menBlock = protocolBlock('Иван Первый');
+    const womenBlock = protocolBlock('Анна Третья');
+
+    fireEvent.click(blockCollapseToggle(womenBlock));
+    fireEvent.click(blockCollapseToggle(menBlock));
+    expect(blockIsExpanded(menBlock)).toBe(false);
+    expect(blockIsExpanded(womenBlock)).toBe(false);
+
+    fireEvent.click(blockCollapseToggle(menBlock));
+
+    expect(blockIsExpanded(menBlock)).toBe(true);
+    expect(within(menBlock).getByText('Иван Первый')).not.toBeNull();
+    expect(blockIsExpanded(womenBlock)).toBe(false);
+    expect(within(womenBlock).queryByText('Анна Третья')).toBeNull();
+  });
+
+  it('keeps a race block and a simple block independent', () => {
+    renderProtocol(raceRows, [{ ...split, gender: 'M' }], [raceCompetition]);
+
+    const raceBlock = protocolBlock('Иван Гонщик');
+    const simpleBlock = protocolBlock('Пётр Простой');
+
+    fireEvent.click(blockCollapseToggle(raceBlock));
+
+    expect(blockIsExpanded(raceBlock)).toBe(false);
+    expect(within(raceBlock).queryByText('Иван Гонщик')).toBeNull();
+    expect(blockIsExpanded(simpleBlock)).toBe(true);
+    expect(within(simpleBlock).getByText('Пётр Простой')).not.toBeNull();
+
+    fireEvent.click(blockCollapseToggle(simpleBlock));
+
+    expect(blockIsExpanded(raceBlock)).toBe(false);
+    expect(blockIsExpanded(simpleBlock)).toBe(false);
+
+    fireEvent.click(blockCollapseToggle(raceBlock));
+
+    expect(blockIsExpanded(raceBlock)).toBe(true);
+    expect(within(raceBlock).getByText('Иван Гонщик')).not.toBeNull();
+    expect(blockIsExpanded(simpleBlock)).toBe(false);
+  });
+
+  it('starts every block expanded after a remount', () => {
+    renderProtocol(siblingRows, splitBothGenders);
+    fireEvent.click(blockCollapseToggle(protocolBlock('Иван Первый')));
+    expect(blockIsExpanded(protocolBlock('Пётр Второй'))).toBe(true);
+    cleanup();
+
+    renderProtocol(siblingRows, splitBothGenders);
+
+    expect(blockIsExpanded(protocolBlock('Иван Первый'))).toBe(true);
+    expect(blockIsExpanded(protocolBlock('Пётр Второй'))).toBe(true);
+    expect(blockIsExpanded(protocolBlock('Анна Третья'))).toBe(true);
+  });
+
+  it('keeps the category controls, search and filters working across a collapsed block', () => {
+    renderProtocol(siblingRows, splitBothGenders);
+
+    const search = screen.getByLabelText('Поиск по участнику');
+    fireEvent.change(search, { target: { value: 'Иван' } });
+
+    expect(screen.getByText('Иван Первый')).not.toBeNull();
+    expect(screen.queryByText('Анна Третья')).toBeNull();
+    expect(screen.getAllByLabelText('Фильтр по городу')).not.toHaveLength(0);
+    expect(screen.getAllByLabelText('Фильтр по команде')).not.toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сбросить фильтры' }));
+    expect(screen.getByText('Анна Третья')).not.toBeNull();
+
+    const menBlock = protocolBlock('Иван Первый');
+    const womenBlock = protocolBlock('Анна Третья');
+    fireEvent.click(blockCollapseToggle(menBlock));
+
+    expect(screen.getAllByRole('button', { name: 'Возрастные категории' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Завершить гонку' })).toHaveLength(2);
+    expect(screen.getByLabelText('Поиск по участнику')).not.toBeNull();
+    expect(blockIsExpanded(womenBlock)).toBe(true);
+  });
+
+  it('keeps the compact/full protocol control working while a block is collapsed', () => {
+    const restoreViewport = mockPhoneViewport();
+    try {
+      renderProtocol(siblingRows, splitBothGenders);
+      expect(screen.getAllByRole('button', { name: 'Полный протокол' })).toHaveLength(2);
+
+      const menBlock = protocolBlock('Иван Первый');
+      const womenBlock = protocolBlock('Анна Третья');
+      fireEvent.click(blockCollapseToggle(menBlock));
+      expect(blockIsExpanded(menBlock)).toBe(false);
+
+      fireEvent.click(screen.getAllByRole('button', { name: 'Полный протокол' })[0]);
+
+      expect(screen.getAllByRole('button', { name: 'Краткий протокол' })).toHaveLength(1);
+      expect(screen.getAllByRole('button', { name: 'Полный протокол' })).toHaveLength(1);
+      expect(blockIsExpanded(menBlock)).toBe(false);
+      expect(blockIsExpanded(womenBlock)).toBe(true);
+    } finally {
+      restoreViewport();
+    }
+  });
+
+  it('renders a filtered-out block expanded again and keeps a rendered sibling collapsed', () => {
+    renderProtocol(siblingRows, splitBothGenders);
+
+    const menBlock = protocolBlock('Иван Первый');
+    const menSiblingBlock = protocolBlock('Пётр Второй');
+    fireEvent.click(blockCollapseToggle(menBlock));
+    fireEvent.click(blockCollapseToggle(menSiblingBlock));
+    expect(blockIsExpanded(menBlock)).toBe(false);
+    expect(blockIsExpanded(menSiblingBlock)).toBe(false);
+
+    fireEvent.change(screen.getByLabelText('Поиск по участнику'), {
+      target: { value: 'Второй' },
+    });
+
+    expect(screen.queryByText('Иван Первый')).toBeNull();
+    expect(blockIsExpanded(menSiblingBlock)).toBe(false);
+    expect(within(menSiblingBlock).queryByText('Пётр Второй')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сбросить фильтры' }));
+
+    const restoredBlock = protocolBlock('Иван Первый');
+    expect(blockIsExpanded(restoredBlock)).toBe(true);
+    expect(within(restoredBlock).getByText('Иван Первый')).not.toBeNull();
+    expect(blockIsExpanded(menSiblingBlock)).toBe(false);
+    expect(
+      screen.getAllByRole('button', { name: 'Развернуть категорию' }),
+    ).toHaveLength(1);
+  });
+});
+
