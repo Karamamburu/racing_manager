@@ -180,6 +180,28 @@ describe('TimingCategoryBlock', () => {
     expect(screen.getByText('Время: 01:23.756')).not.toBeNull();
   });
 
+  it('isolates the elapsed block so changing digits never shift the row', () => {
+    render(
+      <TimingCategoryBlock
+        block={block({
+          state: 'RUNNING',
+          attemptId: 'attempt-1',
+          officialStartedAt: RUNNING_START,
+          elapsedMs: 83_456,
+          startControlEnabled: false,
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    const elapsed = screen.getByText('Время: 01:23.456');
+    expect(elapsed.style.display).toBe('inline-block');
+    expect(elapsed.style.minWidth).toBe('118px');
+    expect(elapsed.style.fontVariantNumeric).toBe('tabular-nums');
+  });
+
   it('keeps a closed block on the surface elapsed value', () => {
     const advanceLocal = withLocalClock();
     render(

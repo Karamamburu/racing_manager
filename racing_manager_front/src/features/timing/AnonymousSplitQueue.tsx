@@ -141,14 +141,17 @@ export function AnonymousSplitQueue({
             margin: 0,
             padding: 0,
             listStyle: 'none',
-            display: 'flex',
-            flexDirection: 'column',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+            gridAutoRows: 'min-content',
+            alignContent: 'start',
             gap: 8,
           }}
         >
           {splits.length === 0 ? (
             <li
               style={{
+                gridColumn: '1 / -1',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',

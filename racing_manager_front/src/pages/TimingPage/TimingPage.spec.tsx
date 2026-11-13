@@ -923,21 +923,22 @@ describe('TimingPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /^Сплит 1:/ }));
 
-    expect(await screen.findByText('Назначение сплита')).not.toBeNull();
-    expect(
-      screen.getByText('Сплит будет назначен попытке: 5 км · Мужчины'),
-    ).not.toBeNull();
-
     const field = screen.getByLabelText('Номер участника');
+    expect(field).toBe(document.activeElement);
+    expect(screen.queryByText(/^Сплит будет назначен/)).toBeNull();
     fireEvent.change(field, { target: { value: '17' } });
     fireEvent.keyDown(field, { key: 'Enter' });
 
     await waitFor(() =>
       expect(capture.assignAnonymousSplit).toHaveBeenCalledWith('split-1', 17),
     );
-    // The accepted assignment exits the mode and returns the field to capture.
+    // The accepted assignment exits the mode and drops the queue selection.
     await waitFor(() =>
-      expect(screen.queryByText('Назначение сплита')).toBeNull(),
+      expect(
+        screen
+          .getByRole('button', { name: /^Сплит 1:/ })
+          .getAttribute('aria-pressed'),
+      ).toBe('false'),
     );
     expect(capture.captureAnonymous).not.toHaveBeenCalled();
   });
@@ -1180,14 +1181,10 @@ describe('TimingPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /^Сплит 1:/ }));
 
-    expect(await screen.findByText('Назначение сплита')).not.toBeNull();
-    expect(
-      screen.getByText(
-        'Сплит будет назначен попытке: Кубковая гонка · Квалификация · Заезд 1',
-      ),
-    ).not.toBeNull();
-
     const field = screen.getByLabelText('Номер участника');
+    expect(field).toBe(document.activeElement);
+    expect(screen.queryByText(/^Сплит будет назначен/)).toBeNull();
+
     fireEvent.change(field, { target: { value: '42' } });
     fireEvent.keyDown(field, { key: 'Enter' });
 

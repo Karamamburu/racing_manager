@@ -1,4 +1,5 @@
 import { Button, Input, Modal, Space, Spin, Typography } from 'antd';
+import type { InputRef } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
@@ -116,6 +117,7 @@ export function NumberCaptureField({
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const [choice, setChoice] = useState<AmbiguousChoice | null>(null);
   const submitting = useRef(false);
+  const inputRef = useRef<InputRef>(null);
   const assignmentId = assignment?.splitId ?? null;
 
   // Entering, leaving or changing assignment mode starts from an empty field:
@@ -123,6 +125,9 @@ export function NumberCaptureField({
   useEffect(() => {
     setText('');
     setError(null);
+    if (assignmentId !== null) {
+      inputRef.current?.focus();
+    }
   }, [assignmentId]);
 
   const refuse = (message: string) => {
@@ -281,21 +286,16 @@ export function NumberCaptureField({
 
   return (
     <Space direction="vertical" size={4} style={{ width: '100%' }}>
-      <Typography.Text strong>
-        {assignment === null ? 'Номер участника' : 'Назначение сплита'}
-      </Typography.Text>
+      <Typography.Text strong>Номер участника</Typography.Text>
       {assignment === null ? (
         <Typography.Text type="secondary">
           Enter на пустом поле добавит неразмеченный сплит
         </Typography.Text>
-      ) : (
-        <Typography.Text type="secondary">
-          Сплит будет назначен попытке: {assignment.attemptLabel}
-        </Typography.Text>
-      )}
+      ) : null}
       <Input
+        ref={inputRef}
         aria-label="Номер участника"
-        placeholder={assignment === null ? 'Номер' : 'Номер для назначения'}
+        placeholder="Номер"
         inputMode="numeric"
         autoComplete="off"
         status={error ? 'error' : undefined}

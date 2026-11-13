@@ -275,7 +275,7 @@ describe('NumberCaptureField', () => {
     );
   });
 
-  it('names the entry attempt while the field assigns a queued split', () => {
+  it('opens assignment mode with the field focused and no extra prompt', () => {
     render(
       <NumberCaptureField
         resolve={() => [candidate()]}
@@ -288,13 +288,12 @@ describe('NumberCaptureField', () => {
       />,
     );
 
-    expect(screen.getByText('Назначение сплита')).not.toBeNull();
+    expect(screen.getByText('Номер участника')).not.toBeNull();
     expect(
-      screen.getByText(
-        'Сплит будет назначен попытке: 5 км · Мужчины · Кубковая гонка — 10 км',
-      ),
-    ).not.toBeNull();
-    expect(numberInput().placeholder).toBe('Номер для назначения');
+      screen.queryByText(/Сплит будет назначен попытке/),
+    ).toBeNull();
+    expect(numberInput().placeholder).toBe('Номер');
+    expect(document.activeElement).toBe(numberInput());
   });
 
   it('assigns a typed number in assignment mode without resolving a capture', async () => {

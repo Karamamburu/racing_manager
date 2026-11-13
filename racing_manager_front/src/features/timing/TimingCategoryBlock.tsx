@@ -176,7 +176,13 @@ export function TimingCategoryBlock({
             Старт: {formatTimingClock(block.officialStartedAt)}
           </Typography.Text>
           {displayedElapsedMs === null ? null : (
-            <Typography.Text>
+            <Typography.Text
+              style={{
+                display: 'inline-block',
+                minWidth: 118,
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
               Время: {formatElapsed(displayedElapsedMs)}
             </Typography.Text>
           )}

@@ -554,14 +554,10 @@ describe('TimingPage capture integration', () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /^Сплит 1:/ }));
-    expect(await screen.findByText('Назначение сплита')).not.toBeNull();
-    expect(
-      screen.getByText(
-        'Сплит будет назначен попытке: Кубковая гонка · Квалификация · Заезд 1',
-      ),
-    ).not.toBeNull();
-
     const field = screen.getByLabelText('Номер участника');
+    // Assigning needs no caption: selecting the entry focuses the field.
+    expect(field).toBe(document.activeElement);
+    expect(screen.queryByText(/^Сплит будет назначен/)).toBeNull();
     fireEvent.change(field, { target: { value: '17' } });
     fireEvent.keyDown(field, { key: 'Enter' });
 
