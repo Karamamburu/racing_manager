@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from '../../shared/api/ApiClient';
 import type {
+  AssignAnonymousSplitRequest,
+  CancelAnonymousSplitRequest,
   CaptureTimingPassRequest,
   CompleteTimingAttemptRequest,
   CorrectOfficialTimeRequest,
   ForceReleaseCaptureRequest,
+  StartHeatAttemptRequest,
   StartTimingAttemptRequest,
+  TimingAnonymousSplitView,
   TimingAttemptRecordView,
   TimingCaptureView,
   TimingCategoryBlockView,
@@ -86,6 +90,14 @@ const START_REQUEST: StartTimingAttemptRequest = {
   clientStartedAt: '2026-11-13T09:00:00.000Z',
 };
 
+const HEAT_START_REQUEST: StartHeatAttemptRequest = {
+  classCompetitionId: 'race-1',
+  stageId: 'stage-1',
+  heatNumber: 2,
+  workstationInstanceId: 'ws-1',
+  clientStartedAt: '2026-11-13T09:10:00.000Z',
+};
+
 const PASS_REQUEST: CaptureTimingPassRequest = {
   attemptId: 'attempt-1',
   kind: 'NUMBER',
@@ -96,6 +108,38 @@ const PASS_REQUEST: CaptureTimingPassRequest = {
   workstationInstanceId: 'ws-1',
   deviceSequence: 1,
 };
+
+const ANONYMOUS_PASS_REQUEST: CaptureTimingPassRequest = {
+  attemptId: 'attempt-heat-1',
+  kind: 'ANONYMOUS_SPLIT',
+  clientCapturedAt: '2026-11-13T09:10:07.500Z',
+  clientElapsedMs: 7500,
+  clockEpochId: 'epoch-heat-1',
+  workstationInstanceId: 'ws-1',
+  deviceSequence: 4,
+};
+
+const ASSIGN_REQUEST: AssignAnonymousSplitRequest = {
+  startNumber: 17,
+  workstationInstanceId: 'ws-1',
+  deviceSequence: 5,
+};
+
+const CANCEL_REQUEST: CancelAnonymousSplitRequest = {
+  reason: 'Сплит не относится к заезду',
+};
+
+function splitView(): TimingAnonymousSplitView {
+  return {
+    splitId: 'split-1',
+    attemptId: 'attempt-1',
+    blockKey: 'CATEGORY_1:start-1',
+    attemptLabel: 'Заезд 1',
+    capturedAt: '2026-11-13T09:00:07.500Z',
+    officialElapsedMs: 7500,
+    status: 'QUEUED',
+  };
+}
 
 const COMPLETE_REQUEST: CompleteTimingAttemptRequest = {
   workstationInstanceId: 'ws-1',
@@ -158,6 +202,84 @@ describe('TimingService requests', () => {
       },
       { headers: { 'Idempotency-Key': 'key-pass' } },
     );
+  });
+
+  it('POSTs a heat Start to the heat route with its stage, heat and key', async () => {
+    const result = {
+      attempt: { ...blockView(), kind: 'HEAT', stageId: 'stage-1', heatNumber: 2 },
+      epoch: {
+        epochId: 'epoch-heat-1',
+        attemptId: 'attempt-heat-1',
+        officialElapsedAnchorMs: 0,
+        serverNow: '2026-11-13T09:10:00.000Z',
+      },
+    };
+    vi.mocked(apiClient.post).mockResolvedValue(result as never);
+
+    await expect(
+      timingService.startHeatAttempt('event-1', HEAT_START_REQUEST, 'key-heat'),
+    ).resolves.toBe(result);
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/events/event-1/timing/heat-attempts',
+      HEAT_START_REQUEST,
+      { headers: { 'Idempotency-Key': 'key-heat' } },
+    );
+  });
+
+  it('POSTs an anonymous split on the pass route with no participant', async () => {
+    vi.mocked(apiClient.post).mockResolvedValue(passView() as never);
+
+    await expect(
+      timingService.captureAnonymousSplit(
+        'event-1',
+        ANONYMOUS_PASS_REQUEST,
+        'key-split',
+      ),
+    ).resolves.toEqual(passView());
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/events/event-1/timing/passes',
+      ANONYMOUS_PASS_REQUEST,
+      { headers: { 'Idempotency-Key': 'key-split' } },
+    );
+    const body = vi.mocked(apiClient.post).mock.calls[0][1] as Record<
+      string,
+      unknown
+    >;
+    expect(body.kind).toBe('ANONYMOUS_SPLIT');
+    expect(body).not.toHaveProperty('startNumber');
+    expect(body).not.toHaveProperty('enrollmentId');
+  });
+
+  it('POSTs a split assignment to its own route with the replay header', async () => {
+    vi.mocked(apiClient.post).mockResolvedValue(passView() as never);
+
+    await expect(
+      timingService.assignAnonymousSplit(
+        'event-1',
+        'split-1',
+        ASSIGN_REQUEST,
+        'key-assign',
+      ),
+    ).resolves.toEqual(passView());
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/events/event-1/timing/splits/split-1/assign',
+      ASSIGN_REQUEST,
+      { headers: { 'Idempotency-Key': 'key-assign' } },
+    );
+  });
+
+  it('POSTs a split cancellation with a reason and no replay header', async () => {
+    const split = splitView();
+    vi.mocked(apiClient.post).mockResolvedValue(split as never);
+
+    await expect(
+      timingService.cancelAnonymousSplit('event-1', 'split-1', CANCEL_REQUEST),
+    ).resolves.toBe(split);
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/events/event-1/timing/splits/split-1/cancel',
+      CANCEL_REQUEST,
+    );
+    expect(vi.mocked(apiClient.post).mock.calls[0]).toHaveLength(2);
   });
 
   it('POSTs completion of one attempt with the last issued sequence', async () => {

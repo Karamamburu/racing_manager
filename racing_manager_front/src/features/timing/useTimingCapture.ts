@@ -4,11 +4,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   newTimingMutationKey,
   openTimingQueue,
+  type TimingAnonymousAssignPayload,
   type TimingMutationOperation,
   type TimingQueueItem,
 } from './timingQueue';
 import { timingService } from './timingService';
 import type {
+  AssignAnonymousSplitRequest,
   BindPendingFinishRequest,
   CaptureTimingPassRequest,
   QuickUndoTimingPassRequest,
@@ -67,8 +69,15 @@ export interface UseTimingCaptureResult {
     participant: TimingParticipantTileView,
     attemptId: string,
   ) => Promise<void>;
+  /** Queues one anonymous split of the attempt; it needs no number and no N. */
+  captureAnonymous: (attemptId: string) => Promise<void>;
+  /** Binds one queued split to a start number of its own attempt. */
+  assignAnonymousSplit: (splitId: string, startNumber: number) => Promise<void>;
+  /** Retires one queued split with a reason; a referee or an administrator. */
+  cancelAnonymousSplit: (splitId: string, reason: string) => Promise<void>;
   bindPending: (pendingId: string, startNumber: number) => Promise<void>;
   quickUndo: (attemptId: string) => Promise<void>;
+  /** Starts a category block or a heat block on its own route. */
   startAttempt: (block: TimingCategoryBlockView) => Promise<void>;
   complete: (attemptId: string) => Promise<void>;
   forceComplete: (attemptId: string, reason: string) => Promise<void>;
@@ -88,6 +97,8 @@ const EPOCH_FALLBACK_MESSAGE = 'Не удалось открыть отсчёт 
 const EVENT_REQUIRED_MESSAGE = 'Хронометраж недоступен: мероприятие не выбрано';
 const CANDIDATE_MISSING_MESSAGE = 'Участник не найден среди идущих заездов';
 const PENDING_MISSING_MESSAGE = 'Непривязанный финиш не найден на поверхности';
+const SPLIT_MISSING_MESSAGE = 'Неразмеченный сплит не найден в очереди';
+const HEAT_INCOMPLETE_MESSAGE = 'Блок заезда не готов к старту';
 
 /** The surface query key, shared with the page that owns the read. */
 export function timingSurfaceQueryKey(eventId: string | undefined) {
@@ -151,6 +162,29 @@ function queueItem(
 /** The sent or unsent items only, in capture order (AD-3). */
 function isUnsynced(item: TimingQueueItem): boolean {
   return item.status === 'PENDING' || item.status === 'SENT';
+}
+
+/** The raw elapsed of one press, derived from the attempt's own anchor (AD-2). */
+function elapsedFromAnchor(
+  anchor: TimingEpochAnchor,
+  monotonicMs: number,
+): number {
+  return Math.max(
+    0,
+    Math.round(
+      anchor.anchorElapsedMs + (monotonicMs - anchor.anchorMonotonicMs),
+    ),
+  );
+}
+
+/**
+ * A heat Start needs the identity the API validates. A block missing one is a
+ * surface defect, not a product rule, so the press fails loudly instead of
+ * sending a half-empty body the API would refuse with a validator message.
+ */
+function requireHeatField<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error(HEAT_INCOMPLETE_MESSAGE);
+  return value;
 }
 
 /**
@@ -302,12 +336,7 @@ export function useTimingCapture(
         workstationInstanceId,
       );
       const key = newTimingMutationKey();
-      const clientElapsedMs = Math.max(
-        0,
-        Math.round(
-          anchor.anchorElapsedMs + (input.monotonicMs - anchor.anchorMonotonicMs),
-        ),
-      );
+      const clientElapsedMs = elapsedFromAnchor(anchor, input.monotonicMs);
       // The API refuses an identity field the kind must leave absent, so a
       // number sends the number and a tile sends the enrollment, never both.
       const identity: Pick<
@@ -338,6 +367,49 @@ export function useTimingCapture(
           payload,
         ),
         () => timingService.capturePass(id, payload, key),
+      );
+    },
+    [requireEvent, openEpoch, workstationInstanceId, deliver],
+  );
+
+  /**
+   * One anonymous split of one attempt. The press instant is read before the
+   * epoch is awaited, so the elapsed value is the press and not the response.
+   * The split carries no participant and no lap bound, so nothing here reads a
+   * number, N or the roster (AD-17).
+   */
+  const captureAnonymous = useCallback(
+    async (attemptId: string): Promise<void> => {
+      const id = requireEvent();
+      const capturedAt = new Date().toISOString();
+      const monotonicMs = performance.now();
+      const anchor = await openEpoch(attemptId);
+      const queue = await openTimingQueue();
+      const deviceSequence = await queue.nextSequence(
+        attemptId,
+        workstationInstanceId,
+      );
+      const key = newTimingMutationKey();
+      const payload: CaptureTimingPassRequest = {
+        attemptId,
+        kind: 'ANONYMOUS_SPLIT',
+        clientCapturedAt: capturedAt,
+        clientElapsedMs: elapsedFromAnchor(anchor, monotonicMs),
+        clockEpochId: anchor.epochId,
+        workstationInstanceId,
+        deviceSequence,
+      };
+
+      await deliver(
+        queueItem(
+          key,
+          attemptId,
+          workstationInstanceId,
+          deviceSequence,
+          'PASS',
+          payload,
+        ),
+        () => timingService.captureAnonymousSplit(id, payload, key),
       );
     },
     [requireEvent, openEpoch, workstationInstanceId, deliver],
@@ -481,6 +553,48 @@ export function useTimingCapture(
     [requireEvent, workstationInstanceId, deliver],
   );
 
+  /**
+   * Binds one queued split to a start number of its own attempt. The split names
+   * the attempt, so the sequence it takes is the sequence of that attempt; an
+   * accepted assignment leaves the queue with the surface refetch (AD-17).
+   */
+  const assignAnonymousSplit = useCallback(
+    async (splitId: string, startNumber: number): Promise<void> => {
+      const id = requireEvent();
+      const split = surface?.anonymousSplits?.find(
+        (entry) => entry.splitId === splitId,
+      );
+      if (split === undefined) {
+        report(SPLIT_MISSING_MESSAGE);
+        throw new Error(SPLIT_MISSING_MESSAGE);
+      }
+      const queue = await openTimingQueue();
+      const deviceSequence = await queue.nextSequence(
+        split.attemptId,
+        workstationInstanceId,
+      );
+      const key = newTimingMutationKey();
+      const request: AssignAnonymousSplitRequest = {
+        startNumber,
+        workstationInstanceId,
+        deviceSequence,
+      };
+      const payload: TimingAnonymousAssignPayload = { splitId, request };
+      await deliver(
+        queueItem(
+          key,
+          split.attemptId,
+          workstationInstanceId,
+          deviceSequence,
+          'ANONYMOUS_ASSIGN',
+          payload,
+        ),
+        () => timingService.assignAnonymousSplit(id, splitId, request, key),
+      );
+    },
+    [requireEvent, surface, workstationInstanceId, deliver, report],
+  );
+
   /** One thin service wrapper: invalidate on success, report and rethrow on failure. */
   const runMutation = useCallback(
     async (work: () => Promise<unknown>): Promise<void> => {
@@ -495,21 +609,55 @@ export function useTimingCapture(
     [invalidate, report],
   );
 
+  /**
+   * Retires one queued split with a reason. Cancellation is a record correction,
+   * so it takes no capture sequence and writes no receipt of its own (E-08).
+   */
+  const cancelAnonymousSplit = useCallback(
+    async (splitId: string, reason: string): Promise<void> => {
+      const id = requireEvent();
+      await runMutation(() =>
+        timingService.cancelAnonymousSplit(id, splitId, { reason }),
+      );
+    },
+    [requireEvent, runMutation],
+  );
+
+  /**
+   * A heat block starts its own attempt on the heat route; a category block
+   * keeps the category route. Both answer with the block and its epoch, so the
+   * anchor is stored the same way and later captures route to it (AD-15).
+   */
   const startAttempt = useCallback(
     async (block: TimingCategoryBlockView): Promise<void> => {
       const id = requireEvent();
       await runMutation(async () => {
-        const result = await timingService.startAttempt(
-          id,
-          {
-            startId: block.startId,
-            formatId: block.formatId,
-            gender: block.gender,
-            workstationInstanceId,
-            clientStartedAt: new Date().toISOString(),
-          },
-          newTimingMutationKey(),
-        );
+        const result =
+          block.kind === 'HEAT'
+            ? await timingService.startHeatAttempt(
+                id,
+                {
+                  classCompetitionId: requireHeatField(
+                    block.classCompetitionId,
+                  ),
+                  stageId: requireHeatField(block.stageId),
+                  heatNumber: requireHeatField(block.heatNumber),
+                  workstationInstanceId,
+                  clientStartedAt: new Date().toISOString(),
+                },
+                newTimingMutationKey(),
+              )
+            : await timingService.startAttempt(
+                id,
+                {
+                  startId: block.startId,
+                  formatId: block.formatId,
+                  gender: block.gender,
+                  workstationInstanceId,
+                  clientStartedAt: new Date().toISOString(),
+                },
+                newTimingMutationKey(),
+              );
         anchors.current.set(result.epoch.attemptId, {
           epochId: result.epoch.epochId,
           anchorElapsedMs: result.epoch.officialElapsedAnchorMs,
@@ -600,12 +748,12 @@ export function useTimingCapture(
     (item: TimingQueueItem): Promise<unknown> => {
       const id = requireEvent();
       switch (item.operation) {
-        case 'PASS':
-          return timingService.capturePass(
-            id,
-            item.payload as CaptureTimingPassRequest,
-            item.id,
-          );
+        case 'PASS': {
+          const payload = item.payload as CaptureTimingPassRequest;
+          return payload.kind === 'ANONYMOUS_SPLIT'
+            ? timingService.captureAnonymousSplit(id, payload, item.id)
+            : timingService.capturePass(id, payload, item.id);
+        }
         case 'BIND': {
           const payload = item.payload as BindPendingFinishRequest;
           return timingService.bindPendingFinish(
@@ -622,6 +770,15 @@ export function useTimingCapture(
             item.payload as QuickUndoTimingPassRequest,
             item.id,
           );
+        case 'ANONYMOUS_ASSIGN': {
+          const payload = item.payload as TimingAnonymousAssignPayload;
+          return timingService.assignAnonymousSplit(
+            id,
+            payload.splitId,
+            payload.request,
+            item.id,
+          );
+        }
       }
     },
     [requireEvent],
@@ -702,6 +859,9 @@ export function useTimingCapture(
     resolveCandidates,
     commitNumber,
     commitTile,
+    captureAnonymous,
+    assignAnonymousSplit,
+    cancelAnonymousSplit,
     bindPending,
     quickUndo,
     startAttempt,

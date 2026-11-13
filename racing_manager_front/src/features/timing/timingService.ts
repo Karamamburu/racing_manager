@@ -1,6 +1,8 @@
 import { apiClient } from '../../shared/api/ApiClient';
 import type {
+  AssignAnonymousSplitRequest,
   BindPendingFinishRequest,
+  CancelAnonymousSplitRequest,
   CancelPendingFinishRequest,
   CancelTimingAttemptRequest,
   CancelTimingPassRequest,
@@ -12,9 +14,11 @@ import type {
   OpenClockEpochRequest,
   QuickUndoTimingPassRequest,
   RebindTimingPassRequest,
+  StartHeatAttemptRequest,
   StartTimingAttemptRequest,
   StartTimingAttemptResult,
   TakeCaptureRequest,
+  TimingAnonymousSplitView,
   TimingAttemptRecordView,
   TimingCaptureView,
   TimingClockEpochView,
@@ -78,6 +82,67 @@ export class TimingService {
       `${this.base(eventId)}/attempts`,
       payload,
       idempotencyKey,
+    );
+  }
+
+  /**
+   * The Start press of one heat of a seeded stage. A heat attempt is a timing
+   * attempt of its own, so the answer carries its block and its clock epoch.
+   */
+  public async startHeatAttempt(
+    eventId: string,
+    payload: StartHeatAttemptRequest,
+    idempotencyKey?: string,
+  ): Promise<StartTimingAttemptResult> {
+    return this.post<StartTimingAttemptResult>(
+      `${this.base(eventId)}/heat-attempts`,
+      payload,
+      idempotencyKey,
+    );
+  }
+
+  /**
+   * Queues one anonymous split. It shares the capture route with a number and a
+   * tile; only `kind` differs, and the API leaves it unbound until assignment.
+   */
+  public async captureAnonymousSplit(
+    eventId: string,
+    payload: CaptureTimingPassRequest,
+    idempotencyKey: string,
+  ): Promise<TimingPassView> {
+    return this.post<TimingPassView>(
+      `${this.base(eventId)}/passes`,
+      payload,
+      idempotencyKey,
+    );
+  }
+
+  /** Binds one queued split to a participant of its own attempt. */
+  public async assignAnonymousSplit(
+    eventId: string,
+    splitId: string,
+    payload: AssignAnonymousSplitRequest,
+    idempotencyKey: string,
+  ): Promise<TimingPassView> {
+    return this.post<TimingPassView>(
+      `${this.base(eventId)}/splits/${splitId}/assign`,
+      payload,
+      idempotencyKey,
+    );
+  }
+
+  /**
+   * Retires one unassigned split with a reason. Cancellation is a record
+   * correction, not a capture, so it carries no sequence and no replay header.
+   */
+  public async cancelAnonymousSplit(
+    eventId: string,
+    splitId: string,
+    payload: CancelAnonymousSplitRequest,
+  ): Promise<TimingAnonymousSplitView> {
+    return this.post<TimingAnonymousSplitView>(
+      `${this.base(eventId)}/splits/${splitId}/cancel`,
+      payload,
     );
   }
 

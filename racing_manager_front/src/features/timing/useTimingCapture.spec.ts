@@ -9,6 +9,7 @@ import type { TimingQueueItem } from './timingQueue';
 import { timingService } from './timingService';
 import type {
   CaptureTimingPassRequest,
+  TimingAnonymousSplitView,
   TimingAttemptRecordView,
   TimingCaptureView,
   TimingCategoryBlockView,
@@ -22,8 +23,12 @@ import { useTimingCapture } from './useTimingCapture';
 vi.mock('./timingService', () => ({
   timingService: {
     startAttempt: vi.fn(),
+    startHeatAttempt: vi.fn(),
     openClockEpoch: vi.fn(),
     capturePass: vi.fn(),
+    captureAnonymousSplit: vi.fn(),
+    assignAnonymousSplit: vi.fn(),
+    cancelAnonymousSplit: vi.fn(),
     bindPendingFinish: vi.fn(),
     quickUndo: vi.fn(),
     completeAttempt: vi.fn(),
@@ -126,6 +131,32 @@ function surfaceOf(categories: TimingCategoryBlockView[]): TimingSurfaceView {
   return { eventId: 'event-1', captureWorkstationInstanceId: 'ws-1', categories };
 }
 
+function anonymousSplit(
+  overrides: Partial<TimingAnonymousSplitView> = {},
+): TimingAnonymousSplitView {
+  return {
+    splitId: 'split-1',
+    attemptId: 'attempt-a',
+    blockKey: 'CATEGORY_1:start-a',
+    attemptLabel: 'Заезд 1',
+    capturedAt: '2026-11-13T09:00:03.000Z',
+    officialElapsedMs: 3000,
+    status: 'QUEUED',
+    ...overrides,
+  };
+}
+
+/** A surface whose queue holds the given splits beside one running block. */
+function surfaceWithQueue(
+  attemptId: string,
+  splits: TimingAnonymousSplitView[],
+): TimingSurfaceView {
+  return {
+    ...surfaceOf([runningBlock({ attemptId })]),
+    anonymousSplits: splits,
+  };
+}
+
 function attemptRecord(): TimingAttemptRecordView {
   return {
     attemptId: 'attempt-a',
@@ -189,6 +220,57 @@ function queuedPass(
   };
 }
 
+function queuedAnonymousCapture(
+  id: string,
+  attemptId: string,
+  deviceSequence: number,
+): TimingQueueItem {
+  const payload: CaptureTimingPassRequest = {
+    attemptId,
+    kind: 'ANONYMOUS_SPLIT',
+    clientCapturedAt: '2026-11-13T09:00:03.000Z',
+    clientElapsedMs: 3000,
+    clockEpochId: `epoch-${attemptId}`,
+    workstationInstanceId: 'ws-1',
+    deviceSequence,
+  };
+  return {
+    id,
+    attemptId,
+    workstationInstanceId: 'ws-1',
+    deviceSequence,
+    operation: 'PASS',
+    payload,
+    status: 'PENDING',
+    createdAt: `2026-11-13T09:00:0${deviceSequence}.000Z`,
+  };
+}
+
+function queuedAssignment(
+  id: string,
+  attemptId: string,
+  splitId: string,
+  deviceSequence: number,
+): TimingQueueItem {
+  return {
+    id,
+    attemptId,
+    workstationInstanceId: 'ws-1',
+    deviceSequence,
+    operation: 'ANONYMOUS_ASSIGN',
+    payload: {
+      splitId,
+      request: {
+        startNumber: 17,
+        workstationInstanceId: 'ws-1',
+        deviceSequence,
+      },
+    },
+    status: 'PENDING',
+    createdAt: `2026-11-13T09:00:0${deviceSequence}.000Z`,
+  };
+}
+
 function renderCapture(initial: HookProps) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -214,6 +296,13 @@ beforeEach(async () => {
     async (_eventId: string, attemptId: string) => epochView(attemptId),
   );
   vi.mocked(timingService.capturePass).mockResolvedValue(passView());
+  vi.mocked(timingService.captureAnonymousSplit).mockResolvedValue(
+    passView({ enrollmentId: null, lapNumber: null, status: 'PENDING' }),
+  );
+  vi.mocked(timingService.assignAnonymousSplit).mockResolvedValue(passView());
+  vi.mocked(timingService.cancelAnonymousSplit).mockResolvedValue(
+    anonymousSplit(),
+  );
   vi.mocked(timingService.bindPendingFinish).mockResolvedValue(passView());
   vi.mocked(timingService.quickUndo).mockResolvedValue(
     passView({ status: 'CANCELLED' }),
@@ -221,6 +310,10 @@ beforeEach(async () => {
   vi.mocked(timingService.startAttempt).mockResolvedValue({
     attempt: runningBlock(),
     epoch: epochView('attempt-a'),
+  });
+  vi.mocked(timingService.startHeatAttempt).mockResolvedValue({
+    attempt: runningBlock({ attemptId: 'attempt-heat', kind: 'HEAT' }),
+    epoch: epochView('attempt-heat'),
   });
   vi.mocked(timingService.completeAttempt).mockResolvedValue(attemptRecord());
   vi.mocked(timingService.forceCompleteAttempt).mockResolvedValue(
@@ -561,6 +654,263 @@ describe('useTimingCapture pending finishes and completion', () => {
       },
       expect.any(String),
     );
+    expect(onError).not.toHaveBeenCalled();
+  });
+});
+
+describe('useTimingCapture anonymous splits', () => {
+  it('captures a split with the attempt epoch and the next sequence, and no participant', async () => {
+    const onError = vi.fn();
+    const { result } = renderCapture({
+      surface: surfaceOf([runningBlock({ attemptId: 'attempt-anon-capture' })]),
+      onError,
+    });
+
+    await waitFor(() => {
+      expect(timingService.openClockEpoch).toHaveBeenCalledTimes(1);
+    });
+
+    monotonicNow = 2500;
+    await act(async () => {
+      await result.current.captureAnonymous('attempt-anon-capture');
+    });
+
+    expect(timingService.captureAnonymousSplit).toHaveBeenCalledTimes(1);
+    expect(timingService.capturePass).not.toHaveBeenCalled();
+    const [eventId, payload, key] = vi.mocked(
+      timingService.captureAnonymousSplit,
+    ).mock.calls[0];
+    expect(eventId).toBe('event-1');
+    expect(payload).toEqual({
+      attemptId: 'attempt-anon-capture',
+      kind: 'ANONYMOUS_SPLIT',
+      clientCapturedAt: expect.any(String),
+      clientElapsedMs: 2500,
+      clockEpochId: 'epoch-attempt-anon-capture',
+      workstationInstanceId: 'ws-1',
+      deviceSequence: 1,
+    });
+    expect(payload).not.toHaveProperty('startNumber');
+    expect(payload).not.toHaveProperty('enrollmentId');
+    expect(typeof key).toBe('string');
+
+    const queue = await openTimingQueue();
+    const items = await queue.list('attempt-anon-capture');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      id: key,
+      operation: 'PASS',
+      status: 'APPLIED',
+      deviceSequence: 1,
+    });
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('assigns a queued split with the sequence of its own attempt', async () => {
+    const onError = vi.fn();
+    const { result } = renderCapture({
+      surface: surfaceWithQueue('attempt-anon-assign', [
+        anonymousSplit({
+          splitId: 'split-assign',
+          attemptId: 'attempt-anon-assign',
+        }),
+      ]),
+      onError,
+    });
+
+    await waitFor(() => {
+      expect(timingService.openClockEpoch).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      await result.current.assignAnonymousSplit('split-assign', 17);
+    });
+
+    const call = vi.mocked(timingService.assignAnonymousSplit).mock.calls[0];
+    expect(call[0]).toBe('event-1');
+    expect(call[1]).toBe('split-assign');
+    expect(call[2]).toEqual({
+      startNumber: 17,
+      workstationInstanceId: 'ws-1',
+      deviceSequence: 1,
+    });
+    expect(typeof call[3]).toBe('string');
+
+    const queue = await openTimingQueue();
+    const items = await queue.list('attempt-anon-assign');
+    expect(items.map((item) => [item.operation, item.status])).toEqual([
+      ['ANONYMOUS_ASSIGN', 'APPLIED'],
+    ]);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('keeps a refused assignment in the queue with the API message', async () => {
+    const onError = vi.fn();
+    vi.mocked(timingService.assignAnonymousSplit).mockRejectedValue(
+      apiRefusal('Сплит уже назначен'),
+    );
+    const { result } = renderCapture({
+      surface: surfaceWithQueue('attempt-anon-refused', [
+        anonymousSplit({
+          splitId: 'split-refused',
+          attemptId: 'attempt-anon-refused',
+        }),
+      ]),
+      onError,
+    });
+
+    await waitFor(() => {
+      expect(timingService.openClockEpoch).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      await expect(
+        result.current.assignAnonymousSplit('split-refused', 17),
+      ).rejects.toThrow('Сплит уже назначен');
+    });
+
+    const queue = await openTimingQueue();
+    const [item] = await queue.list('attempt-anon-refused');
+    expect(item).toMatchObject({
+      operation: 'ANONYMOUS_ASSIGN',
+      status: 'REJECTED',
+      error: 'Сплит уже назначен',
+    });
+    expect(onError).toHaveBeenCalledWith('Сплит уже назначен');
+  });
+
+  it('cancels a queued split with a reason and takes no sequence', async () => {
+    const { result } = renderCapture({
+      surface: surfaceOf([runningBlock({ attemptId: 'attempt-anon-cancel' })]),
+    });
+
+    await act(async () => {
+      await result.current.cancelAnonymousSplit(
+        'split-cancel',
+        'Сплит не относится к заезду',
+      );
+    });
+
+    expect(timingService.cancelAnonymousSplit).toHaveBeenCalledWith(
+      'event-1',
+      'split-cancel',
+      { reason: 'Сплит не относится к заезду' },
+    );
+    const queue = await openTimingQueue();
+    await expect(
+      queue.lastSequence('attempt-anon-cancel', 'ws-1'),
+    ).resolves.toBe(0);
+  });
+
+  it('keeps an unanswered anonymous capture queued for a later flush', async () => {
+    const onError = vi.fn();
+    const { result } = renderCapture({
+      surface: surfaceOf([runningBlock({ attemptId: 'attempt-anon-offline' })]),
+      onError,
+    });
+
+    await waitFor(() => {
+      expect(timingService.openClockEpoch).toHaveBeenCalledTimes(1);
+    });
+
+    vi.mocked(timingService.captureAnonymousSplit).mockRejectedValueOnce(
+      new Error('Network Error'),
+    );
+    await act(async () => {
+      await expect(
+        result.current.captureAnonymous('attempt-anon-offline'),
+      ).rejects.toThrow('Network Error');
+    });
+
+    const queue = await openTimingQueue();
+    const [queued] = await queue.list('attempt-anon-offline');
+    expect(queued).toMatchObject({ operation: 'PASS', status: 'PENDING' });
+    expect(onError).toHaveBeenCalledWith('Network Error');
+  });
+
+  it('replays an anonymous capture and an assignment with their stored payloads', async () => {
+    const { result } = renderCapture({
+      surface: surfaceOf([runningBlock({ attemptId: 'attempt-anon-flush' })]),
+    });
+
+    await waitFor(() => {
+      expect(timingService.openClockEpoch).toHaveBeenCalledTimes(1);
+    });
+
+    const queue = await openTimingQueue();
+    await queue.enqueue(
+      queuedAnonymousCapture('key-flush-anon', 'attempt-anon-flush', 1),
+    );
+    await queue.enqueue(
+      queuedAssignment('key-flush-assign', 'attempt-anon-flush', 'split-flush', 2),
+    );
+
+    await act(async () => {
+      await result.current.flush();
+    });
+
+    expect(timingService.captureAnonymousSplit).toHaveBeenCalledWith(
+      'event-1',
+      expect.objectContaining({ kind: 'ANONYMOUS_SPLIT', deviceSequence: 1 }),
+      'key-flush-anon',
+    );
+    expect(timingService.assignAnonymousSplit).toHaveBeenCalledWith(
+      'event-1',
+      'split-flush',
+      { startNumber: 17, workstationInstanceId: 'ws-1', deviceSequence: 2 },
+      'key-flush-assign',
+    );
+    const items = await queue.list('attempt-anon-flush');
+    expect(items.map((item) => item.status)).toEqual(['APPLIED', 'APPLIED']);
+  });
+});
+
+describe('useTimingCapture heat start', () => {
+  it('starts a heat block on the heat route and anchors its epoch', async () => {
+    const onError = vi.fn();
+    const heatBlock = runningBlock({
+      attemptId: null,
+      state: 'NOT_STARTED',
+      startControlEnabled: true,
+      kind: 'HEAT',
+      blockKey: 'M:race-1:stage-1:heat-1',
+      classCompetitionId: 'race-1',
+      stageId: 'stage-1',
+      stageLabel: 'Круг 1',
+      stageState: 'SEEDED',
+      heatNumber: 1,
+      heatLabel: 'Заезд 1',
+    });
+    const { result } = renderCapture({
+      surface: surfaceOf([heatBlock]),
+      onError,
+    });
+
+    await act(async () => {
+      await result.current.startAttempt(heatBlock);
+    });
+
+    expect(timingService.startHeatAttempt).toHaveBeenCalledWith(
+      'event-1',
+      {
+        classCompetitionId: 'race-1',
+        stageId: 'stage-1',
+        heatNumber: 1,
+        workstationInstanceId: 'ws-1',
+        clientStartedAt: expect.any(String),
+      },
+      expect.any(String),
+    );
+    expect(timingService.startAttempt).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.captureAnonymous('attempt-heat');
+    });
+
+    const [, payload] = vi.mocked(timingService.captureAnonymousSplit).mock
+      .calls[0];
+    expect(payload.clockEpochId).toBe('epoch-attempt-heat');
+    expect(timingService.openClockEpoch).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
   });
 });

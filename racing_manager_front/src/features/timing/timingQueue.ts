@@ -2,10 +2,11 @@
  * IndexedDB outbox for the capture surface.
  *
  * AD-3: every capture-surface mutation (pass create, pending-finish bind, quick
- * undo) carries a contiguous `deviceSequence` per `(attempt, workstation
- * instance)`, and the API writes one receipt per sequence. That is only true if
- * the mutation is stored *before* it is sent, so this module offers
- * write-before-send persistence and never reuses a sequence number.
+ * undo, anonymous split assignment) carries a contiguous `deviceSequence` per
+ * `(attempt, workstation instance)`, and the API writes one receipt per
+ * sequence. That is only true if the mutation is stored *before* it is sent, so
+ * this module offers write-before-send persistence and never reuses a sequence
+ * number.
  *
  * The native `indexedDB` API is used directly: one database,
  * `racing_manager_timing`, version 1, with a `mutations` store keyed by the
@@ -17,9 +18,27 @@
  * visible through `pendingCount`.
  */
 
-export const TIMING_QUEUE_OPERATIONS = ['PASS', 'BIND', 'UNDO'] as const;
+import type { AssignAnonymousSplitRequest } from './types';
+
+export const TIMING_QUEUE_OPERATIONS = [
+  'PASS',
+  'BIND',
+  'UNDO',
+  'ANONYMOUS_ASSIGN',
+] as const;
 
 export type TimingMutationOperation = (typeof TIMING_QUEUE_OPERATIONS)[number];
+
+/**
+ * The stored payload of an `ANONYMOUS_ASSIGN` item: the split that leaves the
+ * queue and the request body that binds it, so a replay needs no surface read.
+ * An anonymous capture is a `PASS` item whose payload kind is
+ * `ANONYMOUS_SPLIT`.
+ */
+export interface TimingAnonymousAssignPayload {
+  splitId: string;
+  request: AssignAnonymousSplitRequest;
+}
 
 export const TIMING_QUEUE_STATUSES = [
   'PENDING',

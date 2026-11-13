@@ -145,6 +145,60 @@ describe('timingQueue outbox', () => {
     await expect(queue.list(attemptId)).resolves.toEqual([]);
   });
 
+  it('persists an anonymous capture and an anonymous assignment in capture order', async () => {
+    const queue = await openTimingQueue();
+    const attemptId = 'attempt-anonymous-ops';
+    const captureSequence = await queue.nextSequence(attemptId, 'ws-1');
+    await queue.enqueue(
+      queueItem('key-anonymous-capture', attemptId, {
+        operation: 'PASS',
+        deviceSequence: captureSequence,
+        payload: {
+          attemptId,
+          kind: 'ANONYMOUS_SPLIT',
+          clockEpochId: 'epoch-anonymous',
+          workstationInstanceId: 'ws-1',
+          deviceSequence: captureSequence,
+        },
+        createdAt: '2026-11-13T09:00:00.100Z',
+      }),
+    );
+    const assignSequence = await queue.nextSequence(attemptId, 'ws-1');
+    await queue.enqueue(
+      queueItem('key-anonymous-assign', attemptId, {
+        operation: 'ANONYMOUS_ASSIGN',
+        deviceSequence: assignSequence,
+        payload: {
+          splitId: 'split-1',
+          request: {
+            startNumber: 17,
+            workstationInstanceId: 'ws-1',
+            deviceSequence: assignSequence,
+          },
+        },
+        createdAt: '2026-11-13T09:00:00.200Z',
+      }),
+    );
+
+    const items = await queue.list(attemptId);
+
+    expect(items.map((item) => [item.operation, item.deviceSequence])).toEqual([
+      ['PASS', 1],
+      ['ANONYMOUS_ASSIGN', 2],
+    ]);
+    await expect(queue.pendingCount(attemptId)).resolves.toBe(2);
+    await expect(queue.lastSequence(attemptId, 'ws-1')).resolves.toBe(2);
+
+    await queue.mark('key-anonymous-assign', 'REJECTED', 'Сплит уже назначен');
+    const [, rejected] = await queue.list(attemptId);
+    expect(rejected).toMatchObject({
+      operation: 'ANONYMOUS_ASSIGN',
+      status: 'REJECTED',
+      error: 'Сплит уже назначен',
+    });
+    await expect(queue.lastSequence(attemptId, 'ws-1')).resolves.toBe(2);
+  });
+
   it('empties the queue with clear', async () => {
     const queue = await openTimingQueue();
     await queue.enqueue(queueItem('key-clear-a', 'attempt-clear-a'));
