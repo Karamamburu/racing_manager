@@ -20,23 +20,30 @@ import {
   assertCanAddPass,
   assertWithinBounds,
   assignLapNumbers,
+  canCorrectOfficialTime,
+  canRebindOrCancelPass,
   canStartAttempt,
   classifyParticipantState,
   classifyRouting,
+  computeSplits,
   nextAttemptNumber,
   normalizeReason,
   orderByOfficialInstant,
   resolveElapsedMs,
   TIMING_MAX_TOTAL_MS,
+  type TimingLapSplit,
   type TimingRoutingCandidate,
   type TimingRoutingNoneReason,
 } from './timing.domain';
 import type {
   BindPendingFinishDto,
   CancelPendingFinishDto,
+  CancelTimingPassDto,
   CaptureTimingPassDto,
+  CorrectOfficialTimeDto,
   OpenClockEpochDto,
   QuickUndoTimingPassDto,
+  RebindTimingPassDto,
   StartTimingAttemptDto,
 } from './timing.dto';
 import {
@@ -81,7 +88,8 @@ import type {
 
 /**
  * MANUAL-TIMING read surface, Start press, number/tile/pending capture, bind,
- * pending cancellation, quick undo, attempt record and clock epoch.
+ * pending cancellation, quick undo, attempt record, clock epoch, official-time
+ * corrections and pass cancel/rebind.
  *
  * The service owns every refusal: it loads the event-wide facts the rules read,
  * asks the pure domain helpers, and only then writes. A refused Start press
@@ -92,10 +100,14 @@ import type {
  * writes neither a mark, a receipt nor an audit row, so its `deviceSequence`
  * stays unconsumed and the client's outbox may retry the same sequence with a
  * corrected payload. A receipt row, once written, is final; a second request on
- * a used sequence is a `CONFLICT`, never a second mutation.
+ * a used sequence is a `CONFLICT`, never a second mutation. An administrator
+ * correction, a pass cancellation and a pass rebind write no receipt at all:
+ * they are record corrections, not workstation captures.
  *
- * Corrections, closure, the lock lifecycle and the role grant belong to later
- * waves and are not implemented here.
+ * Closure, the lock lifecycle and the role grant belong to later waves and are
+ * not implemented here. A correction still republishes an already
+ * timing-published result, because the published total must agree with the
+ * official values as soon as the category is unfinished.
  */
 
 /** Why a roster row is out of timing: displayed in a multi-stage race section. */
@@ -214,6 +226,25 @@ type StartRefusalContext = {
 type PendingFinishContext = {
   mark: TimingMarkRow;
   attempt: TimingAttemptRow;
+};
+
+/** One bound pass of the attempt, resolved to the participant it belongs to. */
+type BoundPassContext = {
+  mark: TimingMarkRow;
+  enrollmentId: string;
+  attempt: TimingAttemptRow;
+};
+
+/**
+ * The publication a correction has to rewrite, computed before any write so a
+ * bound or split refusal leaves the record untouched. `null` means the
+ * participant's result is not timing-owned and is never overwritten.
+ */
+type RepublishPlan = {
+  enrollmentId: string;
+  registrationId: string;
+  totalMs: number;
+  splits: TimingLapSplit[];
 };
 
 @Injectable()
@@ -992,6 +1023,591 @@ export class TimingService {
       });
       return toPassView(cancelled);
     });
+  }
+
+  /**
+   * `PATCH /events/:eventId/timing/passes/:passId/official-time`: move one
+   * official instant and republish what it changes (E-15, E-16).
+   *
+   * A `PASS` correction returns the corrected pass. A `START` correction
+   * returns the attempt reference — id, state and the corrected official start
+   * — because the route addresses the attempt's start, not one pass; a caller
+   * reads the attempt record for the shifted marks. Raw capture columns are
+   * never part of the update.
+   */
+  async correctOfficialTime(
+    authentikId: string | undefined,
+    eventId: string,
+    pathId: string,
+    dto: CorrectOfficialTimeDto,
+  ): Promise<TimingPassView | TimingAttemptRef> {
+    await this.rolesService.assertHasAnyRole(authentikId, [
+      RoleCode.ADMINISTRATOR,
+    ]);
+    if (dto.targetId !== pathId) {
+      throw timingError(
+        TimingErrorCode.INVALID_STATE,
+        'The body addresses another target than the route.',
+        { pathId, targetId: dto.targetId },
+      );
+    }
+    const reason = normalizeReason(dto.reason);
+    const officialAt = new Date(dto.officialAt);
+    const actorUserId = await this.requireUserId(authentikId);
+    if (dto.targetType === 'START') {
+      return this.correctStartTime(
+        actorUserId,
+        eventId,
+        dto.targetId,
+        officialAt,
+        reason,
+      );
+    }
+    return this.correctPassTime(
+      actorUserId,
+      eventId,
+      dto.targetId,
+      officialAt,
+      reason,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/passes/:passId/cancel`: soft-cancel one bound
+   * pass with a reason (E-10 analogue for a bound pass, F-17).
+   *
+   * The pass stays in the record as `CANCELLED` with no lap number, so the
+   * remaining passes of its participant are renumbered 1..k by official instant.
+   * Administrator only, no clock and no receipt.
+   */
+  async cancelPass(
+    authentikId: string | undefined,
+    eventId: string,
+    passId: string,
+    dto: CancelTimingPassDto,
+  ): Promise<TimingPassView> {
+    await this.rolesService.assertHasAnyRole(authentikId, [
+      RoleCode.ADMINISTRATOR,
+    ]);
+    const reason = normalizeReason(dto.reason);
+    // Refuse before opening the transaction; the pass is re-read under it.
+    await this.loadPassContext(passId, eventId);
+    const actorUserId = await this.requireUserId(authentikId);
+
+    const cancelled = await this.repository.withTransaction(async (tx) => {
+      const current = await this.loadPassContext(passId, eventId, tx);
+      await this.assertTimingChangeAllowed(current.attempt, 'PASS_EDIT', tx);
+      const updated = await this.repository.updateMark(tx, current.mark.id, {
+        status: 'CANCELLED',
+        lapNumber: null,
+      });
+      await this.renumberParticipantLaps(
+        tx,
+        current.attempt.id,
+        current.enrollmentId,
+      );
+      await this.repository.insertAudit(tx, {
+        attemptId: current.attempt.id,
+        actorUserId,
+        action: 'PASS_CANCEL',
+        targetType: 'PASS',
+        targetId: current.mark.id,
+        oldValues: {
+          status: current.mark.status,
+          enrollmentId: current.enrollmentId,
+          lapNumber: current.mark.lapNumber,
+          officialAt: current.mark.officialAt.toISOString(),
+          officialElapsedMs: current.mark.officialElapsedMs,
+        },
+        newValues: { status: 'CANCELLED', lapNumber: null },
+        reason,
+      });
+      return updated;
+    });
+    return toPassView(cancelled);
+  }
+
+  /**
+   * `POST /events/:eventId/timing/passes/:passId/rebind`: move one bound pass
+   * to another frozen participant of the same running attempt (F-20, U-30).
+   *
+   * Both participants' lap numbers are rewritten in the same transaction, so a
+   * failed rebind changes neither participant's laps. Administrator only, no
+   * clock and no receipt.
+   */
+  async rebindPass(
+    authentikId: string | undefined,
+    eventId: string,
+    passId: string,
+    dto: RebindTimingPassDto,
+  ): Promise<TimingPassView> {
+    await this.rolesService.assertHasAnyRole(authentikId, [
+      RoleCode.ADMINISTRATOR,
+    ]);
+    const reason = normalizeReason(dto.reason);
+    await this.loadPassContext(passId, eventId);
+    const actorUserId = await this.requireUserId(authentikId);
+
+    return this.repository.withTransaction(async (tx) => {
+      const current = await this.loadPassContext(passId, eventId, tx);
+      await this.assertTimingChangeAllowed(current.attempt, 'PASS_EDIT', tx);
+      if (dto.targetEnrollmentId === current.enrollmentId) {
+        throw timingError(
+          TimingErrorCode.INVALID_STATE,
+          'The pass already belongs to that participant.',
+          { passId, enrollmentId: current.enrollmentId },
+        );
+      }
+      const target = await this.repository.findParticipant(
+        current.attempt.id,
+        dto.targetEnrollmentId,
+        tx,
+      );
+      if (target === null) {
+        throw timingError(
+          TimingErrorCode.NOT_FOUND,
+          'The enrollment is not a frozen participant of this attempt.',
+          {
+            attemptId: current.attempt.id,
+            enrollmentId: dto.targetEnrollmentId,
+          },
+        );
+      }
+      const marks = await this.repository.listMarks(current.attempt.id, tx);
+      // The moved pass belongs to the source participant until the update, so
+      // the target count already answers "below N after the source pass leaves".
+      assertCaptureEligible(target, boundPassCount(marks, target.enrollmentId));
+
+      const moved = await this.repository.updateMark(tx, current.mark.id, {
+        enrollmentId: target.enrollmentId,
+        registrationId: target.registrationId,
+        startNumber: target.startNumber,
+      });
+      await this.renumberParticipantLaps(
+        tx,
+        current.attempt.id,
+        current.enrollmentId,
+      );
+      const destination = await this.renumberParticipantLaps(
+        tx,
+        current.attempt.id,
+        target.enrollmentId,
+      );
+      const applied = destination.get(moved.id) ?? moved;
+      await this.repository.insertAudit(tx, {
+        attemptId: current.attempt.id,
+        actorUserId,
+        action: 'PASS_REBIND',
+        targetType: 'PASS',
+        targetId: current.mark.id,
+        oldValues: {
+          enrollmentId: current.enrollmentId,
+          registrationId: current.mark.registrationId,
+          startNumber: current.mark.startNumber,
+          lapNumber: current.mark.lapNumber,
+          officialAt: current.mark.officialAt.toISOString(),
+          officialElapsedMs: current.mark.officialElapsedMs,
+        },
+        newValues: {
+          enrollmentId: target.enrollmentId,
+          registrationId: target.registrationId,
+          startNumber: target.startNumber,
+          lapNumber: applied.lapNumber,
+        },
+        reason,
+      });
+      return toPassView(applied);
+    });
+  }
+
+  /**
+   * One bound pass of the event and the attempt it belongs to. The mark must be
+   * a `PASS`; its state is read separately by the caller, so a correction after
+   * closure can still address it while a cancellation cannot.
+   */
+  private async loadPassContext(
+    passId: string,
+    eventId: string,
+    tx?: TimingTx,
+  ): Promise<BoundPassContext> {
+    const mark = await this.repository.findMark(passId, tx);
+    if (mark === null) {
+      throw timingError(TimingErrorCode.NOT_FOUND, 'Pass not found.', {
+        passId,
+      });
+    }
+    if (mark.kind !== 'PASS') {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'The addressed mark is not a pass.',
+        { passId, kind: mark.kind },
+      );
+    }
+    const attempt = await this.loadAttemptForEvent(mark.attemptId, eventId, tx);
+    if (mark.status !== 'BOUND' || mark.enrollmentId === null) {
+      throw timingError(
+        TimingErrorCode.INVALID_STATE,
+        'The pass is no longer a bound pass.',
+        { passId, status: mark.status, enrollmentId: mark.enrollmentId },
+      );
+    }
+    return { mark, enrollmentId: mark.enrollmentId, attempt };
+  }
+
+  /** One attempt that must belong to the addressed event. */
+  private async loadAttemptForEvent(
+    attemptId: string,
+    eventId: string,
+    tx?: TimingTx,
+  ): Promise<TimingAttemptRow> {
+    const attempt = await this.repository.findAttempt(attemptId, tx);
+    if (attempt === null) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'Timing attempt not found.',
+        { attemptId },
+      );
+    }
+    if (attempt.eventId !== eventId) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'The timing attempt belongs to another event.',
+        { attemptId, eventId },
+      );
+    }
+    return attempt;
+  }
+
+  /**
+   * E-15, E-16, F-17: the category finish and the attempt state refuse a
+   * correction, a rebind or a cancellation before any write.
+   */
+  private async assertTimingChangeAllowed(
+    attempt: TimingAttemptRow,
+    change: 'CORRECTION' | 'PASS_EDIT',
+    tx?: TimingTx,
+  ): Promise<void> {
+    const categoryFinished = await this.repository.isCategoryFinished(
+      attempt.eventId,
+      attempt.startId,
+      attempt.formatId,
+      attempt.gender,
+      tx,
+    );
+    const context = {
+      attemptStatus: attempt.status,
+      categoryFinished,
+    };
+    const refusal =
+      change === 'CORRECTION'
+        ? canCorrectOfficialTime(context)
+        : canRebindOrCancelPass(context);
+    if (refusal === null) {
+      return;
+    }
+    if (refusal === TimingErrorCode.CATEGORY_FINISHED) {
+      throw timingError(refusal, CATEGORY_FINISHED_MESSAGE, {
+        attemptId: attempt.id,
+      });
+    }
+    if (refusal === TimingErrorCode.ATTEMPT_CLOSED) {
+      throw timingError(
+        refusal,
+        'A pass rebind or a pass cancellation requires a running attempt.',
+        { attemptId: attempt.id, status: attempt.status },
+      );
+    }
+    throw timingError(
+      refusal,
+      'A cancelled attempt accepts no timing change.',
+      {
+        attemptId: attempt.id,
+        status: attempt.status,
+      },
+    );
+  }
+
+  /** A `PASS` correction: one official instant, its lap order and publication. */
+  private async correctPassTime(
+    actorUserId: string,
+    eventId: string,
+    passId: string,
+    officialAt: Date,
+    reason: string,
+  ): Promise<TimingPassView> {
+    const { mark, attempt } = await this.loadPassContext(passId, eventId);
+    await this.assertTimingChangeAllowed(attempt, 'CORRECTION');
+    if (mark.enrollmentId === null) {
+      throw timingError(
+        TimingErrorCode.INVALID_STATE,
+        'The pass names no participant.',
+        { passId },
+      );
+    }
+    const participant = await this.repository.findParticipant(
+      attempt.id,
+      mark.enrollmentId,
+    );
+    if (participant === null) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'The pass names no frozen participant of its attempt.',
+        { passId, enrollmentId: mark.enrollmentId },
+      );
+    }
+
+    return this.repository.withTransaction(async (tx) => {
+      const current = await this.loadPassContext(passId, eventId, tx);
+      await this.assertTimingChangeAllowed(current.attempt, 'CORRECTION', tx);
+      assertWithinBounds(current.attempt.officialStartedAt, officialAt);
+      const officialElapsedMs = resolveElapsedMs(
+        officialAt,
+        current.attempt.officialStartedAt,
+      );
+      const marks = await this.repository.listMarks(current.attempt.id, tx);
+      const projected = marks.map((row) =>
+        row.id === current.mark.id
+          ? { ...row, officialAt, officialElapsedMs }
+          : row,
+      );
+      // Publication only exists after closure; a running attempt republishes
+      // nothing, because nothing of it is published yet.
+      const plan =
+        current.attempt.status === 'COMPLETED' ||
+        current.attempt.status === 'INCOMPLETE'
+          ? await this.planRepublish(
+              tx,
+              current.attempt,
+              participant.enrollmentId,
+              projected,
+            )
+          : null;
+
+      const updated = await this.repository.updateMark(tx, current.mark.id, {
+        officialAt,
+        officialElapsedMs,
+      });
+      const applied = await this.reindexLaps(
+        tx,
+        current.attempt.id,
+        participant.enrollmentId,
+        marks,
+        updated,
+      );
+      if (plan !== null) {
+        await this.applyRepublish(tx, current.attempt.id, plan);
+      }
+      await this.repository.insertAudit(tx, {
+        attemptId: current.attempt.id,
+        actorUserId,
+        action: 'OFFICIAL_TIME_CORRECT',
+        targetType: 'PASS',
+        targetId: current.mark.id,
+        oldValues: {
+          enrollmentId: current.mark.enrollmentId,
+          officialAt: current.mark.officialAt.toISOString(),
+          officialElapsedMs: current.mark.officialElapsedMs,
+          lapNumber: current.mark.lapNumber,
+        },
+        newValues: {
+          enrollmentId: current.mark.enrollmentId,
+          officialAt: officialAt.toISOString(),
+          officialElapsedMs,
+          lapNumber: applied.lapNumber,
+          republished: plan !== null,
+        },
+        reason,
+      });
+      return toPassView(applied);
+    });
+  }
+
+  /**
+   * A `START` correction: every mark of the attempt keeps its official instant
+   * and gains the shifted elapsed value; no other attempt moves (E-16).
+   */
+  private async correctStartTime(
+    actorUserId: string,
+    eventId: string,
+    attemptId: string,
+    officialAt: Date,
+    reason: string,
+  ): Promise<TimingAttemptRef> {
+    const attempt = await this.loadAttemptForEvent(attemptId, eventId);
+    await this.assertTimingChangeAllowed(attempt, 'CORRECTION');
+    const now = new Date();
+
+    return this.repository.withTransaction(async (tx) => {
+      const current = await this.loadAttemptForEvent(attemptId, eventId, tx);
+      await this.assertTimingChangeAllowed(current, 'CORRECTION', tx);
+      const marks = await this.repository.listMarks(current.id, tx);
+      // F-15: a start that reaches a mark leaves an elapsed value at or below
+      // zero. Every bound is checked before the first write.
+      const projected = marks.map((mark) => {
+        assertWithinBounds(officialAt, mark.officialAt);
+        return {
+          ...mark,
+          officialElapsedMs: resolveElapsedMs(mark.officialAt, officialAt),
+        };
+      });
+      const shiftedAttempt: TimingAttemptRow = {
+        ...current,
+        officialStartedAt: officialAt,
+      };
+      const participants = await this.repository.listParticipants(
+        current.id,
+        tx,
+      );
+      const plans: RepublishPlan[] = [];
+      for (const participant of participants) {
+        const plan = await this.planRepublish(
+          tx,
+          shiftedAttempt,
+          participant.enrollmentId,
+          projected,
+        );
+        if (plan !== null) {
+          plans.push(plan);
+        }
+      }
+
+      const updated = await this.repository.updateAttemptOfficialStart(
+        tx,
+        current.id,
+        officialAt,
+      );
+      let changedMarkCount = 0;
+      for (const [index, mark] of marks.entries()) {
+        const next = projected[index];
+        if (next.officialElapsedMs === mark.officialElapsedMs) {
+          continue;
+        }
+        await this.repository.updateMark(tx, mark.id, {
+          officialElapsedMs: next.officialElapsedMs,
+        });
+        changedMarkCount += 1;
+      }
+      // AD-2: a start correction re-anchors the running clock at the real
+      // elapsed value. Without a capture holder there is no open epoch to
+      // anchor, so any stale epoch is only closed.
+      let epoch: TimingClockEpochRow | null = null;
+      if (current.status === 'RUNNING') {
+        const lock = await this.repository.getCaptureLock(eventId, tx);
+        await this.repository.closeOpenEpochs(tx, current.id);
+        if (lock !== null) {
+          epoch = await this.repository.createClockEpoch(tx, {
+            attemptId: current.id,
+            workstationInstanceId: lock.workstationInstanceId,
+            officialElapsedAnchorMs: Math.max(
+              0,
+              resolveElapsedMs(now, officialAt),
+            ),
+            openedByUserId: actorUserId,
+            openedAt: now,
+          });
+        }
+      }
+      for (const plan of plans) {
+        await this.applyRepublish(tx, current.id, plan);
+      }
+      await this.repository.insertAudit(tx, {
+        attemptId: current.id,
+        actorUserId,
+        action: 'START_CORRECT',
+        targetType: 'ATTEMPT',
+        targetId: current.id,
+        oldValues: {
+          officialStartedAt: current.officialStartedAt.toISOString(),
+        },
+        newValues: {
+          officialStartedAt: officialAt.toISOString(),
+          changedMarkCount,
+          clockEpochId: epoch?.id ?? null,
+          officialElapsedAnchorMs: epoch?.officialElapsedAnchorMs ?? null,
+          republishedEnrollmentIds: plans.map((plan) => plan.enrollmentId),
+        },
+        reason,
+      });
+      return toAttemptRef(updated);
+    });
+  }
+
+  /**
+   * The publication a correction republishes. A result is timing-owned only
+   * when it names this attempt as `timingSessionId`; a hand-entered result or a
+   * result of another attempt is never overwritten.
+   */
+  private async planRepublish(
+    tx: TimingTx,
+    attempt: TimingAttemptRow,
+    enrollmentId: string,
+    marks: readonly TimingMarkRow[],
+  ): Promise<RepublishPlan | null> {
+    const result = await this.repository.findResultByEnrollment(
+      enrollmentId,
+      tx,
+    );
+    if (
+      result === null ||
+      result.timingSessionId !== attempt.id ||
+      result.outcome !== 'FINISHED'
+    ) {
+      return null;
+    }
+    const passes = marks
+      .filter(
+        (mark) =>
+          mark.status === 'BOUND' &&
+          mark.kind === 'PASS' &&
+          mark.enrollmentId === enrollmentId,
+      )
+      .map((mark) => ({ passId: mark.id, officialAt: mark.officialAt }));
+    if (passes.length === 0) {
+      return null;
+    }
+    const splits = computeSplits(attempt.officialStartedAt, passes);
+    return {
+      enrollmentId,
+      registrationId: result.registrationId,
+      totalMs: splits[splits.length - 1].cumulativeMs,
+      splits,
+    };
+  }
+
+  /** Rewrites a timing-owned result with the corrected total and split set. */
+  private async applyRepublish(
+    tx: TimingTx,
+    attemptId: string,
+    plan: RepublishPlan,
+  ): Promise<void> {
+    const published = await this.repository.publishResult(tx, {
+      enrollmentId: plan.enrollmentId,
+      registrationId: plan.registrationId,
+      outcome: 'FINISHED',
+      timeMilliseconds: plan.totalMs,
+      timingSessionId: attemptId,
+    });
+    await this.repository.replaceResultSplits(tx, published.id, plan.splits);
+  }
+
+  /** Rewrites one participant's bound lap numbers in official-instant order. */
+  private async renumberParticipantLaps(
+    tx: TimingTx,
+    attemptId: string,
+    enrollmentId: string,
+  ): Promise<Map<string, TimingMarkRow>> {
+    const marks = await this.repository.listParticipantMarks(
+      attemptId,
+      enrollmentId,
+      tx,
+    );
+    const passes = new Map<string, TimingMarkRow>();
+    for (const mark of marks) {
+      if (mark.status === 'BOUND') {
+        passes.set(mark.id, mark);
+      }
+    }
+    return this.writeLapNumbers(tx, passes);
   }
 
   /**

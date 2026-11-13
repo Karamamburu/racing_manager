@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Req,
   UseFilters,
@@ -22,9 +23,12 @@ import { SessionAuthGuard } from '../auth/session-auth.guard';
 import {
   BindPendingFinishDto,
   CancelPendingFinishDto,
+  CancelTimingPassDto,
   CaptureTimingPassDto,
+  CorrectOfficialTimeDto,
   OpenClockEpochDto,
   QuickUndoTimingPassDto,
+  RebindTimingPassDto,
   StartTimingAttemptDto,
 } from './timing.dto';
 import { TimingExceptionFilter } from './timing.exception.filter';
@@ -33,6 +37,7 @@ import type {
   ClockEpochView,
   StartTimingAttemptResult,
   TimingAttemptRecordView,
+  TimingAttemptRef,
   TimingPassView,
   TimingSurfaceView,
 } from './timing.views';
@@ -171,6 +176,71 @@ export class TimingController {
       req.session?.userSub,
       eventId,
       pendingFinishId,
+      dto,
+    );
+  }
+
+  /**
+   * `PATCH /events/:eventId/timing/passes/:passId/official-time`: an
+   * administrator moves one official start or pass instant with a reason. The
+   * response is a pass view for a pass target and the attempt reference for a
+   * start target.
+   */
+  @Patch('passes/:passId/official-time')
+  @HttpCode(HttpStatus.OK)
+  @Roles(RoleCode.ADMINISTRATOR)
+  correctOfficialTime(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('passId', new ParseUUIDPipe({ version: '4' })) passId: string,
+    @Body() dto: CorrectOfficialTimeDto,
+  ): Promise<TimingPassView | TimingAttemptRef> {
+    return this.timingService.correctOfficialTime(
+      req.session?.userSub,
+      eventId,
+      passId,
+      dto,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/passes/:passId/cancel`: an administrator
+   * soft-cancels one bound pass with a reason.
+   */
+  @Post('passes/:passId/cancel')
+  @HttpCode(HttpStatus.OK)
+  @Roles(RoleCode.ADMINISTRATOR)
+  cancelPass(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('passId', new ParseUUIDPipe({ version: '4' })) passId: string,
+    @Body() dto: CancelTimingPassDto,
+  ): Promise<TimingPassView> {
+    return this.timingService.cancelPass(
+      req.session?.userSub,
+      eventId,
+      passId,
+      dto,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/passes/:passId/rebind`: an administrator
+   * moves one bound pass to another frozen participant of the same attempt.
+   */
+  @Post('passes/:passId/rebind')
+  @HttpCode(HttpStatus.OK)
+  @Roles(RoleCode.ADMINISTRATOR)
+  rebindPass(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('passId', new ParseUUIDPipe({ version: '4' })) passId: string,
+    @Body() dto: RebindTimingPassDto,
+  ): Promise<TimingPassView> {
+    return this.timingService.rebindPass(
+      req.session?.userSub,
+      eventId,
+      passId,
       dto,
     );
   }

@@ -1131,6 +1131,23 @@ export class TimingRepository {
     return toAttemptRow(row);
   }
 
+  /**
+   * Moves the attempt's official start. The raw client press stays untouched:
+   * only the official side of the timeline is correctable.
+   */
+  async updateAttemptOfficialStart(
+    tx: TimingTx,
+    attemptId: string,
+    officialStartedAt: Date,
+  ): Promise<TimingAttemptRow> {
+    const row = await tx.timingSession.update({
+      where: { id: attemptId },
+      data: { officialStartedAt },
+      select: ATTEMPT_SELECT,
+    });
+    return toAttemptRow(row);
+  }
+
   async listParticipants(
     attemptId: string,
     tx?: TimingTx,
@@ -1200,6 +1217,24 @@ export class TimingRepository {
   async listMarks(attemptId: string, tx?: TimingTx): Promise<TimingMarkRow[]> {
     const rows = await this.db(tx).timingMark.findMany({
       where: { sessionId: attemptId },
+      select: MARK_SELECT,
+      orderBy: [{ officialAt: 'asc' }, { id: 'asc' }],
+    });
+    return rows.map(toMarkRow);
+  }
+
+  /**
+   * One participant's marks in official-instant order, tie-broken by id. A
+   * correction rewrites lap numbers per participant, so it reads exactly the
+   * rows it may renumber.
+   */
+  async listParticipantMarks(
+    attemptId: string,
+    enrollmentId: string,
+    tx?: TimingTx,
+  ): Promise<TimingMarkRow[]> {
+    const rows = await this.db(tx).timingMark.findMany({
+      where: { sessionId: attemptId, enrollmentId },
       select: MARK_SELECT,
       orderBy: [{ officialAt: 'asc' }, { id: 'asc' }],
     });

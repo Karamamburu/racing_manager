@@ -5,7 +5,10 @@ import type {
   BindPendingFinishDto,
   CaptureTimingPassDto,
   CancelPendingFinishDto,
+  CancelTimingPassDto,
+  CorrectOfficialTimeDto,
   QuickUndoTimingPassDto,
+  RebindTimingPassDto,
 } from './timing.dto';
 import { TimingErrorCode, TimingDomainError } from './timing.errors';
 import type {
@@ -14,6 +17,7 @@ import type {
   CreateMarkInput,
   CreateReceiptInput,
   InsertAuditInput,
+  PublishResultInput,
   TimingAgeCategoryRow,
   TimingAgeSectionRow,
   TimingAttemptRow,
@@ -29,6 +33,7 @@ import type {
   TimingParticipantRow,
   TimingPublishedResultRow,
   TimingReceiptRow,
+  TimingResultRow,
   TimingRoutingCandidateRow,
   TimingStartRow,
   UpdateMarkInput,
@@ -116,6 +121,17 @@ function createRepositoryFake() {
       (): Promise<TimingPublishedResultRow[]> => Promise.resolve([]),
     ),
     listAudit: jest.fn((): Promise<TimingAuditRow[]> => Promise.resolve([])),
+    listParticipants: jest.fn(
+      (): Promise<TimingParticipantRow[]> => Promise.resolve([]),
+    ),
+    listParticipantMarks: jest.fn<Promise<TimingMarkRow[]>, [string, string]>(
+      () => Promise.resolve([]),
+    ),
+    findResultByEnrollment: jest.fn(
+      (): Promise<TimingResultRow | null> => Promise.resolve(null),
+    ),
+    publishResult: jest.fn(),
+    replaceResultSplits: jest.fn(),
     getCaptureLock: jest.fn(
       (): Promise<TimingCaptureLockRow | null> => Promise.resolve(null),
     ),
@@ -126,6 +142,7 @@ function createRepositoryFake() {
     closeOpenEpochs: jest.fn((): Promise<number> => Promise.resolve(0)),
     createMark: jest.fn(),
     updateMark: jest.fn(),
+    updateAttemptOfficialStart: jest.fn(),
     findReceipt: jest.fn(
       (): Promise<TimingReceiptRow | null> => Promise.resolve(null),
     ),
@@ -459,6 +476,51 @@ function capturePassDto(
     clockEpochId: 'epoch-1',
     workstationInstanceId: WORKSTATION,
     deviceSequence: 1,
+    ...overrides,
+  };
+}
+
+function correctDto(
+  overrides: Partial<CorrectOfficialTimeDto> = {},
+): CorrectOfficialTimeDto {
+  return {
+    targetType: 'PASS',
+    targetId: 'mark-1',
+    officialAt: new Date(NOW.getTime() + 45_000).toISOString(),
+    reason: 'Ошибка секундомера',
+    ...overrides,
+  };
+}
+
+function cancelPassDto(
+  overrides: Partial<CancelTimingPassDto> = {},
+): CancelTimingPassDto {
+  return { reason: 'Лишний круг', ...overrides };
+}
+
+function rebindPassDto(
+  overrides: Partial<RebindTimingPassDto> = {},
+): RebindTimingPassDto {
+  return {
+    targetEnrollmentId: 'enrollment-b',
+    reason: 'Не тот участник',
+    ...overrides,
+  };
+}
+
+/** One authoritative result row; a timing-owned row names the attempt. */
+function resultRow(
+  overrides: Partial<TimingResultRow> & Pick<TimingResultRow, 'id'>,
+): TimingResultRow {
+  return {
+    enrollmentId: 'enrollment-a',
+    registrationId: 'registration-enrollment-a',
+    outcome: 'FINISHED',
+    timeMilliseconds: 90_000,
+    place: null,
+    recordedAt: NOW,
+    updatedAt: NOW,
+    timingSessionId: ATTEMPT_ID,
     ...overrides,
   };
 }
@@ -2916,6 +2978,726 @@ describe('TimingService', () => {
       expect(repository.createReceipt.mock.invocationCallOrder[0]).toBeLessThan(
         repository.insertAudit.mock.invocationCallOrder[0],
       );
+    });
+  });
+
+  describe('official-time corrections and pass edits', () => {
+    /** Marks of one participant at +30 s, +60 s and +90 s from the start. */
+    function threeLaps(): TimingMarkRow[] {
+      return [
+        markRow({
+          id: 'mark-1',
+          enrollmentId: 'enrollment-a',
+          lapNumber: 1,
+          officialAt: new Date(NOW.getTime() + 30_000),
+          officialElapsedMs: 30_000,
+        }),
+        markRow({
+          id: 'mark-2',
+          enrollmentId: 'enrollment-a',
+          lapNumber: 2,
+          officialAt: new Date(NOW.getTime() + 60_000),
+          officialElapsedMs: 60_000,
+        }),
+        markRow({
+          id: 'mark-3',
+          enrollmentId: 'enrollment-a',
+          lapNumber: 3,
+          officialAt: new Date(NOW.getTime() + 90_000),
+          officialElapsedMs: 90_000,
+        }),
+      ];
+    }
+
+    /**
+     * Wires the fake repository around one attempt, its marks, its frozen
+     * roster and the result a correction may republish. Every write mutates the
+     * returned mark store, so an assertion sees the record the service built.
+     */
+    function arrangeCorrection(
+      overrides: {
+        attempt?: TimingAttemptRow;
+        marks?: TimingMarkRow[];
+        participants?: TimingParticipantRow[];
+        result?: TimingResultRow | null;
+        categoryFinished?: boolean;
+        lock?: TimingCaptureLockRow | null;
+      } = {},
+    ): Map<string, TimingMarkRow> {
+      const attempt =
+        overrides.attempt ??
+        attemptRow({ id: ATTEMPT_ID, status: 'COMPLETED', closedAt: NOW });
+      const participants = overrides.participants ?? [];
+      const markStore = new Map(
+        (overrides.marks ?? []).map((mark) => [mark.id, mark]),
+      );
+      repository.findAttempt.mockResolvedValue(attempt);
+      repository.isCategoryFinished.mockResolvedValue(
+        overrides.categoryFinished ?? false,
+      );
+      repository.findMark.mockImplementation((markId: string) =>
+        Promise.resolve(markStore.get(markId) ?? null),
+      );
+      repository.listMarks.mockImplementation(() =>
+        Promise.resolve([...markStore.values()]),
+      );
+      repository.listParticipantMarks.mockImplementation(
+        (_attemptId: string, enrollmentId: string) =>
+          Promise.resolve(
+            [...markStore.values()].filter(
+              (mark) => mark.enrollmentId === enrollmentId,
+            ),
+          ),
+      );
+      repository.listParticipants.mockResolvedValue(participants);
+      repository.findParticipant.mockImplementation(
+        (_attemptId: string, enrollmentId: string) =>
+          Promise.resolve(
+            participants.find((row) => row.enrollmentId === enrollmentId) ??
+              null,
+          ),
+      );
+      repository.updateMark.mockImplementation(
+        (_tx: unknown, markId: string, input: UpdateMarkInput) => {
+          const current = markStore.get(markId) ?? markRow({ id: markId });
+          const updated = applyMarkUpdate(current, input);
+          markStore.set(markId, updated);
+          return Promise.resolve(updated);
+        },
+      );
+      repository.findResultByEnrollment.mockResolvedValue(
+        overrides.result ?? null,
+      );
+      repository.publishResult.mockImplementation(
+        (_tx: unknown, input: PublishResultInput) =>
+          Promise.resolve(
+            resultRow({
+              id: 'result-1',
+              enrollmentId: input.enrollmentId,
+              registrationId: input.registrationId,
+              outcome: input.outcome,
+              timeMilliseconds: input.timeMilliseconds,
+              timingSessionId: input.timingSessionId,
+            }),
+          ),
+      );
+      repository.updateAttemptOfficialStart.mockImplementation(
+        (_tx: unknown, _attemptId: string, officialStartedAt: Date) =>
+          Promise.resolve({ ...attempt, officialStartedAt }),
+      );
+      repository.getCaptureLock.mockResolvedValue(overrides.lock ?? null);
+      repository.createClockEpoch.mockImplementation(
+        (_tx: unknown, input: CreateClockEpochInput) =>
+          Promise.resolve(
+            clockEpochRow({
+              id: 'epoch-2',
+              attemptId: input.attemptId,
+              workstationInstanceId: input.workstationInstanceId,
+              officialElapsedAnchorMs: input.officialElapsedAnchorMs,
+              openedAt: input.openedAt ?? NOW,
+            }),
+          ),
+      );
+      repository.insertAudit.mockImplementation(
+        (_tx: unknown, input: InsertAuditInput) =>
+          Promise.resolve({
+            auditId: 'audit-1',
+            actorUserId: input.actorUserId,
+            action: input.action,
+            targetType: input.targetType,
+            targetId: input.targetId,
+            oldValues: null,
+            newValues: null,
+            reason: input.reason,
+            createdAt: NOW,
+          }),
+      );
+      return markStore;
+    }
+
+    /** The lap-number writes of `updateMark`, in call order. */
+    function lapWrites(): Array<{ markId: string; lapNumber: number }> {
+      return repository.updateMark.mock.calls
+        .map(([, markId, input]) => ({
+          markId: markId as string,
+          lapNumber: (input as UpdateMarkInput).lapNumber,
+        }))
+        .filter(
+          (row): row is { markId: string; lapNumber: number } =>
+            typeof row.lapNumber === 'number' && row.lapNumber > 0,
+        );
+    }
+
+    it('moves a pass official time, renumbers its laps and republishes total and splits', async () => {
+      arrangeCorrection({
+        marks: threeLaps(),
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        result: resultRow({ id: 'result-a' }),
+      });
+      const correctedAt = new Date(NOW.getTime() + 100_000);
+
+      const pass = await service.correctOfficialTime(
+        USER_ID,
+        EVENT_ID,
+        'mark-1',
+        correctDto({
+          targetType: 'PASS',
+          targetId: 'mark-1',
+          officialAt: correctedAt.toISOString(),
+          reason: '  Ошибка секундомера  ',
+        }),
+      );
+
+      expect(roles.assertHasAnyRole).toHaveBeenCalledWith(USER_ID, [
+        RoleCode.ADMINISTRATOR,
+      ]);
+      expect(repository.updateMark).toHaveBeenCalledWith(TX, 'mark-1', {
+        officialAt: correctedAt,
+        officialElapsedMs: 100_000,
+      });
+      // U-14: laps follow the official instant, not the capture order.
+      expect(lapWrites()).toEqual([
+        { markId: 'mark-2', lapNumber: 1 },
+        { markId: 'mark-3', lapNumber: 2 },
+        { markId: 'mark-1', lapNumber: 3 },
+      ]);
+      const [, publishInput] = callArguments<[unknown, PublishResultInput]>(
+        repository.publishResult,
+      );
+      expect(publishInput).toEqual({
+        enrollmentId: 'enrollment-a',
+        registrationId: 'registration-enrollment-a',
+        outcome: 'FINISHED',
+        timeMilliseconds: 100_000,
+        timingSessionId: ATTEMPT_ID,
+      });
+      expect(repository.replaceResultSplits).toHaveBeenCalledWith(
+        TX,
+        'result-1',
+        [
+          { lapNumber: 1, lapTimeMs: 60_000, cumulativeMs: 60_000 },
+          { lapNumber: 2, lapTimeMs: 30_000, cumulativeMs: 90_000 },
+          { lapNumber: 3, lapTimeMs: 10_000, cumulativeMs: 100_000 },
+        ],
+      );
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        attemptId: ATTEMPT_ID,
+        actorUserId: USER_ID,
+        action: 'OFFICIAL_TIME_CORRECT',
+        targetType: 'PASS',
+        targetId: 'mark-1',
+        reason: 'Ошибка секундомера',
+        oldValues: {
+          enrollmentId: 'enrollment-a',
+          officialAt: new Date(NOW.getTime() + 30_000).toISOString(),
+          officialElapsedMs: 30_000,
+          lapNumber: 1,
+        },
+        newValues: {
+          enrollmentId: 'enrollment-a',
+          officialAt: correctedAt.toISOString(),
+          officialElapsedMs: 100_000,
+          lapNumber: 3,
+          republished: true,
+        },
+      });
+      expect(pass).toMatchObject({
+        passId: 'mark-1',
+        enrollmentId: 'enrollment-a',
+        officialAt: correctedAt.toISOString(),
+        officialElapsedMs: 100_000,
+        lapNumber: 3,
+        status: 'BOUND',
+      });
+      // An administrator correction is not a workstation capture.
+      expect(repository.findReceipt).not.toHaveBeenCalled();
+      expect(repository.createReceipt).not.toHaveBeenCalled();
+    });
+
+    it('shifts every elapsed value of a start correction and re-anchors a new epoch', async () => {
+      arrangeCorrection({
+        attempt: attemptRow({ id: ATTEMPT_ID, status: 'RUNNING' }),
+        marks: threeLaps(),
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        lock: lockRow(),
+      });
+      const newStart = new Date(NOW.getTime() + 5_000);
+
+      const ref = await service.correctOfficialTime(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        correctDto({
+          targetType: 'START',
+          targetId: ATTEMPT_ID,
+          officialAt: newStart.toISOString(),
+          reason: 'Неточный старт',
+        }),
+      );
+
+      expect(repository.updateAttemptOfficialStart).toHaveBeenCalledWith(
+        TX,
+        ATTEMPT_ID,
+        newStart,
+      );
+      const elapsedWrites = repository.updateMark.mock.calls
+        .map(([, markId, input]) => ({
+          markId: markId as string,
+          officialElapsedMs: (input as UpdateMarkInput).officialElapsedMs,
+        }))
+        .filter((row) => row.officialElapsedMs !== undefined);
+      expect(elapsedWrites).toEqual([
+        { markId: 'mark-1', officialElapsedMs: 25_000 },
+        { markId: 'mark-2', officialElapsedMs: 55_000 },
+        { markId: 'mark-3', officialElapsedMs: 85_000 },
+      ]);
+      expect(repository.closeOpenEpochs).toHaveBeenCalledWith(TX, ATTEMPT_ID);
+      // The corrected start is in the future of the fake clock, so the anchor
+      // clamps to zero instead of going negative.
+      expect(repository.createClockEpoch).toHaveBeenCalledWith(TX, {
+        attemptId: ATTEMPT_ID,
+        workstationInstanceId: WORKSTATION,
+        officialElapsedAnchorMs: 0,
+        openedByUserId: USER_ID,
+        openedAt: NOW,
+      });
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        attemptId: ATTEMPT_ID,
+        action: 'START_CORRECT',
+        targetType: 'ATTEMPT',
+        targetId: ATTEMPT_ID,
+        reason: 'Неточный старт',
+        oldValues: { officialStartedAt: NOW.toISOString() },
+        newValues: {
+          officialStartedAt: newStart.toISOString(),
+          changedMarkCount: 3,
+          clockEpochId: 'epoch-2',
+          officialElapsedAnchorMs: 0,
+          republishedEnrollmentIds: [],
+        },
+      });
+      expect(repository.publishResult).not.toHaveBeenCalled();
+      expect(ref).toEqual({
+        attemptId: ATTEMPT_ID,
+        state: 'RUNNING',
+        officialStartedAt: newStart.toISOString(),
+      });
+    });
+
+    it('republishes a timing-owned result of the attempt after a start correction', async () => {
+      arrangeCorrection({
+        attempt: attemptRow({
+          id: ATTEMPT_ID,
+          status: 'COMPLETED',
+          closedAt: NOW,
+        }),
+        marks: threeLaps(),
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        result: resultRow({ id: 'result-a' }),
+      });
+      const newStart = new Date(NOW.getTime() + 5_000);
+
+      await service.correctOfficialTime(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        correctDto({
+          targetType: 'START',
+          targetId: ATTEMPT_ID,
+          officialAt: newStart.toISOString(),
+        }),
+      );
+
+      const [, publishInput] = callArguments<[unknown, PublishResultInput]>(
+        repository.publishResult,
+      );
+      expect(publishInput).toMatchObject({
+        enrollmentId: 'enrollment-a',
+        outcome: 'FINISHED',
+        timeMilliseconds: 85_000,
+        timingSessionId: ATTEMPT_ID,
+      });
+      expect(repository.replaceResultSplits).toHaveBeenCalledWith(
+        TX,
+        'result-1',
+        [
+          { lapNumber: 1, lapTimeMs: 25_000, cumulativeMs: 25_000 },
+          { lapNumber: 2, lapTimeMs: 30_000, cumulativeMs: 55_000 },
+          { lapNumber: 3, lapTimeMs: 30_000, cumulativeMs: 85_000 },
+        ],
+      );
+    });
+
+    it('refuses a correction outside the bounds and changes nothing', async () => {
+      arrangeCorrection({
+        marks: threeLaps(),
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+      });
+
+      await expect(
+        service.correctOfficialTime(
+          USER_ID,
+          EVENT_ID,
+          'mark-1',
+          correctDto({ targetId: 'mark-1', officialAt: NOW.toISOString() }),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.OUT_OF_BOUNDS });
+
+      const newStart = new Date(NOW.getTime() + 40_000);
+      await expect(
+        service.correctOfficialTime(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          correctDto({
+            targetType: 'START',
+            targetId: ATTEMPT_ID,
+            officialAt: newStart.toISOString(),
+          }),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.OUT_OF_BOUNDS });
+
+      expect(repository.updateMark).not.toHaveBeenCalled();
+      expect(repository.updateAttemptOfficialStart).not.toHaveBeenCalled();
+      expect(repository.closeOpenEpochs).not.toHaveBeenCalled();
+      expect(repository.publishResult).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('refuses every change when the protocol category is finished', async () => {
+      arrangeCorrection({
+        attempt: attemptRow({ id: ATTEMPT_ID, status: 'RUNNING' }),
+        marks: threeLaps(),
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        categoryFinished: true,
+      });
+
+      await expect(
+        service.correctOfficialTime(USER_ID, EVENT_ID, 'mark-1', correctDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.CATEGORY_FINISHED });
+      await expect(
+        service.cancelPass(USER_ID, EVENT_ID, 'mark-1', cancelPassDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.CATEGORY_FINISHED });
+      await expect(
+        service.rebindPass(USER_ID, EVENT_ID, 'mark-1', rebindPassDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.CATEGORY_FINISHED });
+
+      expect(repository.updateMark).not.toHaveBeenCalled();
+      expect(repository.updateAttemptOfficialStart).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('refuses every change to a cancelled attempt', async () => {
+      arrangeCorrection({
+        attempt: attemptRow({ id: ATTEMPT_ID, status: 'CANCELLED' }),
+        marks: threeLaps(),
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+      });
+
+      await expect(
+        service.correctOfficialTime(USER_ID, EVENT_ID, 'mark-1', correctDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.INVALID_STATE });
+      await expect(
+        service.cancelPass(USER_ID, EVENT_ID, 'mark-1', cancelPassDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.INVALID_STATE });
+      await expect(
+        service.rebindPass(USER_ID, EVENT_ID, 'mark-1', rebindPassDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.INVALID_STATE });
+
+      expect(repository.updateMark).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('refuses a rebind or a cancellation after closure', async () => {
+      arrangeCorrection({
+        attempt: attemptRow({
+          id: ATTEMPT_ID,
+          status: 'COMPLETED',
+          closedAt: NOW,
+        }),
+        marks: threeLaps(),
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+      });
+
+      await expect(
+        service.cancelPass(USER_ID, EVENT_ID, 'mark-1', cancelPassDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.ATTEMPT_CLOSED });
+      await expect(
+        service.rebindPass(USER_ID, EVENT_ID, 'mark-1', rebindPassDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.ATTEMPT_CLOSED });
+
+      expect(repository.updateMark).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('soft-cancels a bound pass and renumbers the remaining laps', async () => {
+      arrangeCorrection({
+        attempt: attemptRow({ id: ATTEMPT_ID, status: 'RUNNING' }),
+        marks: threeLaps(),
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+      });
+
+      const pass = await service.cancelPass(
+        USER_ID,
+        EVENT_ID,
+        'mark-1',
+        cancelPassDto(),
+      );
+
+      expect(roles.assertHasAnyRole).toHaveBeenCalledWith(USER_ID, [
+        RoleCode.ADMINISTRATOR,
+      ]);
+      expect(repository.updateMark).toHaveBeenCalledWith(TX, 'mark-1', {
+        status: 'CANCELLED',
+        lapNumber: null,
+      });
+      expect(lapWrites()).toEqual([
+        { markId: 'mark-2', lapNumber: 1 },
+        { markId: 'mark-3', lapNumber: 2 },
+      ]);
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        action: 'PASS_CANCEL',
+        targetType: 'PASS',
+        targetId: 'mark-1',
+        reason: 'Лишний круг',
+        oldValues: {
+          status: 'BOUND',
+          enrollmentId: 'enrollment-a',
+          lapNumber: 1,
+          officialAt: new Date(NOW.getTime() + 30_000).toISOString(),
+          officialElapsedMs: 30_000,
+        },
+        newValues: { status: 'CANCELLED', lapNumber: null },
+      });
+      expect(pass).toMatchObject({
+        passId: 'mark-1',
+        status: 'CANCELLED',
+        lapNumber: null,
+      });
+      expect(repository.findReceipt).not.toHaveBeenCalled();
+      expect(repository.createReceipt).not.toHaveBeenCalled();
+      expect(repository.getCaptureLock).not.toHaveBeenCalled();
+    });
+
+    it('moves one pass to another participant and renumbers both', async () => {
+      arrangeCorrection({
+        attempt: attemptRow({ id: ATTEMPT_ID, status: 'RUNNING' }),
+        marks: [
+          markRow({
+            id: 'mark-a1',
+            enrollmentId: 'enrollment-a',
+            lapNumber: 1,
+            officialAt: new Date(NOW.getTime() + 30_000),
+            officialElapsedMs: 30_000,
+          }),
+          markRow({
+            id: 'mark-a2',
+            enrollmentId: 'enrollment-a',
+            lapNumber: 2,
+            officialAt: new Date(NOW.getTime() + 60_000),
+            officialElapsedMs: 60_000,
+          }),
+          markRow({
+            id: 'mark-b1',
+            enrollmentId: 'enrollment-b',
+            registrationId: 'registration-enrollment-b',
+            startNumber: 11,
+            lapNumber: 1,
+            officialAt: new Date(NOW.getTime() + 70_000),
+            officialElapsedMs: 70_000,
+          }),
+        ],
+        participants: [
+          participantRow({ enrollmentId: 'enrollment-a', startNumber: 10 }),
+          participantRow({ enrollmentId: 'enrollment-b', startNumber: 11 }),
+        ],
+      });
+
+      const pass = await service.rebindPass(
+        USER_ID,
+        EVENT_ID,
+        'mark-a2',
+        rebindPassDto(),
+      );
+
+      expect(repository.updateMark).toHaveBeenCalledWith(TX, 'mark-a2', {
+        enrollmentId: 'enrollment-b',
+        registrationId: 'registration-enrollment-b',
+        startNumber: 11,
+      });
+      // Both participants are renumbered by official instant in one transaction.
+      expect(repository.listParticipantMarks).toHaveBeenCalledWith(
+        ATTEMPT_ID,
+        'enrollment-a',
+        TX,
+      );
+      expect(repository.listParticipantMarks).toHaveBeenCalledWith(
+        ATTEMPT_ID,
+        'enrollment-b',
+        TX,
+      );
+      expect(lapWrites()).toEqual([
+        { markId: 'mark-a2', lapNumber: 1 },
+        { markId: 'mark-b1', lapNumber: 2 },
+      ]);
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        action: 'PASS_REBIND',
+        targetType: 'PASS',
+        targetId: 'mark-a2',
+        reason: 'Не тот участник',
+        oldValues: {
+          enrollmentId: 'enrollment-a',
+          registrationId: 'registration-enrollment-a',
+          startNumber: 10,
+          lapNumber: 2,
+          officialAt: new Date(NOW.getTime() + 60_000).toISOString(),
+          officialElapsedMs: 60_000,
+        },
+        newValues: {
+          enrollmentId: 'enrollment-b',
+          registrationId: 'registration-enrollment-b',
+          startNumber: 11,
+          lapNumber: 1,
+        },
+      });
+      expect(pass).toMatchObject({
+        passId: 'mark-a2',
+        enrollmentId: 'enrollment-b',
+        lapNumber: 1,
+        status: 'BOUND',
+      });
+      expect(repository.publishResult).not.toHaveBeenCalled();
+      expect(repository.createReceipt).not.toHaveBeenCalled();
+    });
+
+    it('refuses a rebind across attempts, to an excluded participant or at N', async () => {
+      const attempt = attemptRow({ id: ATTEMPT_ID, status: 'RUNNING' });
+      const marks = threeLaps();
+      const source = participantRow({ enrollmentId: 'enrollment-a' });
+
+      arrangeCorrection({ attempt, marks, participants: [source] });
+      await expect(
+        service.rebindPass(
+          USER_ID,
+          EVENT_ID,
+          'mark-1',
+          rebindPassDto({ targetEnrollmentId: 'enrollment-other' }),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.NOT_FOUND });
+      expect(repository.updateMark).not.toHaveBeenCalled();
+
+      arrangeCorrection({
+        attempt,
+        marks,
+        participants: [
+          source,
+          participantRow({
+            enrollmentId: 'enrollment-b',
+            excludedReason: 'RACE_SECTION',
+          }),
+        ],
+      });
+      await expect(
+        service.rebindPass(USER_ID, EVENT_ID, 'mark-1', rebindPassDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.EXCLUDED_PARTICIPANT });
+      expect(repository.updateMark).not.toHaveBeenCalled();
+
+      arrangeCorrection({
+        attempt,
+        marks: [
+          markRow({ id: 'mark-a1', enrollmentId: 'enrollment-a' }),
+          markRow({
+            id: 'mark-b1',
+            enrollmentId: 'enrollment-b',
+            lapNumber: 1,
+          }),
+          markRow({
+            id: 'mark-b2',
+            enrollmentId: 'enrollment-b',
+            lapNumber: 2,
+          }),
+          markRow({
+            id: 'mark-b3',
+            enrollmentId: 'enrollment-b',
+            lapNumber: 3,
+          }),
+        ],
+        participants: [
+          source,
+          participantRow({ enrollmentId: 'enrollment-b' }),
+        ],
+      });
+      await expect(
+        service.rebindPass(USER_ID, EVENT_ID, 'mark-a1', rebindPassDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.ALREADY_N_PASSES });
+      expect(repository.updateMark).not.toHaveBeenCalled();
+      expect(repository.insertAudit).not.toHaveBeenCalled();
+    });
+
+    it('does not overwrite a hand-entered result after a pass correction', async () => {
+      arrangeCorrection({
+        marks: threeLaps(),
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        result: resultRow({ id: 'result-manual', timingSessionId: null }),
+      });
+
+      await service.correctOfficialTime(
+        USER_ID,
+        EVENT_ID,
+        'mark-1',
+        correctDto({ targetId: 'mark-1' }),
+      );
+
+      expect(repository.updateMark).toHaveBeenCalled();
+      expect(repository.publishResult).not.toHaveBeenCalled();
+      expect(repository.replaceResultSplits).not.toHaveBeenCalled();
+    });
+
+    it('refuses a blank reason for every administrative change', async () => {
+      arrangeCorrection({
+        attempt: attemptRow({ id: ATTEMPT_ID, status: 'RUNNING' }),
+        marks: threeLaps(),
+      });
+
+      await expect(
+        service.correctOfficialTime(
+          USER_ID,
+          EVENT_ID,
+          'mark-1',
+          correctDto({ reason: '   ' }),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.REASON_REQUIRED });
+      await expect(
+        service.cancelPass(
+          USER_ID,
+          EVENT_ID,
+          'mark-1',
+          cancelPassDto({ reason: ' ' }),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.REASON_REQUIRED });
+      await expect(
+        service.rebindPass(
+          USER_ID,
+          EVENT_ID,
+          'mark-1',
+          rebindPassDto({ reason: '' }),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.REASON_REQUIRED });
+
+      expect(repository.withTransaction).not.toHaveBeenCalled();
+      expect(repository.updateMark).not.toHaveBeenCalled();
     });
   });
 });
