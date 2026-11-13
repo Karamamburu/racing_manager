@@ -101,6 +101,17 @@ export function TimingCategoryBlock({
   const showsRecord = block.attemptId !== null && onOpenRecord !== undefined;
   const showsStart = showsStartControl(block);
   const isHeat = block.kind === 'HEAT';
+  // Race-captured participants are timeable in their heat blocks, not in the
+  // category attempt. Render them as one compact note instead of a wall of
+  // EXCLUDED RACE_SECTION tiles (MANUAL-TIMING-2 UX fix).
+  const raceSectionExcluded = block.participants.filter(
+    (participant) => participant.excludedReason === 'RACE_SECTION',
+  );
+  const visibleParticipants = block.participants.filter(
+    (participant) => participant.excludedReason !== 'RACE_SECTION',
+  );
+  const allInRaces =
+    visibleParticipants.length === 0 && raceSectionExcluded.length > 0;
   // A running block advances locally from its official start; a closed or
   // unstarted block keeps the surface value untouched (AD-19, O-04).
   const displayedElapsedMs = useElapsedClock({
@@ -169,10 +180,17 @@ export function TimingCategoryBlock({
               Время: {formatElapsed(displayedElapsedMs)}
             </Typography.Text>
           )}
-          <Typography.Text>Участники: {block.participants.length}</Typography.Text>
+          <Typography.Text>Участники: {visibleParticipants.length}</Typography.Text>
         </Space>
 
-        {block.blockReason ? (
+        {raceSectionExcluded.length > 0 ? (
+          <Typography.Text type="secondary">
+            В заездах гонки: {raceSectionExcluded.length}. Время фиксируется в
+            блоках заездов ниже.
+          </Typography.Text>
+        ) : null}
+
+        {block.blockReason && !allInRaces ? (
           <Alert type="warning" showIcon message={block.blockReason} />
         ) : null}
 
@@ -182,13 +200,15 @@ export function TimingCategoryBlock({
           </Tag>
         ) : null}
 
-        {block.participants.length === 0 ? (
+        {visibleParticipants.length === 0 ? (
           <Typography.Text type="secondary">
-            В категории нет участников для хронометража
+            {allInRaces
+              ? 'Все участники категории проводятся по заездам.'
+              : 'В категории нет участников для хронометража'}
           </Typography.Text>
         ) : (
           <Row gutter={[8, 8]}>
-            {block.participants.map((participant) => (
+            {visibleParticipants.map((participant) => (
               <Col
                 key={participant.enrollmentId}
                 xs={24}

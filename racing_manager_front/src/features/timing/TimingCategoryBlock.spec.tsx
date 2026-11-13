@@ -480,3 +480,71 @@ describe('TimingCategoryBlock', () => {
     expect(screen.getByText('Этап уже завершён.')).not.toBeNull();
   });
 });
+
+describe('race-captured participants in a category block', () => {
+  const raceTile = (index: number): TimingParticipantTileView =>
+    participant({
+      enrollmentId: `race-${index}`,
+      registrationId: `race-reg-${index}`,
+      startNumber: index,
+      fullName: `Гонщик ${index}`,
+      state: 'EXCLUDED',
+      excludedReason: 'RACE_SECTION',
+    });
+
+  it('renders only simple participants and a compact race count', () => {
+    const visible = [
+      participant({
+        enrollmentId: 'simple-1',
+        registrationId: 'simple-reg-1',
+        startNumber: 101,
+        fullName: 'Простой Первый',
+      }),
+      participant({
+        enrollmentId: 'simple-2',
+        registrationId: 'simple-reg-2',
+        startNumber: 102,
+        fullName: 'Простой Второй',
+      }),
+    ];
+    render(
+      <TimingCategoryBlock
+        block={block({ participants: [...Array(8)].map((_, i) => raceTile(i + 1)).concat(visible) })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/Участники: 2/)).not.toBeNull();
+    expect(screen.getByText(/В заездах гонки: 8/)).not.toBeNull();
+    expect(screen.queryByText('Гонщик 1')).toBeNull();
+    expect(screen.getByText('Простой Первый')).not.toBeNull();
+    expect(screen.getByText('Простой Второй')).not.toBeNull();
+  });
+
+  it('shows the race note instead of a wall of exclusions when nobody is simple', () => {
+    render(
+      <TimingCategoryBlock
+        block={block({
+          participants: [...Array(9)].map((_, i) => raceTile(i + 1)),
+          startControlEnabled: false,
+          blockReason: 'В категории нет участников, доступных для хронометража.',
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/Участники: 0/)).not.toBeNull();
+    expect(screen.getByText(/В заездах гонки: 9/)).not.toBeNull();
+    expect(
+      screen.getByText('Все участники категории проводятся по заездам.'),
+    ).not.toBeNull();
+    expect(screen.queryByText('Гонщик 1')).toBeNull();
+    expect(
+      screen.queryByText('В категории нет участников, доступных для хронометража.'),
+    ).toBeNull();
+  });
+});
