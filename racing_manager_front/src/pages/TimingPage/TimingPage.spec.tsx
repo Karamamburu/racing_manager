@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { useEventDetailsQuery } from '../../features/events/useEventDetailsQuery';
+import type { AttemptRecordDrawerProps } from '../../features/timing/AttemptRecordDrawer';
 import { timingService } from '../../features/timing/timingService';
 import type {
   TimingCategoryBlockView,
@@ -16,6 +17,13 @@ import { formatDateTime } from '../../shared/formatDateTime';
 import type { EventDetails, StartResponse } from '../../shared/types/event';
 import { TimingPage } from './index';
 
+/**
+ * The props of every drawer render, newest last. The drawer itself has its own
+ * suite; here the page is proven to hand it the attempt, the workstation and
+ * the names, and to close it.
+ */
+const drawerProps = vi.hoisted(() => ({ current: [] as AttemptRecordDrawerProps[] }));
+
 vi.mock('../../features/timing/timingService', () => ({
   timingService: {
     getSurface: vi.fn(),
@@ -23,7 +31,24 @@ vi.mock('../../features/timing/timingService', () => ({
 }));
 
 vi.mock('../../features/timing/useTimingCapture', () => ({
+  timingSurfaceQueryKey: (eventId: string | undefined) =>
+    ['timing-surface', eventId ?? ''] as const,
   useTimingCapture: vi.fn(),
+}));
+
+vi.mock('../../features/timing/AttemptRecordDrawer', () => ({
+  AttemptRecordDrawer: (props: AttemptRecordDrawerProps) => {
+    drawerProps.current.push(props);
+    if (!props.open) return null;
+    return (
+      <div>
+        <p>Запись попытки {props.attemptId}</p>
+        <button type="button" onClick={props.onClose}>
+          Закрыть запись
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('../../features/auth/useSessionQuery', () => ({
@@ -215,6 +240,7 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   sessionStorage.clear();
+  drawerProps.current = [];
 });
 
 describe('TimingPage', () => {
@@ -472,5 +498,136 @@ describe('TimingPage', () => {
     expect(
       (screen.getByLabelText('Номер участника') as HTMLInputElement).disabled,
     ).toBe(true);
+  });
+
+  it('opens the attempt record with its attempt, workstation and participant names', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+            lastAttempts: [
+              {
+                attemptId: 'attempt-1',
+                state: 'RUNNING',
+                officialStartedAt: '2026-11-13T09:00:00.000Z',
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+    mockCapture();
+
+    renderPage();
+
+    // The drawer is mounted closed, so nothing of the record is readable yet.
+    await screen.findByText('5 км · Мужчины');
+    expect(drawerProps.current.at(-1)?.open).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: /Запись/ }));
+
+    expect(await screen.findByText('Запись попытки attempt-1')).not.toBeNull();
+    const drawer = drawerProps.current.at(-1);
+    expect(drawer?.open).toBe(true);
+    expect(drawer?.eventId).toBe('event-1');
+    expect(drawer?.attemptId).toBe('attempt-1');
+    expect(drawer?.workstationInstanceId).toBe('ws-1');
+    expect(drawer?.participantNames).toEqual({
+      'enrollment-1': 'Иван Петров',
+    });
+    expect(drawer?.canOperate).toBe(true);
+    expect(drawer?.canAdminister).toBe(false);
+  });
+
+  it('shows no surface and no record to an organizer without REFEREE', () => {
+    mockCapture();
+    mockSession(['ORGANIZER']);
+    mockEvent();
+
+    renderPage();
+
+    expect(screen.getByText('Хронометраж недоступен')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /Запись/ })).toBeNull();
+    expect(drawerProps.current).toHaveLength(0);
+    expect(getSurface).not.toHaveBeenCalled();
+  });
+
+  it('closes the attempt record when the referee closes it', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+        ],
+      }),
+    );
+    mockCapture();
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Запись/ }));
+    expect(await screen.findByText('Запись попытки attempt-1')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Закрыть запись' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Запись попытки attempt-1')).toBeNull();
+    });
+    expect(drawerProps.current.at(-1)?.open).toBe(false);
+    expect(drawerProps.current.at(-1)?.attemptId).toBeNull();
+  });
+
+  it('closes the attempt record when a refetch no longer lists the attempt', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+        ],
+      }),
+    );
+    mockCapture();
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Запись/ }));
+    expect(await screen.findByText('Запись попытки attempt-1')).not.toBeNull();
+
+    // The attempt is gone from the surface: no newest attempt and no earlier
+    // one of the category. The drawer must not keep reading a dropped record.
+    getSurface.mockResolvedValue(surface());
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Запись попытки attempt-1')).toBeNull();
+    });
+    expect(drawerProps.current.at(-1)?.open).toBe(false);
+    expect(drawerProps.current.at(-1)?.attemptId).toBeNull();
   });
 });

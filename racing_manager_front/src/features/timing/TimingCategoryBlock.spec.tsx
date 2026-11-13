@@ -205,6 +205,57 @@ describe('TimingCategoryBlock', () => {
     expect(screen.queryByRole('button', { name: /Взять захват/ })).toBeNull();
   });
 
+  it('offers the record of a started category and forwards the press', () => {
+    const onOpenRecord = vi.fn();
+    render(
+      <TimingCategoryBlock
+        block={block({
+          state: 'RUNNING',
+          attemptId: 'attempt-1',
+          officialStartedAt: RUNNING_START,
+          elapsedMs: 1000,
+          startControlEnabled: false,
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder={false}
+        onStart={vi.fn()}
+        onOpenRecord={onOpenRecord}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Запись/ }));
+    expect(onOpenRecord).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the record control without an attempt or without a callback', () => {
+    const { rerender } = render(
+      <TimingCategoryBlock
+        block={block()}
+        title="5 км · Мужчины"
+        isCaptureHolder={false}
+        onStart={vi.fn()}
+        onOpenRecord={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /Запись/ })).toBeNull();
+
+    rerender(
+      <TimingCategoryBlock
+        block={block({
+          state: 'RUNNING',
+          attemptId: 'attempt-1',
+          officialStartedAt: RUNNING_START,
+          elapsedMs: 1000,
+          startControlEnabled: false,
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder={false}
+        onStart={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /Запись/ })).toBeNull();
+  });
+
   it('renders the block reason and the pending-finish count', () => {
     render(
       <TimingCategoryBlock

@@ -1,4 +1,8 @@
-import { PlayCircleOutlined, UnlockOutlined } from '@ant-design/icons';
+import {
+  FileTextOutlined,
+  PlayCircleOutlined,
+  UnlockOutlined,
+} from '@ant-design/icons';
 import { Alert, Button, Card, Col, Row, Space, Tag, Typography } from 'antd';
 import { ParticipantTile, formatTimingClock } from './ParticipantTile';
 import type {
@@ -47,9 +51,10 @@ export function formatElapsed(elapsedMs: number): string {
 /**
  * One timeable protocol category of the event-wide timing surface.
  *
- * This wave renders the read-only block plus the category Start press and the
- * capture hand-over. Number capture, pending-finish binding, the attempt record
- * and corrections belong to later waves and have no control here.
+ * This wave renders the read-only block, the category Start press, the capture
+ * hand-over and the entry to the record of its current or last attempt. Number
+ * capture, pending-finish binding and corrections belong to other components:
+ * the record drawer owns every correction control (U-29).
  */
 export function TimingCategoryBlock({
   block,
@@ -59,6 +64,7 @@ export function TimingCategoryBlock({
   onStart,
   onTakeCapture,
   onParticipantClick,
+  onOpenRecord,
 }: {
   block: TimingCategoryBlockView;
   title: string;
@@ -67,9 +73,14 @@ export function TimingCategoryBlock({
   onStart: () => void;
   onTakeCapture?: () => void;
   onParticipantClick?: (participant: TimingParticipantTileView) => void;
+  /** Opens the record of the block's current or last attempt; absent hides it. */
+  onOpenRecord?: () => void;
 }) {
   const canStart = block.startControlEnabled && isCaptureHolder;
   const showsTakeCapture = !isCaptureHolder && onTakeCapture !== undefined;
+  // An attempt exists only once the category has started, so a category that
+  // never ran offers no record to read (U-29).
+  const showsRecord = block.attemptId !== null && onOpenRecord !== undefined;
 
   return (
     <Card
@@ -90,6 +101,11 @@ export function TimingCategoryBlock({
           >
             Старт
           </Button>
+          {showsRecord ? (
+            <Button icon={<FileTextOutlined />} onClick={onOpenRecord}>
+              Запись
+            </Button>
+          ) : null}
           {showsTakeCapture ? (
             <Button icon={<UnlockOutlined />} onClick={onTakeCapture}>
               Взять захват

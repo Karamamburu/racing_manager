@@ -11,10 +11,15 @@ import {
   Typography,
   message,
 } from 'antd';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { useEventDetailsQuery } from '../../features/events/useEventDetailsQuery';
+import { AttemptRecordDrawer } from '../../features/timing/AttemptRecordDrawer';
+import {
+  canAdministerTiming,
+  canOperateTiming,
+} from '../../features/timing/capabilities';
 import { CaptureControls } from '../../features/timing/CaptureControls';
 import { NumberCaptureField } from '../../features/timing/NumberCaptureField';
 import { PendingFinishBar } from '../../features/timing/PendingFinishBar';
@@ -25,7 +30,10 @@ import type {
   TimingCategoryBlockView,
   TimingSurfaceView,
 } from '../../features/timing/types';
-import { useTimingCapture } from '../../features/timing/useTimingCapture';
+import {
+  timingSurfaceQueryKey,
+  useTimingCapture,
+} from '../../features/timing/useTimingCapture';
 import { formatDateTime } from '../../shared/formatDateTime';
 import { AppShell } from '../../shared/layout';
 import type { EventDetails } from '../../shared/types/event';
@@ -107,12 +115,29 @@ function describeBlock(
 }
 
 /**
+ * Whether the surface still knows an attempt, as its block's newest attempt or
+ * as one of the earlier attempts of the same category.
+ */
+function surfaceHasAttempt(
+  surface: TimingSurfaceView,
+  attemptId: string,
+): boolean {
+  return surface.categories.some(
+    (block) =>
+      block.attemptId === attemptId ||
+      block.lastAttempts.some((attempt) => attempt.attemptId === attemptId),
+  );
+}
+
+/**
  * The event-wide timing surface (AD-9).
  *
  * One block per timeable protocol category in the backend order. The page only
  * renders: `useTimingCapture` owns the clock anchor, the capture outbox and
  * every mutation, so this component wires the controls to that hook and never
- * talks to the API for a write itself.
+ * talks to the API for a write itself. The attempt record drawer owns every
+ * correction control (T13), so the page only decides which attempt it reads and
+ * which block supplies the participant names (U-29).
  */
 export function TimingPage() {
   const { id } = useParams<{ id: string }>();
@@ -120,17 +145,23 @@ export function TimingPage() {
   const sessionQuery = useSessionQuery();
   const eventQuery = useEventDetailsQuery(id);
   const [workstationInstanceId] = useState(readWorkstationInstanceId);
+  // The record the drawer reads, and the `enrollmentId → fullName` map of the
+  // block that supplied the attempt, so a pass names its participant without a
+  // second request per row.
+  const [recordAttemptId, setRecordAttemptId] = useState<string | null>(null);
+  const [recordParticipantNames, setRecordParticipantNames] = useState<
+    Record<string, string>
+  >({});
 
   const roles = sessionQuery.data?.roles ?? [];
-  const canOperateTiming =
-    roles.includes('REFEREE') || roles.includes('ADMINISTRATOR');
-  const canAdminister = roles.includes('ADMINISTRATOR');
+  const canOperate = canOperateTiming(roles);
+  const canAdminister = canAdministerTiming(roles);
 
-  const surfaceQueryKey = ['timing-surface', id ?? ''] as const;
+  const surfaceQueryKey = timingSurfaceQueryKey(id);
   const surfaceQuery = useQuery<TimingSurfaceView>({
     queryKey: surfaceQueryKey,
     queryFn: () => timingService.getSurface(id as string),
-    enabled: Boolean(id) && canOperateTiming,
+    enabled: Boolean(id) && canOperate,
     refetchInterval: (query) =>
       query.state.data?.categories.some((block) => block.state === 'RUNNING')
         ? RUNNING_SURFACE_REFRESH_MS
@@ -146,6 +177,33 @@ export function TimingPage() {
     workstationInstanceId,
     (text) => message.error(text),
   );
+
+  // An open record never outlives its attempt on the surface: once a refetch
+  // no longer lists it, the drawer closes instead of reading a record the
+  // surface dropped. A closed attempt stays listed as the category's newest or
+  // earlier attempt, so its closure report remains readable.
+  useEffect(() => {
+    if (recordAttemptId === null) return;
+    const surface = surfaceQuery.data;
+    if (surface === undefined) return;
+    if (surfaceHasAttempt(surface, recordAttemptId)) return;
+    setRecordAttemptId(null);
+  }, [recordAttemptId, surfaceQuery.data]);
+
+  /** Opens the record of the attempt the block currently shows (U-29). */
+  const openRecord = (block: TimingCategoryBlockView) => {
+    const attemptId = block.attemptId;
+    if (attemptId === null) return;
+    setRecordParticipantNames(
+      Object.fromEntries(
+        block.participants.map((participant) => [
+          participant.enrollmentId,
+          participant.fullName,
+        ]),
+      ),
+    );
+    setRecordAttemptId(attemptId);
+  };
 
   const event = eventQuery.data;
   const subtitle = event
@@ -174,7 +232,7 @@ export function TimingPage() {
     );
   }
 
-  if (!canOperateTiming) {
+  if (!canOperate) {
     return (
       <AppShell title="Хронометраж" subtitle={subtitle}>
         <Result
@@ -349,6 +407,14 @@ export function TimingPage() {
                           void capture.commitTile(participant, attemptId);
                         }
                   }
+                  // The record is readable without the capture lock: reading
+                  // never writes. A category without an attempt has nothing to
+                  // open, so the block hides the control (U-29).
+                  onOpenRecord={
+                    block.attemptId === null
+                      ? undefined
+                      : () => openRecord(block)
+                  }
                 />
 
                 {block.pendingFinishes.length > 0 ? (
@@ -361,6 +427,22 @@ export function TimingPage() {
             );
           })
         )}
+
+        <AttemptRecordDrawer
+          open={recordAttemptId !== null}
+          eventId={surface.eventId}
+          attemptId={recordAttemptId}
+          participantNames={recordParticipantNames}
+          canAdminister={canAdminister}
+          canOperate={canOperate}
+          workstationInstanceId={workstationInstanceId}
+          onClose={() => {
+            setRecordAttemptId(null);
+          }}
+          onChanged={() => {
+            void queryClient.invalidateQueries({ queryKey: surfaceQueryKey });
+          }}
+        />
       </Space>
     </AppShell>
   );
