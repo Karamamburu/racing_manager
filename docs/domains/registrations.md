@@ -1,6 +1,6 @@
 ---
 type: domain
-updated: 2026-11-08
+updated: 2026-11-13
 ---
 
 # Domain: registrations
@@ -29,6 +29,7 @@ Create/update/cancel registrations (self, guest, for-user); enrollment selection
 - One active registration per person key per event: user `(eventId, userId)`, guest `(eventId, trimmed case-insensitive name + birthYear)`; guest and user paths share the same enrollment rules; duplicates → 409/400 with no partials.
 - Concurrency: partial unique indexes on active person keys; concurrent duplicate creates cannot yield two active registrations.
 - Idempotency: `Idempotency-Key` on mutating registration routes (Postgres store, ≥ 24 h).
+- A `startNumber` update is refused while the registration is in a `RUNNING` timing attempt; other fields and enrollments are unaffected. See [timing](timing.md).
 
 ## Code
 
@@ -41,3 +42,4 @@ Create/update/cancel registrations (self, guest, for-user); enrollment selection
 - Guest vs user payload fields renamed/removed.
 - Consent gates on register changed without updating [personal](personal.md).
 - Create accepted without `enrollments[]`, or enrollments physically deleted.
+- A start-number change accepted while the registration is in a running timing attempt.

@@ -1,6 +1,6 @@
 ---
 type: domain
-updated: 2026-11-12
+updated: 2026-11-13
 ---
 
 # Domain: cms (class competitions)
@@ -24,6 +24,7 @@ Façade from main API to competition engine; plan/start-lists/heats/qualificatio
 - Each protocol row exposes additive `raceId` and `raceRole` (`CAPTURED` | `OUTSIDE_RACE`). A row joins a race section only when captured, or when its current target membership exactly equals that race's frozen membership; otherwise it stays in its configuration-derived simple section.
 - A `CATEGORY` race suppresses the age-category configuration for the whole protocol category. A section race suppresses nothing; sibling configured sections stay visible, ranked and timeable.
 - Ordinary result entry is rejected only for rows displayed in a race section. Race heat times/results write to the race start's enrollment. Start numbers are read-only event-wide while the participant appears in any race section.
+- A race cannot be created while a running timing attempt's participant would enter its field; timing excludes race-section rows and never writes heat times. See [timing](timing.md).
 - «Завершить гонку» remains one action per start × format × gender, is rejected while any race of the category is not `DONE`, and treats a `DONE` race as satisfying completeness for its captured field. Simple-section snapshots stay per section and enrollment.
 - Existing races are backfilled to the event's single/first start and `CATEGORY`; the migration is idempotent and reports anomalies. The competition service exposes `DELETE /v1/competitions/:id` for creation compensation; it adds no product race-deletion action.
 
@@ -51,3 +52,4 @@ Façade from main API to competition engine; plan/start-lists/heats/qualificatio
 - Several races in one protocol category coalesce, or a section race suppresses a sibling configured section.
 - Ordinary result entry is blocked for a simple section because a sibling section has a race.
 - Migration binds a race to anything other than the single/first start and `CATEGORY`.
+- A race created while its field would capture a participant of a running timing attempt, or timing writing a heat time.

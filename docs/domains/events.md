@@ -1,6 +1,6 @@
 ---
 type: domain
-updated: 2026-11-12
+updated: 2026-11-13
 ---
 
 # Domain: events
@@ -53,6 +53,8 @@ Every row also carries additive `ageGroupId`: the participant's base age group (
 
 Every row also carries additive `raceId` and `raceRole` (`CAPTURED` | `OUTSIDE_RACE`, or null). `raceId` names the multi-stage race section that displays the row; `sectionId` keeps its configuration-derived meaning and is not used to route a race row.
 
+Every row also carries additive `lapSplits?: TimingLapSplitDto[]` when a timing closure published splits for that enrollment: `lapNumber`, `lapTimeMs`, `cumulativeMs`. The existing `laps: ParticipantLap[]` field keeps its legacy/race-stage meaning and is never replaced by the timing splits.
+
 `ageSplits?: AgeSplitRef[]` adds the stored configuration per protocol category: `enabled` plus the ordered `categories[]`, each with `id` (`CATEGORY_1`…`CATEGORY_9`), `number`, `title` («Категория N»), `subtitle` (member ranges such as `15–16, 17–18`) and `groupIds[]`. Every row carries `sectionId`: `CATEGORY_n` for a configured age category, `REMAINDER` or `NO_BIRTH_YEAR` for the implicit ones, and `CATEGORY` when the protocol category is unsplit. `place` is age-category-scoped when the category is configured and keeps today's category-wide value otherwise.
 
 ## Age categories (AGE-CATEGORIES)
@@ -89,6 +91,13 @@ A protocol category (`event × gender × start × format`) may carry one **age-c
 - Filtering is client-side only; no HTTP contract changes. An empty result keeps the toolbar and selections and shows “Участники не найдены” with a reset action. Reset restores every row and keeps previously expanded “Итоговый протокол” sections expanded.
 - Category actions (“Завершить гонку”, class-competition panel, result and registration-status editing) still evaluate against the full category row set, not the filtered subset.
 
+## Timing (MANUAL-TIMING)
+
+- A user holding the global `REFEREE` role or `ADMINISTRATOR` opens the timing surface from the event page (`/events/:id/timing`); an `ORGANIZER` without `REFEREE` has no timing surface. Roles are a set and capabilities compose.
+- A running timing attempt freezes its roster; a participant's start number cannot change while its registration is in that attempt, and race creation is refused while the proposed field would capture a participant of a running attempt. Rows displayed in a race section are excluded from timing.
+- The event protocol renders timing `lapSplits` inside the participant's own row; it does not change `laps`, place, section, race or finish fields.
+- A legacy event without starts offers no timing surface. See [timing](timing.md).
+
 ## Code
 
 - API: `racing_manager_back/src/events/`, `src/results/`, `src/idempotency/`, `src/migrations/`
@@ -122,3 +131,7 @@ A protocol category (`event × gender × start × format`) may carry one **age-c
 - `raceId` / `raceRole` missing from protocol rows, or a row routed by a stored `CATEGORY_n`.
 - A base group silently dropped from the protocol (a row rendered twice or not at all).
 - A new required response field breaking clients that ignore `sectionId` / `ageSplits`.
+- A timing surface offered to an `ORGANIZER` without `REFEREE`, or missing for `REFEREE`/`ADMINISTRATOR`.
+- A start-number change allowed while the participant is in a running timing attempt.
+- A race created while its field would capture a participant of a running timing attempt.
+- Timing `lapSplits` changing `laps`, place, section or race fields, or a legacy event offering timing.
