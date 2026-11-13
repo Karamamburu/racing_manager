@@ -45,6 +45,13 @@ export type TimingClosureReportRecord = {
   publishedEnrollmentIds: string[];
   unpublishedEnrollmentIds: string[];
   conflictEnrollmentIds: string[];
+  /**
+   * Heat closure only (E-14): the registrations that received a heat time.
+   * Absent on a category report, which keeps its original three lists.
+   */
+  publishedRegistrationIds?: string[];
+  /** Heat closure only: the registrations that already gained a heat time. */
+  conflictRegistrationIds?: string[];
 };
 
 /** What a start press needs to know about the event. */
@@ -762,6 +769,11 @@ type RawCaptureLockRow = {
  * Rebuilds the closure report from the JSON column. A missing report and a
  * malformed one both read as `null`; the attempt record then shows no report
  * instead of inventing empty lists.
+ *
+ * The additive heat lists are preserved verbatim. A category report written
+ * before the heat closure existed has neither key, so it keeps exactly its
+ * three enrollment lists and the heat fields stay absent rather than being
+ * invented as empty arrays.
  */
 export function toClosureReport(
   value: Prisma.JsonValue | null,
@@ -774,11 +786,27 @@ export function toClosureReport(
   if (published === null || unpublished === null || conflicts === null) {
     return null;
   }
-  return {
+  const publishedRegistrations = toOptionalIdList(
+    record.publishedRegistrationIds,
+  );
+  const conflictRegistrations = toOptionalIdList(
+    record.conflictRegistrationIds,
+  );
+  if (publishedRegistrations === null || conflictRegistrations === null) {
+    return null;
+  }
+  const report: TimingClosureReportRecord = {
     publishedEnrollmentIds: published,
     unpublishedEnrollmentIds: unpublished,
     conflictEnrollmentIds: conflicts,
   };
+  if (publishedRegistrations !== undefined) {
+    report.publishedRegistrationIds = publishedRegistrations;
+  }
+  if (conflictRegistrations !== undefined) {
+    report.conflictRegistrationIds = conflictRegistrations;
+  }
+  return report;
 }
 
 /** Reads a JSON object column as a plain record; anything else is `null`. */
@@ -800,6 +828,16 @@ function toIdList(value: unknown): string[] | null {
     ids.push(entry);
   }
   return ids;
+}
+
+/**
+ * Reads one additive list: an absent key is `undefined` (the field stays out of
+ * the report), a present but malformed value is `null` so the report is
+ * rejected exactly like a malformed enrollment list.
+ */
+function toOptionalIdList(value: unknown): string[] | undefined | null {
+  if (value === undefined) return undefined;
+  return toIdList(value);
 }
 
 /**

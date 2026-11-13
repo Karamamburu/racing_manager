@@ -4,6 +4,9 @@ import {
   MODULE_METADATA,
 } from '@nestjs/common/constants';
 import { AuthModule } from '../auth/auth.module';
+import { ClassCompetitionsModule } from '../class-competitions/class-competitions.module';
+import { AnonymousSplitService } from './anonymous-split.service';
+import { TimingAttemptsReadModule } from './timing-attempts-read.module';
 import { TimingController } from './timing.controller';
 import { TimingErrorCode, TimingDomainError } from './timing.errors';
 import {
@@ -133,7 +136,7 @@ describe('TimingExceptionFilter', () => {
 });
 
 describe('TimingModule metadata', () => {
-  it('registers the controller, its service, the repository and the filter', () => {
+  it('registers the controller, its providers and the guard module imports', () => {
     const imports: unknown = Reflect.getMetadata(
       MODULE_METADATA.IMPORTS,
       TimingModule,
@@ -147,11 +150,16 @@ describe('TimingModule metadata', () => {
       TimingModule,
     );
 
-    expect(imports).toEqual([AuthModule]);
+    expect(imports).toEqual([
+      AuthModule,
+      TimingAttemptsReadModule,
+      ClassCompetitionsModule,
+    ]);
     expect(controllers).toEqual([TimingController]);
     expect(providers).toEqual([
       TimingService,
       TimingRepository,
+      AnonymousSplitService,
       TimingExceptionFilter,
     ]);
   });

@@ -20,8 +20,11 @@ import { RoleCode, TIMING_OPERATE_ROLE_CODES } from '../auth/role-codes';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
+import { AnonymousSplitService } from './anonymous-split.service';
 import {
+  AssignAnonymousSplitDto,
   BindPendingFinishDto,
+  CancelAnonymousSplitDto,
   CancelPendingFinishDto,
   CancelTimingAttemptDto,
   CancelTimingPassDto,
@@ -33,6 +36,7 @@ import {
   OpenClockEpochDto,
   QuickUndoTimingPassDto,
   RebindTimingPassDto,
+  StartHeatAttemptDto,
   StartTimingAttemptDto,
   TakeCaptureDto,
   TransferCaptureDto,
@@ -42,6 +46,7 @@ import { TimingService } from './timing.service';
 import type {
   ClockEpochView,
   StartTimingAttemptResult,
+  TimingAnonymousSplitView,
   TimingAttemptRecordView,
   TimingAttemptRef,
   TimingCaptureView,
@@ -68,7 +73,10 @@ import type {
   }),
 )
 export class TimingController {
-  constructor(private readonly timingService: TimingService) {}
+  constructor(
+    private readonly timingService: TimingService,
+    private readonly anonymousSplitService: AnonymousSplitService,
+  ) {}
 
   @Get()
   getSurface(
@@ -100,6 +108,25 @@ export class TimingController {
     @Body() dto: StartTimingAttemptDto,
   ): Promise<StartTimingAttemptResult> {
     return this.timingService.startAttempt(req.session?.userSub, eventId, dto);
+  }
+
+  /**
+   * `POST /events/:eventId/timing/heat-attempts`: the Start press of one heat of
+   * a seeded stage. A heat attempt is a timing attempt of its own; the response
+   * carries its block and its clock epoch.
+   */
+  @Post('heat-attempts')
+  @HttpCode(HttpStatus.CREATED)
+  startHeatAttempt(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Body() dto: StartHeatAttemptDto,
+  ): Promise<StartTimingAttemptResult> {
+    return this.timingService.startHeatAttempt(
+      req.session?.userSub,
+      eventId,
+      dto,
+    );
   }
 
   @Post('attempts/:attemptId/clock-epochs')
@@ -183,6 +210,53 @@ export class TimingController {
       req.session?.userSub,
       eventId,
       pendingFinishId,
+      dto,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/splits/:splitId/assign`: bind one queued
+   * anonymous split to a participant of its own attempt. This is a capture
+   * mutation, so the workstation must hold capture; a repeated
+   * `Idempotency-Key` is replayed by the global interceptor.
+   */
+  @Post('splits/:splitId/assign')
+  @HttpCode(HttpStatus.OK)
+  assignSplit(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('splitId', new ParseUUIDPipe({ version: '4' })) splitId: string,
+    @Body() dto: AssignAnonymousSplitDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<TimingPassView> {
+    return this.anonymousSplitService.assign(
+      req.session?.userSub,
+      eventId,
+      splitId,
+      dto,
+      idempotencyKey,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/splits/:splitId/cancel`: a referee or
+   * administrator retires one unassigned split with a reason. Cancellation is a
+   * record correction, so it needs no capture hold; the class-level timing
+   * roles already separate a referee from an administrator where the product
+   * does.
+   */
+  @Post('splits/:splitId/cancel')
+  @HttpCode(HttpStatus.OK)
+  cancelSplit(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('splitId', new ParseUUIDPipe({ version: '4' })) splitId: string,
+    @Body() dto: CancelAnonymousSplitDto,
+  ): Promise<TimingAnonymousSplitView> {
+    return this.anonymousSplitService.cancel(
+      req.session?.userSub,
+      eventId,
+      splitId,
       dto,
     );
   }

@@ -37,6 +37,54 @@ describe('toClosureReport', () => {
     expect(toClosureReport(report)).toEqual(report);
   });
 
+  it('reads a legacy category report without inventing heat lists', () => {
+    const mapped = toClosureReport(report);
+
+    expect(mapped).toEqual(report);
+    expect(mapped).not.toHaveProperty('publishedRegistrationIds');
+    expect(mapped).not.toHaveProperty('conflictRegistrationIds');
+  });
+
+  it('preserves both additive heat registration lists on read', () => {
+    const heatReport = {
+      publishedEnrollmentIds: [],
+      unpublishedEnrollmentIds: ['enrollment-a'],
+      conflictEnrollmentIds: [],
+      publishedRegistrationIds: [
+        'registration-enrollment-b',
+        'registration-enrollment-c',
+      ],
+      conflictRegistrationIds: ['registration-enrollment-d'],
+    };
+
+    expect(toClosureReport(heatReport)).toEqual(heatReport);
+  });
+
+  it('preserves empty heat registration lists instead of dropping them', () => {
+    const heatReport = {
+      publishedEnrollmentIds: [],
+      unpublishedEnrollmentIds: [],
+      conflictEnrollmentIds: [],
+      publishedRegistrationIds: [],
+      conflictRegistrationIds: [],
+    };
+
+    const mapped = toClosureReport(heatReport);
+
+    expect(mapped).toEqual(heatReport);
+    expect(mapped?.publishedRegistrationIds).toEqual([]);
+    expect(mapped?.conflictRegistrationIds).toEqual([]);
+  });
+
+  it('reads a malformed heat registration list as null', () => {
+    expect(
+      toClosureReport({ ...report, publishedRegistrationIds: [42] }),
+    ).toBeNull();
+    expect(
+      toClosureReport({ ...report, conflictRegistrationIds: 'none' }),
+    ).toBeNull();
+  });
+
   it('reads a missing report as null', () => {
     expect(toClosureReport(null)).toBeNull();
   });
