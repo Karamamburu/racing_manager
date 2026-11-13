@@ -10,6 +10,7 @@ import type {
   TimingAnonymousSplitView,
   TimingCategoryBlockView,
   TimingPassView,
+  TimingStageGroupView,
   TimingSurfaceView,
 } from '../../features/timing/types';
 import type { UseTimingCaptureResult } from '../../features/timing/useTimingCapture';
@@ -158,6 +159,40 @@ function surface(overrides: Partial<TimingSurfaceView> = {}): TimingSurfaceView 
     eventId: 'event-1',
     captureWorkstationInstanceId: null,
     categories: [block()],
+    ...overrides,
+  };
+}
+
+/** One heat block of a seeded stage, as the surface reports it (FR-17). */
+function heatBlock(
+  overrides: Partial<TimingCategoryBlockView> = {},
+): TimingCategoryBlockView {
+  return block({
+    kind: 'HEAT',
+    blockKey: 'heat:race-1:stage-1:1',
+    classCompetitionId: 'race-1',
+    stageId: 'stage-1',
+    stageLabel: 'Квалификация',
+    stageState: 'SEEDED',
+    heatNumber: 1,
+    heatLabel: 'Заезд 1',
+    ...overrides,
+  });
+}
+
+/** One stage header grouping the heat blocks of a multi-stage race (U-12). */
+function stageGroup(
+  overrides: Partial<TimingStageGroupView> = {},
+): TimingStageGroupView {
+  return {
+    blockKey: 'stage:race-1:stage-1',
+    raceId: 'race-1',
+    raceTitle: 'Кубковая гонка',
+    stageId: 'stage-1',
+    stageLabel: 'Квалификация',
+    stageState: 'SEEDED',
+    heatBlockKeys: ['heat:race-1:stage-1:1'],
+    blockReason: null,
     ...overrides,
   };
 }
@@ -876,5 +911,239 @@ describe('TimingPage', () => {
     );
     expect(screen.getByText('В очереди: 0')).not.toBeNull();
     expect(screen.queryByText('Назначение сплита')).toBeNull();
+  });
+
+  it('renders stage headers and their heat blocks after the category block', async () => {
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        categories: [
+          block(),
+          heatBlock(),
+          heatBlock({
+            blockKey: 'heat:race-1:stage-1:2',
+            heatNumber: 2,
+            heatLabel: 'Заезд 2',
+          }),
+        ],
+        stageGroups: [
+          stageGroup({
+            heatBlockKeys: [
+              'heat:race-1:stage-1:1',
+              'heat:race-1:stage-1:2',
+            ],
+          }),
+        ],
+      }),
+    );
+    mockCapture();
+
+    const { container } = renderPage();
+
+    expect(await screen.findByText('Заезд 1')).not.toBeNull();
+    expect(screen.getByText('Заезд 2')).not.toBeNull();
+    // The header names the race and the stage and states the stage is seeded;
+    // each heat names its race too.
+    expect(screen.getAllByText('Кубковая гонка')).toHaveLength(3);
+    expect(screen.getByText('Квалификация')).not.toBeNull();
+    expect(screen.getByText('Заезды сформированы')).not.toBeNull();
+    // Both heats carry the kind affordance and their stage name.
+    expect(screen.getAllByText('Заезд')).toHaveLength(2);
+    expect(screen.getAllByText('Этап: Квалификация')).toHaveLength(2);
+
+    // The backend order stays untouched: category, stage header, heats ascending.
+    const text = container.textContent ?? '';
+    expect(text.indexOf('5 км · Мужчины')).toBeLessThan(
+      text.indexOf('Заезды сформированы'),
+    );
+    expect(text.indexOf('Заезды сформированы')).toBeLessThan(
+      text.indexOf('Заезд 1'),
+    );
+    expect(text.indexOf('Заезд 1')).toBeLessThan(text.indexOf('Заезд 2'));
+  });
+
+  it('renders the header of a pending stage without heats and offers no heat block', async () => {
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        categories: [block()],
+        stageGroups: [
+          stageGroup({
+            stageState: 'PENDING',
+            heatBlockKeys: [],
+            blockReason: 'Заезды этапа ещё не сформированы.',
+          }),
+        ],
+      }),
+    );
+    mockCapture();
+
+    renderPage();
+
+    expect(await screen.findByText('Заезды не сформированы')).not.toBeNull();
+    expect(
+      screen.getByText('Заезды этапа ещё не сформированы.'),
+    ).not.toBeNull();
+    // No heat block and no Start beyond the category's own control (F-12, S-06).
+    expect(screen.queryByText('Заезд 1')).toBeNull();
+    expect(screen.queryByText('Заезд')).toBeNull();
+    expect(screen.getAllByRole('button', { name: /Старт/ })).toHaveLength(1);
+  });
+
+  it('starts a heat through the capture hook with the heat block', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    const heat = heatBlock({ startControlEnabled: true });
+    const view = surface({
+      captureWorkstationInstanceId: 'ws-1',
+      categories: [block({ startControlEnabled: false }), heat],
+      stageGroups: [stageGroup()],
+    });
+    getSurface.mockResolvedValue(view);
+    const capture = mockCapture();
+
+    renderPage();
+
+    await screen.findByText('Заезд 1');
+    const startButtons = screen.getAllByRole('button', { name: /Старт/ });
+    const heatStart = startButtons.find(
+      (button) => !(button as HTMLButtonElement).disabled,
+    );
+    expect(heatStart).toBeDefined();
+    fireEvent.click(heatStart as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(capture.startAttempt).toHaveBeenCalledWith(heat);
+    });
+  });
+
+  it('makes a running heat the current block and sends an empty Enter to it', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          heatBlock({
+            state: 'RUNNING',
+            attemptId: 'attempt-heat',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+        ],
+        stageGroups: [stageGroup()],
+      }),
+    );
+    const capture = mockCapture();
+
+    renderPage();
+
+    expect(await screen.findByText(/Текущая попытка: не выбрана/)).not.toBeNull();
+
+    fireEvent.mouseDown(screen.getByRole('combobox'));
+    fireEvent.click(
+      await screen.findByText('Кубковая гонка · Квалификация · Заезд 1'),
+    );
+
+    expect(
+      await screen.findByText(/Текущая попытка: Кубковая гонка · Квалификация/),
+    ).not.toBeNull();
+
+    fireEvent.keyDown(screen.getByLabelText('Номер участника'), {
+      key: 'Enter',
+    });
+
+    await waitFor(() =>
+      expect(capture.captureAnonymous).toHaveBeenCalledWith('attempt-heat'),
+    );
+  });
+
+  it('assigns a queued split of a heat attempt through the number field', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          heatBlock({
+            state: 'RUNNING',
+            attemptId: 'attempt-heat',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+        ],
+        stageGroups: [stageGroup()],
+        anonymousSplits: [
+          anonymousSplit({
+            splitId: 'split-heat',
+            attemptId: 'attempt-heat',
+            blockKey: 'heat:race-1:stage-1:1',
+            attemptLabel: 'Кубковая гонка · Квалификация · Заезд 1',
+          }),
+        ],
+      }),
+    );
+    const capture = mockCapture();
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Сплит 1:/ }));
+
+    expect(await screen.findByText('Назначение сплита')).not.toBeNull();
+    expect(
+      screen.getByText(
+        'Сплит будет назначен попытке: Кубковая гонка · Квалификация · Заезд 1',
+      ),
+    ).not.toBeNull();
+
+    const field = screen.getByLabelText('Номер участника');
+    fireEvent.change(field, { target: { value: '42' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+
+    await waitFor(() =>
+      expect(capture.assignAnonymousSplit).toHaveBeenCalledWith(
+        'split-heat',
+        42,
+      ),
+    );
+  });
+
+  it('keeps a category block disabled and unchanged beside a stage header', async () => {
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        categories: [
+          block({
+            state: 'COMPLETED',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            startControlEnabled: false,
+            blockReason: 'Категория завершена в протоколе',
+          }),
+        ],
+        stageGroups: [stageGroup({ heatBlockKeys: [] })],
+      }),
+    );
+    const capture = mockCapture();
+
+    renderPage();
+
+    expect(await screen.findByText('5 км · Мужчины')).not.toBeNull();
+    expect(screen.getByText('Категория завершена в протоколе')).not.toBeNull();
+    expect(screen.queryByText('Заезд')).toBeNull();
+    // A category keeps its disabled Start, unlike a closed-stage heat.
+    expect(
+      (screen.getByRole('button', { name: /Старт/ }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(capture.startAttempt).not.toHaveBeenCalled();
   });
 });

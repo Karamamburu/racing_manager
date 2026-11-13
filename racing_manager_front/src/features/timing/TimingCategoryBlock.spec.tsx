@@ -327,4 +327,86 @@ describe('TimingCategoryBlock', () => {
     expect(screen.queryByRole('button', { name: /Иван Петров/ })).toBeNull();
     expect(screen.getByText('Исключён')).not.toBeNull();
   });
+
+  it('marks a heat block with its kind and its stage name', () => {
+    render(
+      <TimingCategoryBlock
+        block={block({
+          kind: 'HEAT',
+          blockKey: 'heat:race-1:stage-1:1',
+          classCompetitionId: 'race-1',
+          stageId: 'stage-1',
+          stageLabel: 'Квалификация',
+          stageState: 'SEEDED',
+          heatNumber: 1,
+          heatLabel: 'Заезд 1',
+        })}
+        title="Заезд 1"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    // The kind tag and the stage line are the heat affordance: a heat block is
+    // never mistaken for the category block it is grouped with (FR-17).
+    expect(screen.getByText('Заезд')).not.toBeNull();
+    expect(screen.getByText('Заезд 1')).not.toBeNull();
+    expect(screen.getByText('Этап: Квалификация')).not.toBeNull();
+    expect(
+      (screen.getByRole('button', { name: /Старт/ }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
+  it('keeps a category block free of the heat affordance', () => {
+    render(
+      <TimingCategoryBlock
+        block={block()}
+        title="5 км · Мужчины"
+        isCaptureHolder={false}
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('Заезд')).toBeNull();
+    expect(screen.queryByText(/^Этап:/)).toBeNull();
+  });
+
+  it('offers no Start for a heat whose stage is not seeded and states why', () => {
+    const { rerender } = render(
+      <TimingCategoryBlock
+        block={block({
+          kind: 'HEAT',
+          stageLabel: 'Квалификация',
+          stageState: 'PENDING',
+          startControlEnabled: false,
+          blockReason: 'Заезды этапа ещё не сформированы.',
+        })}
+        title="Заезд 1"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /Старт/ })).toBeNull();
+    expect(screen.getByText('Заезды этапа ещё не сформированы.')).not.toBeNull();
+
+    rerender(
+      <TimingCategoryBlock
+        block={block({
+          kind: 'HEAT',
+          stageLabel: 'Квалификация',
+          stageState: 'COMPLETED',
+          startControlEnabled: false,
+          blockReason: 'Этап уже завершён.',
+        })}
+        title="Заезд 1"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /Старт/ })).toBeNull();
+    expect(screen.getByText('Этап уже завершён.')).not.toBeNull();
+  });
 });

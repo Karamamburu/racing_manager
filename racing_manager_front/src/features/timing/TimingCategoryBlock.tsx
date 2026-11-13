@@ -49,12 +49,29 @@ export function formatElapsed(elapsedMs: number): string {
 }
 
 /**
- * One timeable protocol category of the event-wide timing surface.
+ * Whether the block renders its Start control at all.
  *
- * This wave renders the read-only block, the category Start press, the capture
+ * A heat of a stage whose heats are not formed, or of a closed stage, offers no
+ * Start: the block reason states why and the press is not available (F-12,
+ * S-07). A category keeps its disabled Start, so a reader still sees the
+ * control and the reason beside it.
+ */
+function showsStartControl(block: TimingCategoryBlockView): boolean {
+  if (block.kind !== 'HEAT') return true;
+  return block.stageState === undefined || block.stageState === 'SEEDED';
+}
+
+/**
+ * One timeable protocol category or one heat of a multi-stage race.
+ *
+ * This wave renders the read-only block, the Start press, the capture
  * hand-over and the entry to the record of its current or last attempt. Number
  * capture, pending-finish binding and corrections belong to other components:
  * the record drawer owns every correction control (U-29).
+ *
+ * A heat block is the same block with `kind: 'HEAT'`: it adds a kind tag and
+ * its stage name, so it never reads as the category block it is grouped with
+ * (FR-17). Start, tiles, pending finishes and the record behave identically.
  */
 export function TimingCategoryBlock({
   block,
@@ -81,26 +98,31 @@ export function TimingCategoryBlock({
   // An attempt exists only once the category has started, so a category that
   // never ran offers no record to read (U-29).
   const showsRecord = block.attemptId !== null && onOpenRecord !== undefined;
+  const showsStart = showsStartControl(block);
+  const isHeat = block.kind === 'HEAT';
 
   return (
     <Card
       size="small"
       title={
         <Space wrap size={8}>
+          {isHeat ? <Tag color="geekblue">Заезд</Tag> : null}
           <Typography.Text strong>{title}</Typography.Text>
           <Tag color={STATE_COLORS[block.state]}>{STATE_LABELS[block.state]}</Tag>
         </Space>
       }
       extra={
         <Space wrap size={8}>
-          <Button
-            type="primary"
-            icon={<PlayCircleOutlined />}
-            disabled={!canStart}
-            onClick={onStart}
-          >
-            Старт
-          </Button>
+          {showsStart ? (
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              disabled={!canStart}
+              onClick={onStart}
+            >
+              Старт
+            </Button>
+          ) : null}
           {showsRecord ? (
             <Button icon={<FileTextOutlined />} onClick={onOpenRecord}>
               Запись
@@ -122,6 +144,11 @@ export function TimingCategoryBlock({
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
         {subtitle ? (
           <Typography.Text type="secondary">{subtitle}</Typography.Text>
+        ) : null}
+        {isHeat && block.stageLabel ? (
+          <Typography.Text type="secondary">
+            Этап: {block.stageLabel}
+          </Typography.Text>
         ) : null}
 
         <Space wrap size={[16, 4]}>
