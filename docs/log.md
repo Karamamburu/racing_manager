@@ -149,3 +149,7 @@ A split-derived pass must not borrow the assignment's event sequence as its atte
 ## 2026-11-14 — timing totals in a multi-stage stage panel
 
 A timing heat closure writes one total and no per-lap rows. The stage panel treated a multi-lap slot as incomplete unless every event lap had a row, so the timing total was invisible and «Зафиксировать этап» never appeared. A slot with status `OK` and a total is now filled regardless of per-lap detail; the starter card shows the timing total as «Итог» beside the optional lap rows.
+
+## 2026-11-14 — heat lap times from timing
+
+A heat closure now publishes one `ClassHeatLapTime` per event lap from the attempt's official-instant splits, in addition to the `ClassHeatTime` total + `OK`. The stage panel therefore shows Круг 1, Круг 2 and Итог for every participant; a total-only heat remains a complete slot. Existing timing heat times for the current event were backfilled from their bound marks.

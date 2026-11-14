@@ -31,7 +31,7 @@ Façade from main API to competition engine; plan/start-lists/heats/qualificatio
 ## Timing heat attempts (MANUAL-TIMING-2)
 
 - A timing attempt may target one heat of one stage of a multi-stage race (event + race + stage + heat number). The heat roster is the heat start list resolved to race-start enrollments; N is the race start lap count.
-- A closed heat publishes only `ClassHeatTime` total + `OK`; no `ClassHeatLapTime`, ordinary result, split, place or qualification change, and no CMS write. That total is a complete slot for stage commitment even on a multi-lap start: the stage panel shows the timing total beside the optional lap rows, and «Зафиксировать этап» is available without per-lap rows. Stage commitment remains a separate CMS-panel action.
+- A closed heat publishes `ClassHeatTime` total + `OK` and, when the start has event laps, one `ClassHeatLapTime` per lap from the attempt's splits; it writes no ordinary result, event split, place or qualification change and no CMS write. A total alone remains a complete slot for stage commitment even before per-lap rows are present: the stage panel shows the timing total beside the lap rows, and «Зафиксировать этап» is available without them. Stage commitment remains a separate CMS-panel action.
 - The manual heat-time form and stage seeding/reassignment/removal/commit keep `ORGANIZER`/`ADMINISTRATOR` access. A running heat attempt refuses a manual write for that heat; stage commitment and structural stage changes are refused while any heat attempt of the stage runs.
 - «Завершить гонку» is refused while any category or heat attempt of the protocol category runs. See [timing](timing.md).
 
