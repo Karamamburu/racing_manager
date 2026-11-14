@@ -878,7 +878,10 @@ export class AnonymousSplitService {
           chosen.attemptId,
           chosen.participant.enrollmentId,
         );
-        const freshMarks = await this.repository.listMarks(chosen.attemptId, tx);
+        const freshMarks = await this.repository.listMarks(
+          chosen.attemptId,
+          tx,
+        );
         const freshPassCount = boundPassCount(
           freshMarks,
           chosen.participant.enrollmentId,
