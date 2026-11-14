@@ -5369,7 +5369,7 @@ describe('TimingService', () => {
         USER_ID,
         EVENT_ID,
         ATTEMPT_ID,
-        completeAttemptDto({ lastIssuedSequence: 3 }),
+        completeAttemptDto({ lastIssuedSequence: 99 }),
       );
 
       expect(roles.assertHasAnyRole).toHaveBeenCalledWith(
