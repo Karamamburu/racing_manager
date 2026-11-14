@@ -1650,7 +1650,9 @@ export class TimingRepository {
     eventId: string,
     startNumber: number,
     tx?: TimingTx,
-  ): Promise<Array<{ registrationId: string; firstName: string; lastName: string }>> {
+  ): Promise<
+    Array<{ registrationId: string; firstName: string; lastName: string }>
+  > {
     const rows = await this.db(tx).registration.findMany({
       where: { eventId, startNumber },
       select: { id: true, firstName: true, lastName: true },
@@ -1668,7 +1670,9 @@ export class TimingRepository {
     eventId: string,
     registrationId: string,
     tx?: TimingTx,
-  ): Promise<Array<{ enrollmentId: string; startId: string; formatId: number }>> {
+  ): Promise<
+    Array<{ enrollmentId: string; startId: string; formatId: number }>
+  > {
     const rows = await this.db(tx).enrollment.findMany({
       where: { eventId, registrationId, status: 'REGISTERED' },
       select: { id: true, startId: true, formatId: true },
@@ -2273,7 +2277,11 @@ export class TimingRepository {
     eventId: string,
     tx?: TimingTx,
   ): Promise<
-    Array<{ attemptId: string; officialStartedAt: Date; status: TimingSessionStatus }>
+    Array<{
+      attemptId: string;
+      officialStartedAt: Date;
+      status: TimingSessionStatus;
+    }>
   > {
     const rows = await this.db(tx).timingSession.findMany({
       where: { eventId, status: 'RUNNING' },

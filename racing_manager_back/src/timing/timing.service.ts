@@ -1206,7 +1206,12 @@ export class TimingService {
       TIMING_OPERATE_ROLE_CODES,
     );
     if (dto.kind === 'ANONYMOUS_SPLIT' && dto.attemptId === undefined) {
-      return this.captureBlockFreeSplit(authentikId, eventId, dto, idempotencyKey);
+      return this.captureBlockFreeSplit(
+        authentikId,
+        eventId,
+        dto,
+        idempotencyKey,
+      );
     }
     const attempt = await this.repository.findAttempt(dto.attemptId);
     if (attempt === null || attempt.eventId !== eventId) {
@@ -2971,10 +2976,13 @@ export class TimingService {
       ),
     );
     const eventSplitMarks = new Set(
-      eventSplits.map((split) => split.legacyMarkId).filter((id) => id !== null),
+      eventSplits
+        .map((split) => split.legacyMarkId)
+        .filter((id) => id !== null),
     );
     const legacyPending = legacySplits.filter(
-      (split) => split.attemptId === attempt.id && !eventSplitMarks.has(split.splitId),
+      (split) =>
+        split.attemptId === attempt.id && !eventSplitMarks.has(split.splitId),
     );
     if (blockingSplits.length > 0 || legacyPending.length > 0) {
       // Only assignment, cancellation or quick undo clears a split. A
@@ -2986,11 +2994,17 @@ export class TimingService {
       ];
       const instants = [
         ...blockingSplits.map((split) =>
-          formatQueueElapsed(split.captureInstant.getTime() -
-            (split.candidates.find((candidate) => candidate.attemptId === attempt.id)
-              ?.officialStartedAt.getTime() ?? split.captureInstant.getTime())),
+          formatQueueElapsed(
+            split.captureInstant.getTime() -
+              (split.candidates
+                .find((candidate) => candidate.attemptId === attempt.id)
+                ?.officialStartedAt.getTime() ??
+                split.captureInstant.getTime()),
+          ),
         ),
-        ...legacyPending.map((split) => formatQueueElapsed(split.officialElapsedMs)),
+        ...legacyPending.map((split) =>
+          formatQueueElapsed(split.officialElapsedMs),
+        ),
       ].join(', ');
       const message =
         splitIds.length === 1

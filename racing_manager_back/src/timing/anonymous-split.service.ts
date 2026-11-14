@@ -466,8 +466,16 @@ export class AnonymousSplitService {
         );
       }
       const [maxEvent, maxAttempt] = await Promise.all([
-        this.repository.maxAppliedEventReceiptAt(eventId, dto.workstationInstanceId, tx),
-        this.repository.maxAppliedAttemptReceiptAt(eventId, dto.workstationInstanceId, tx),
+        this.repository.maxAppliedEventReceiptAt(
+          eventId,
+          dto.workstationInstanceId,
+          tx,
+        ),
+        this.repository.maxAppliedAttemptReceiptAt(
+          eventId,
+          dto.workstationInstanceId,
+          tx,
+        ),
       ]);
       const captureAt = receipt.createdAt.getTime();
       if (
@@ -521,13 +529,17 @@ export class AnonymousSplitService {
     const actorUserId = await this.requireUserId(authentikId);
     const now = new Date();
     const retired = await this.repository.withTransaction(async (tx) => {
-      const updated = await this.repository.retireEventSplit(tx, split.splitId, {
-        state: 'CANCELLED',
-        resolvedAt: now,
-        resolvedByUserId: actorUserId,
-        resolvedWorkstationInstanceId: null,
-        resolutionReason: reason,
-      });
+      const updated = await this.repository.retireEventSplit(
+        tx,
+        split.splitId,
+        {
+          state: 'CANCELLED',
+          resolvedAt: now,
+          resolvedByUserId: actorUserId,
+          resolvedWorkstationInstanceId: null,
+          resolutionReason: reason,
+        },
+      );
       if (updated === null) {
         throw timingError(
           TimingErrorCode.SPLIT_ALREADY_RESOLVED,
@@ -547,7 +559,9 @@ export class AnonymousSplitService {
         oldValues: {
           state: 'QUEUED',
           capturedAt: split.captureInstant.toISOString(),
-          candidateAttemptIds: split.candidates.map((candidate) => candidate.attemptId),
+          candidateAttemptIds: split.candidates.map(
+            (candidate) => candidate.attemptId,
+          ),
         },
         newValues: { state: 'CANCELLED', resolvedAt: now.toISOString() },
         reason,
@@ -597,19 +611,31 @@ export class AnonymousSplitService {
       );
     }
     if (split.legacyMarkId !== null) {
-      return this.assignLegacySplit(authentikId, eventId, split, dto, idempotencyKey);
+      return this.assignLegacySplit(
+        authentikId,
+        eventId,
+        split,
+        dto,
+        idempotencyKey,
+      );
     }
 
     const actorUserId = await this.requireUserId(authentikId);
     let registrationId: string;
     let enrollmentId: string | null = null;
     if (dto.startNumber !== undefined) {
-      const registrations = await this.repository.findRegistrationsByStartNumber(
-        eventId,
-        dto.startNumber,
-      );
+      const registrations =
+        await this.repository.findRegistrationsByStartNumber(
+          eventId,
+          dto.startNumber,
+        );
       if (registrations.length === 0) {
-        await this.rejectEventAssignment(eventId, split.splitId, dto, 'NUMBER_UNKNOWN');
+        await this.rejectEventAssignment(
+          eventId,
+          split.splitId,
+          dto,
+          'NUMBER_UNKNOWN',
+        );
         throw timingError(
           TimingErrorCode.NUMBER_UNKNOWN,
           'No registration of this event carries the number.',
@@ -617,7 +643,12 @@ export class AnonymousSplitService {
         );
       }
       if (registrations.length > 1) {
-        await this.rejectEventAssignment(eventId, split.splitId, dto, 'NUMBER_DUPLICATE');
+        await this.rejectEventAssignment(
+          eventId,
+          split.splitId,
+          dto,
+          'NUMBER_DUPLICATE',
+        );
         throw timingError(
           TimingErrorCode.NUMBER_DUPLICATE,
           'Two registrations of this event carry the same number.',
@@ -634,12 +665,20 @@ export class AnonymousSplitService {
     } else if (dto.enrollmentId !== undefined) {
       const participants = await Promise.all(
         split.candidates.map((candidate) =>
-          this.repository.findParticipant(candidate.attemptId, dto.enrollmentId as string),
+          this.repository.findParticipant(
+            candidate.attemptId,
+            dto.enrollmentId as string,
+          ),
         ),
       );
       const participant = participants.find((row) => row !== null);
       if (participant === undefined || participant === null) {
-        await this.rejectEventAssignment(eventId, split.splitId, dto, 'NOT_FOUND');
+        await this.rejectEventAssignment(
+          eventId,
+          split.splitId,
+          dto,
+          'NOT_FOUND',
+        );
         throw timingError(
           TimingErrorCode.NOT_FOUND,
           'The enrollment is not a frozen participant of this split.',
@@ -656,9 +695,13 @@ export class AnonymousSplitService {
       );
     }
 
-    const enrollments = enrollmentId === null
-      ? await this.repository.listEnrollmentsForRegistration(eventId, registrationId)
-      : [{ enrollmentId, startId: '', formatId: 0 }];
+    const enrollments =
+      enrollmentId === null
+        ? await this.repository.listEnrollmentsForRegistration(
+            eventId,
+            registrationId,
+          )
+        : [{ enrollmentId, startId: '', formatId: 0 }];
 
     const failures: Array<Record<string, unknown>> = [];
     const qualifying: Array<{
@@ -683,7 +726,10 @@ export class AnonymousSplitService {
                 enrollment.formatId === candidate.formatId,
             );
       if (matching.length === 0) {
-        failures.push({ attemptId: candidate.attemptId, reason: 'NOT_ENROLLED' });
+        failures.push({
+          attemptId: candidate.attemptId,
+          reason: 'NOT_ENROLLED',
+        });
         continue;
       }
       let found: TimingParticipantRow | null = null;
@@ -695,7 +741,10 @@ export class AnonymousSplitService {
         if (found !== null) break;
       }
       if (found === null) {
-        failures.push({ attemptId: candidate.attemptId, reason: 'NOT_ENROLLED' });
+        failures.push({
+          attemptId: candidate.attemptId,
+          reason: 'NOT_ENROLLED',
+        });
         continue;
       }
       if (found.excludedReason !== null) {
@@ -707,7 +756,10 @@ export class AnonymousSplitService {
         continue;
       }
       if (candidate.attemptStatus !== 'RUNNING') {
-        failures.push({ attemptId: candidate.attemptId, reason: 'ATTEMPT_CLOSED' });
+        failures.push({
+          attemptId: candidate.attemptId,
+          reason: 'ATTEMPT_CLOSED',
+        });
         continue;
       }
       if (candidate.officialStartedAt >= split.captureInstant) {
@@ -754,8 +806,9 @@ export class AnonymousSplitService {
         ? qualifying.length === 1
           ? qualifying[0]
           : null
-        : qualifying.find((candidate) => candidate.attemptId === dto.chosenAttemptId) ??
-          null;
+        : (qualifying.find(
+            (candidate) => candidate.attemptId === dto.chosenAttemptId,
+          ) ?? null);
     if (chosen === null) {
       if (dto.chosenAttemptId !== undefined) {
         throw timingError(
@@ -788,7 +841,8 @@ export class AnonymousSplitService {
       (candidate) => candidate.attemptId === chosen.attemptId,
     );
     const officialElapsedMs = chosenCandidate
-      ? split.captureInstant.getTime() - chosenCandidate.officialStartedAt.getTime()
+      ? split.captureInstant.getTime() -
+        chosenCandidate.officialStartedAt.getTime()
       : 0;
     if (officialElapsedMs <= 0) {
       throw timingError(
@@ -834,18 +888,24 @@ export class AnonymousSplitService {
           chosen.marks,
           created,
         );
-        const assigned = await this.repository.assignEventSplit(tx, split.splitId, {
-          assignedAttemptId: chosen.attemptId,
-          assignedAt: new Date(),
-          assignedByUserId: actorUserId,
-          assignedWorkstationInstanceId: dto.workstationInstanceId,
-          assignmentDeviceSequence: dto.deviceSequence,
-          offeredAttemptIds: qualifying.map((candidate) => candidate.attemptId),
-          chosenByReferee: dto.chosenAttemptId !== undefined,
-          resolvedAt: new Date(),
-          resolvedByUserId: actorUserId,
-          resolvedWorkstationInstanceId: dto.workstationInstanceId,
-        });
+        const assigned = await this.repository.assignEventSplit(
+          tx,
+          split.splitId,
+          {
+            assignedAttemptId: chosen.attemptId,
+            assignedAt: new Date(),
+            assignedByUserId: actorUserId,
+            assignedWorkstationInstanceId: dto.workstationInstanceId,
+            assignmentDeviceSequence: dto.deviceSequence,
+            offeredAttemptIds: qualifying.map(
+              (candidate) => candidate.attemptId,
+            ),
+            chosenByReferee: dto.chosenAttemptId !== undefined,
+            resolvedAt: new Date(),
+            resolvedByUserId: actorUserId,
+            resolvedWorkstationInstanceId: dto.workstationInstanceId,
+          },
+        );
         if (assigned === null) {
           throw timingError(
             TimingErrorCode.SPLIT_ALREADY_RESOLVED,
@@ -879,7 +939,9 @@ export class AnonymousSplitService {
           oldValues: {
             splitId: split.splitId,
             captureInstant: split.captureInstant.toISOString(),
-            candidateAttemptIds: split.candidates.map((candidate) => candidate.attemptId),
+            candidateAttemptIds: split.candidates.map(
+              (candidate) => candidate.attemptId,
+            ),
           },
           newValues: {
             enrollmentId: chosen.participant.enrollmentId,
@@ -887,7 +949,9 @@ export class AnonymousSplitService {
             lapNumber: applied.lapNumber,
             officialAt: applied.officialAt.toISOString(),
             officialElapsedMs,
-            offeredAttemptIds: qualifying.map((candidate) => candidate.attemptId),
+            offeredAttemptIds: qualifying.map(
+              (candidate) => candidate.attemptId,
+            ),
             chosenByReferee: dto.chosenAttemptId !== undefined,
             deviceSequence: dto.deviceSequence,
             idempotencyKey: key,
@@ -906,8 +970,16 @@ export class AnonymousSplitService {
         };
       });
     } catch (error) {
-      if (error instanceof TimingDomainError && error.code !== TimingErrorCode.CONFLICT) {
-        await this.rejectEventAssignment(eventId, split.splitId, dto, error.code);
+      if (
+        error instanceof TimingDomainError &&
+        error.code !== TimingErrorCode.CONFLICT
+      ) {
+        await this.rejectEventAssignment(
+          eventId,
+          split.splitId,
+          dto,
+          error.code,
+        );
       }
       throw error;
     }
@@ -930,7 +1002,13 @@ export class AnonymousSplitService {
         { splitId: split.splitId },
       );
     }
-    const result = await this.assign(authentikId, eventId, legacy.id, dto, idempotencyKey);
+    const result = await this.assign(
+      authentikId,
+      eventId,
+      legacy.id,
+      dto,
+      idempotencyKey,
+    );
     const actorUserId = await this.requireUserId(authentikId);
     await this.repository.withTransaction(async (tx) => {
       await this.repository.assignEventSplit(tx, split.splitId, {
