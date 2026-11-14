@@ -46,7 +46,7 @@ Live manual timing of protocol categories: attempt lifecycle, number and tile ca
 - **Event ledger:** a block-free capture and its assignment use `timing_event_capture_receipts`; an accepted assignment also writes an attempt receipt with `timing_capture_origin = SPLIT_ASSIGN`. Closure coverage reads `CAPTURE` receipts only, so assignment sequences never hide or create a capture gap. `timing_event_audit` keeps capture, undo, cancellation and refused assignment history.
 - **Closure gate:** a queued split blocks every still-running candidate, not only the attempt displayed at capture; a non-candidate or later-starting attempt is never blocked. The refusal names the split, its capture instant and all blocked candidates.
 - **Legacy queue:** pending `ANONYMOUS_SPLIT` marks are backfilled into the split/candidate tables with `legacy_mark_id` and one candidate; their mark is never rewritten, they stay assignable only in their captured attempt and block only that attempt.
-- **Pass storage:** a split-derived pass is a new `TimingMark` in the resolved attempt with `source_split_id` unique, `clock_epoch_id` null, raw and official columns equal to the capture instant and the elapsed value in that attempt's scale; `source_split_id` is the database-level one-assignment guarantee. `timing_marks` keeps a check that each mark has either an epoch or a source split.
+- **Pass storage:** a split-derived pass is a new `TimingMark` in the resolved attempt with `source_split_id` unique, `clock_epoch_id` null, `device_sequence` null, raw and official columns equal to the capture instant and the elapsed value in that attempt's scale. Its assignment sequence lives on the `SPLIT_ASSIGN` attempt receipt, the event receipt and the audit, never in the mark's capture sequence slot. `source_split_id` is the database-level one-assignment guarantee; SQL checks keep either an epoch or a source split and forbid a capture sequence on a split-derived mark.
 - **Schema:** `migrate_manual_timing_3_2026_11_14.sql` (+ down) adds `timing_event_splits`, `timing_anonymous_split_candidates`, `timing_event_capture_receipts`, `timing_event_audit`, `timing_split_state`, `timing_capture_origin`, the receipt-key `origin` and the nullable/split-provenance mark columns. The down file refuses to run while split-derived passes exist.
 - **UI:** the «Текущий блок» selector is removed; the number field captures with no block, the queue shows every candidate's label and elapsed value, and an ambiguous number opens an explicit choice dialog with no pre-selection.
 
@@ -54,7 +54,7 @@ Live manual timing of protocol categories: attempt lifecycle, number and tile ca
 
 - API: `racing_manager_back/src/timing/` (`timing.controller.ts`, `timing.service.ts`, `timing.repository.ts`, `timing.domain.ts`, `timing.dto.ts`, `timing.views.ts`, `timing.exception.filter.ts`), `src/admin/referee-role.*`.
 - Front: `racing_manager_front/src/features/timing/`, `pages/TimingPage/`, the event-page `«Хронометраж»` entry and the `lapSplits` protocol column.
-- SQL: `racing_manager_db/db/migrate_manual_timing_2026_11_13.sql` (+ down), `migrate_referee_role_2026_11_13.sql` (+ down) and `migrate_manual_timing_3_2026_11_14.sql` (+ down).
+- SQL: `racing_manager_db/db/migrate_manual_timing_2026_11_13.sql` (+ down), `migrate_referee_role_2026_11_13.sql` (+ down), `migrate_manual_timing_3_2026_11_14.sql` (+ down) and `migrate_manual_timing_3_2026_11_14_split_sequence_guard.sql` (+ down).
 
 ## Breakage signals
 

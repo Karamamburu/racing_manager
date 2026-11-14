@@ -745,6 +745,9 @@ model TimingMark {
   createdAt             DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  // SQL-only check: a split-derived pass has no capture sequence
+  // (source_split_id IS NULL OR device_sequence IS NULL). See
+  // migrate_manual_timing_3_2026_11_14_split_sequence_guard.sql.
   @@index([sessionId, status], map: "idx_timing_marks_session_status")
   @@index([sessionId, enrollmentId, officialElapsedMs], map: "idx_timing_marks_session_enrollment_elapsed")
   @@index([sessionId, workstationInstanceId, deviceSequence], map: "idx_timing_marks_session_workstation_sequence")

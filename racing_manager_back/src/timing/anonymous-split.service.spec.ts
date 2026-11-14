@@ -1227,6 +1227,7 @@ describe('event-scoped number-only assignment', () => {
         officialAt: NOW,
         officialElapsedMs: 60_000,
         rawElapsedMs: 60_000,
+        deviceSequence: null,
       }),
     );
     expect(assignEventSplit).toHaveBeenCalledWith(

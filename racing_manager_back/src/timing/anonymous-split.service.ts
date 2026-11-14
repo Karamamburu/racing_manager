@@ -902,7 +902,10 @@ export class AnonymousSplitService {
           lapNumber: null,
           status: 'BOUND',
           workstationInstanceId: dto.workstationInstanceId,
-          deviceSequence: dto.deviceSequence,
+          // The assignment's sequence belongs to the event ledger and the
+          // SPLIT_ASSIGN attempt receipt. The mark must not borrow a capture
+          // sequence: a later closure would read it as an unconfirmed capture.
+          deviceSequence: null,
           idempotencyKey: key,
         });
         const applied = await this.reindexLaps(
