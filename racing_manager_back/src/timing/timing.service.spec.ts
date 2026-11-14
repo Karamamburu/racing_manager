@@ -1558,6 +1558,16 @@ describe('TimingService', () => {
           capturedAt: NOW.toISOString(),
           officialElapsedMs: 20_000,
           status: 'QUEUED',
+          bound: true,
+          candidates: [
+            {
+              attemptId: ATTEMPT_ID,
+              blockKey: `category:${START_A}:1:M`,
+              attemptLabel: 'Старт · Формат 1 · M',
+              officialElapsedMs: 20_000,
+            },
+          ],
+          captureDeviceSequence: null,
         },
       ]);
 

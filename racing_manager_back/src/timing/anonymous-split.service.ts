@@ -580,6 +580,16 @@ function toQueueEntry(
     capturedAt: row.capturedAt.toISOString(),
     officialElapsedMs: row.officialElapsedMs,
     status: 'QUEUED',
+    bound: true,
+    candidates: [
+      {
+        attemptId: row.attemptId,
+        blockKey: attemptBlockKey(row),
+        attemptLabel: attemptLabel(row, labels),
+        officialElapsedMs: row.officialElapsedMs,
+      },
+    ],
+    captureDeviceSequence: null,
   };
 }
 
@@ -601,6 +611,16 @@ function toRetiredQueueEntry(
     capturedAt: mark.officialAt.toISOString(),
     officialElapsedMs: mark.officialElapsedMs,
     status: 'QUEUED',
+    bound: true,
+    candidates: [
+      {
+        attemptId: attempt.id,
+        blockKey: attemptBlockKey(attempt),
+        attemptLabel: attemptLabel(attempt, labels),
+        officialElapsedMs: mark.officialElapsedMs,
+      },
+    ],
+    captureDeviceSequence: mark.deviceSequence,
   };
 }
 

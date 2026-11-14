@@ -486,6 +486,16 @@ describe('AnonymousSplitService', () => {
           capturedAt: new Date(NOW.getTime() + 30_000).toISOString(),
           officialElapsedMs: 30_000,
           status: 'QUEUED',
+          bound: true,
+          candidates: [
+            {
+              attemptId: ATTEMPT_ID,
+              blockKey: `category:${START_ID}:1:M`,
+              attemptLabel: 'Кубковая гонка · Формат 1 · M',
+              officialElapsedMs: 30_000,
+            },
+          ],
+          captureDeviceSequence: null,
         },
         {
           splitId: 'split-b',
@@ -495,6 +505,16 @@ describe('AnonymousSplitService', () => {
           capturedAt: new Date(NOW.getTime() + 40_000).toISOString(),
           officialElapsedMs: 40_000,
           status: 'QUEUED',
+          bound: true,
+          candidates: [
+            {
+              attemptId: 'attempt-heat',
+              blockKey: `heat:${RACE_ID}:stage-1:2`,
+              attemptLabel: 'Спринт · Этап stage-1 · Заезд 2',
+              officialElapsedMs: 40_000,
+            },
+          ],
+          captureDeviceSequence: null,
         },
       ]);
       expect(repository.listAnonymousSplits).toHaveBeenCalledWith(
@@ -889,6 +909,16 @@ describe('AnonymousSplitService', () => {
         capturedAt: new Date(NOW.getTime() + 30_000).toISOString(),
         officialElapsedMs: 30_000,
         status: 'QUEUED',
+        bound: true,
+        candidates: [
+          {
+            attemptId: ATTEMPT_ID,
+            blockKey: `category:${START_ID}:1:M`,
+            attemptLabel: 'Кубковая гонка · Формат 1 · M',
+            officialElapsedMs: 30_000,
+          },
+        ],
+        captureDeviceSequence: 4,
       });
       expect(roles.assertHasAnyRole).toHaveBeenCalledWith(
         USER_ID,

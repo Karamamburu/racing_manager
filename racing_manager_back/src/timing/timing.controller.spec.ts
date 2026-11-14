@@ -92,6 +92,16 @@ const RETIRED_SPLIT: TimingAnonymousSplitView = {
   capturedAt: '2026-11-13T10:00:05.000Z',
   officialElapsedMs: 5_000,
   status: 'QUEUED',
+  bound: true,
+  candidates: [
+    {
+      attemptId: ATTEMPT_ID,
+      blockKey: `heat:${RACE_ID}:${STAGE_ID}:1`,
+      attemptLabel: 'Race · Stage 1 · Heat 1',
+      officialElapsedMs: 5_000,
+    },
+  ],
+  captureDeviceSequence: null,
 };
 
 const SURFACE = {

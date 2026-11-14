@@ -125,17 +125,34 @@ export interface TimingStageGroupView {
 }
 
 /** One queued anonymous split of the event, oldest capture first. */
-export interface TimingAnonymousSplitView {
-  splitId: string;
+/** One candidate attempt of a queued split, labelled in that attempt's scale. */
+export interface TimingAnonymousSplitCandidateView {
   attemptId: string;
   /** `blockKey` of the attempt's block, so the queue can name it. */
   blockKey: string;
   attemptLabel: string;
+  /** Elapsed value of the capture instant since this attempt's official start. */
+  officialElapsedMs: number;
+}
+
+export interface TimingAnonymousSplitView {
+  splitId: string;
+  /** The captured attempt of a legacy entry; null for a block-free split. */
+  attemptId: string | null;
+  /** Legacy bound entry only. */
+  blockKey?: string;
+  /** Legacy bound entry only. */
+  attemptLabel?: string;
   /** The press instant, ISO-8601. */
   capturedAt: string;
-  /** Elapsed value since the attempt's own official start, integer milliseconds. */
-  officialElapsedMs: number;
+  /** Legacy bound entry only. */
+  officialElapsedMs?: number;
   status: 'QUEUED';
+  /** True for a split queued before the block-free change. */
+  bound: boolean;
+  candidates: TimingAnonymousSplitCandidateView[];
+  /** The event sequence of the capture, used by the event-scoped undo. */
+  captureDeviceSequence: number | null;
 }
 
 /** The whole surface of one event: every protocol category plus the lock holder. */
