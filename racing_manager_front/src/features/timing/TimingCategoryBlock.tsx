@@ -2,8 +2,8 @@ import {
   DownOutlined,
   FileTextOutlined,
   PlayCircleOutlined,
+  RightOutlined,
   UnlockOutlined,
-  UpOutlined,
 } from '@ant-design/icons';
 import { Alert, Button, Card, Col, Row, Space, Tag, Typography } from 'antd';
 import { useState } from 'react';
@@ -131,7 +131,16 @@ export function TimingCategoryBlock({
     <Card
       size="small"
       title={
-        <Space wrap size={8}>
+        <Space wrap size={6} align="baseline">
+          <Button
+            type="text"
+            size="small"
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? 'Развернуть блок' : 'Свернуть блок'}
+            title={collapsed ? 'Развернуть блок' : 'Свернуть блок'}
+            icon={collapsed ? <RightOutlined /> : <DownOutlined />}
+            onClick={() => setCollapsed((current) => !current)}
+          />
           {isHeat ? <Tag color="geekblue">Заезд</Tag> : null}
           <Typography.Text strong>{title}</Typography.Text>
           <Tag color={STATE_COLORS[block.state]}>{STATE_LABELS[block.state]}</Tag>
@@ -164,14 +173,6 @@ export function TimingCategoryBlock({
               Захват у другой станции
             </Typography.Text>
           ) : null}
-          <Button
-            type="text"
-            size="small"
-            aria-expanded={!collapsed}
-            aria-label={collapsed ? 'Развернуть блок' : 'Свернуть блок'}
-            icon={collapsed ? <DownOutlined /> : <UpOutlined />}
-            onClick={() => setCollapsed((current) => !current)}
-          />
         </Space>
       }
     >
