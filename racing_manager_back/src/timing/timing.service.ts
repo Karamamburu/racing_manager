@@ -2959,25 +2959,53 @@ export class TimingService {
     statuses: ReadonlyMap<string, EnrollmentStatus>,
     input: ClosureInput,
   ): Promise<void> {
-    const pendingSplits = (
-      await this.repository.listAnonymousSplits(attempt.eventId, tx)
-    ).filter((split) => split.attemptId === attempt.id);
-    if (pendingSplits.length > 0) {
-      // FR-14: only assignment, cancellation or quick undo clears a split; a
-      // completion, force-completion or cancellation of the attempt itself is
-      // refused and names every queued split. The message names the capture
-      // instants so the operator can find the entry in the top queue.
-      const anonymousSplitIds = pendingSplits.map((split) => split.splitId);
-      const instants = pendingSplits
-        .map((split) => formatQueueElapsed(split.officialElapsedMs))
-        .join(', ');
+    const [eventSplits, legacySplits] = await Promise.all([
+      this.repository.listBlockingEventSplitsForAttempt(attempt.id, tx),
+      this.repository.listAnonymousSplits(attempt.eventId, tx),
+    ]);
+    const blockingSplits = eventSplits.filter((split) =>
+      split.candidates.some(
+        (candidate) =>
+          candidate.attemptId === attempt.id &&
+          candidate.attemptStatus === 'RUNNING',
+      ),
+    );
+    const eventSplitMarks = new Set(
+      eventSplits.map((split) => split.legacyMarkId).filter((id) => id !== null),
+    );
+    const legacyPending = legacySplits.filter(
+      (split) => split.attemptId === attempt.id && !eventSplitMarks.has(split.splitId),
+    );
+    if (blockingSplits.length > 0 || legacyPending.length > 0) {
+      // Only assignment, cancellation or quick undo clears a split. A
+      // block-free split holds every still-running candidate; a legacy split
+      // holds only its captured attempt.
+      const splitIds = [
+        ...blockingSplits.map((split) => split.splitId),
+        ...legacyPending.map((split) => split.splitId),
+      ];
+      const instants = [
+        ...blockingSplits.map((split) =>
+          formatQueueElapsed(split.captureInstant.getTime() -
+            (split.candidates.find((candidate) => candidate.attemptId === attempt.id)
+              ?.officialStartedAt.getTime() ?? split.captureInstant.getTime())),
+        ),
+        ...legacyPending.map((split) => formatQueueElapsed(split.officialElapsedMs)),
+      ].join(', ');
       const message =
-        pendingSplits.length === 1
+        splitIds.length === 1
           ? `В попытке есть неразмеченный сплит (${instants}): назначьте его или отмените в очереди неразмеченных сплитов.`
           : `В попытке есть неразмеченные сплиты (${instants}): назначьте их или отмените в очереди неразмеченных сплитов.`;
       throw timingError(TimingErrorCode.PENDING_REMAINS, message, {
         attemptId: attempt.id,
-        anonymousSplitIds,
+        anonymousSplitIds: splitIds,
+        splits: blockingSplits.map((split) => ({
+          splitId: split.splitId,
+          capturedAt: split.captureInstant.toISOString(),
+          blockedAttemptIds: split.candidates
+            .filter((candidate) => candidate.attemptStatus === 'RUNNING')
+            .map((candidate) => candidate.attemptId),
+        })),
       });
     }
     const receipts = await this.repository.listAttemptReceipts(attempt.id, tx);
@@ -4816,7 +4844,9 @@ function missingReceiptSequences(
   const covered = new Set(
     receipts
       .filter(
-        (receipt) => receipt.workstationInstanceId === workstationInstanceId,
+        (receipt) =>
+          receipt.workstationInstanceId === workstationInstanceId &&
+          (receipt.origin ?? 'CAPTURE') === 'CAPTURE',
       )
       .map((receipt) => receipt.deviceSequence),
   );
@@ -4829,6 +4859,7 @@ function missingReceiptSequences(
   }
   for (const receipt of receipts) {
     if (receipt.workstationInstanceId !== workstationInstanceId) continue;
+    if ((receipt.origin ?? 'CAPTURE') !== 'CAPTURE') continue;
     highestKnown = Math.max(highestKnown, receipt.deviceSequence);
   }
   highestKnown = Math.max(highestKnown, highestMark);

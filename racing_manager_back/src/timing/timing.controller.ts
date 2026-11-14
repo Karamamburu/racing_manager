@@ -35,6 +35,7 @@ import {
   ForceReleaseCaptureDto,
   OpenClockEpochDto,
   QuickUndoTimingPassDto,
+  QuickUndoTimingSplitDto,
   RebindTimingPassDto,
   StartHeatAttemptDto,
   StartTimingAttemptDto,
@@ -254,6 +255,26 @@ export class TimingController {
     @Body() dto: CancelAnonymousSplitDto,
   ): Promise<TimingAnonymousSplitView> {
     return this.anonymousSplitService.cancel(
+      req.session?.userSub,
+      eventId,
+      splitId,
+      dto,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/splits/:splitId/undo`: withdraw the
+   * workstation's newest block-free capture. Event-scoped, no reason.
+   */
+  @Post('splits/:splitId/undo')
+  @HttpCode(HttpStatus.OK)
+  undoSplit(
+    @Req() req: Request,
+    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('splitId', new ParseUUIDPipe({ version: '4' })) splitId: string,
+    @Body() dto: QuickUndoTimingSplitDto,
+  ): Promise<TimingAnonymousSplitView> {
+    return this.anonymousSplitService.undoSplit(
       req.session?.userSub,
       eventId,
       splitId,

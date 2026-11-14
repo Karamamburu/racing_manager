@@ -11,6 +11,7 @@ import {
 import type {
   AssignAnonymousSplitDto,
   CancelAnonymousSplitDto,
+  QuickUndoTimingSplitDto,
 } from './timing.dto';
 import {
   TimingDomainError,
@@ -353,6 +354,10 @@ export class AnonymousSplitService {
       authentikId,
       TIMING_OPERATE_ROLE_CODES,
     );
+    const eventSplit = await this.repository.findEventSplit(splitId);
+    if (eventSplit !== null) {
+      return this.cancelEventSplit(authentikId, eventId, eventSplit, dto);
+    }
     const reason = normalizeReason(dto.reason);
     const actorUserId = await this.requireUserId(authentikId);
     const cancelledAt = new Date();
@@ -397,6 +402,160 @@ export class AnonymousSplitService {
     // (E-08); the durable state is `CANCELLED` on the mark and the audit row,
     // because the frozen split view describes a queue entry only.
     return toRetiredQueueEntry(mark, attempt, labels);
+  }
+
+  /** Event-scoped quick undo of a block-free split. */
+  async undoSplit(
+    authentikId: string | undefined,
+    eventId: string,
+    splitId: string,
+    dto: QuickUndoTimingSplitDto,
+  ): Promise<TimingAnonymousSplitView> {
+    await this.rolesService.assertHasAnyRole(
+      authentikId,
+      TIMING_OPERATE_ROLE_CODES,
+    );
+    const split = await this.repository.findEventSplit(splitId);
+    if (split === null || split.eventId !== eventId) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'Anonymous split not found.',
+        { splitId },
+      );
+    }
+    if (split.state !== 'QUEUED') {
+      throw timingError(
+        TimingErrorCode.SPLIT_ALREADY_RESOLVED,
+        'This split is already resolved.',
+        { splitId, state: split.state },
+      );
+    }
+    if (
+      split.captureWorkstationInstanceId !== dto.workstationInstanceId ||
+      split.captureDeviceSequence !== dto.deviceSequence ||
+      split.legacyMarkId !== null
+    ) {
+      throw timingError(
+        TimingErrorCode.SPLIT_UNDO_NOT_LAST,
+        'This split is not the workstation last capture action.',
+        { splitId },
+      );
+    }
+    const lock = await this.repository.getCaptureLock(eventId);
+    if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
+      throw timingError(
+        TimingErrorCode.CAPTURE_NOT_HELD,
+        'This workstation does not hold capture.',
+        { workstationInstanceId: dto.workstationInstanceId },
+      );
+    }
+    const actorUserId = await this.requireUserId(authentikId);
+    const now = new Date();
+    const retired = await this.repository.withTransaction(async (tx) => {
+      const receipt = await this.repository.findEventReceipt(
+        tx,
+        eventId,
+        dto.workstationInstanceId,
+        dto.deviceSequence,
+      );
+      if (receipt === null || receipt.status !== 'APPLIED') {
+        throw timingError(
+          TimingErrorCode.SPLIT_UNDO_NOT_LAST,
+          'This split is not the workstation last capture action.',
+          { splitId },
+        );
+      }
+      const [maxEvent, maxAttempt] = await Promise.all([
+        this.repository.maxAppliedEventReceiptAt(eventId, dto.workstationInstanceId, tx),
+        this.repository.maxAppliedAttemptReceiptAt(eventId, dto.workstationInstanceId, tx),
+      ]);
+      const captureAt = receipt.createdAt.getTime();
+      if (
+        (maxEvent !== null && maxEvent.getTime() > captureAt) ||
+        (maxAttempt !== null && maxAttempt.getTime() > captureAt)
+      ) {
+        throw timingError(
+          TimingErrorCode.SPLIT_UNDO_NOT_LAST,
+          'This split is not the workstation last capture action.',
+          { splitId },
+        );
+      }
+      const updated = await this.repository.retireEventSplit(tx, splitId, {
+        state: 'UNDONE',
+        resolvedAt: now,
+        resolvedByUserId: actorUserId,
+        resolvedWorkstationInstanceId: dto.workstationInstanceId,
+        resolutionReason: null,
+      });
+      if (updated === null) {
+        throw timingError(
+          TimingErrorCode.SPLIT_ALREADY_RESOLVED,
+          'This split is already resolved.',
+          { splitId },
+        );
+      }
+      await this.repository.insertEventAudit(tx, {
+        eventId,
+        actorUserId,
+        action: 'ANONYMOUS_SPLIT_UNDO',
+        targetType: 'ANONYMOUS_SPLIT',
+        targetId: splitId,
+        oldValues: { state: 'QUEUED' },
+        newValues: { state: 'UNDONE', resolvedAt: now.toISOString() },
+        reason: null,
+      });
+      return updated;
+    });
+    const labels = await this.loadLabels(eventId);
+    return toEventQueueEntry(retired, labels);
+  }
+
+  /** Event-scoped cancellation of a block-free split. */
+  private async cancelEventSplit(
+    authentikId: string | undefined,
+    eventId: string,
+    split: TimingEventSplitRow,
+    dto: CancelAnonymousSplitDto,
+  ): Promise<TimingAnonymousSplitView> {
+    const reason = normalizeReason(dto.reason);
+    const actorUserId = await this.requireUserId(authentikId);
+    const now = new Date();
+    const retired = await this.repository.withTransaction(async (tx) => {
+      const updated = await this.repository.retireEventSplit(tx, split.splitId, {
+        state: 'CANCELLED',
+        resolvedAt: now,
+        resolvedByUserId: actorUserId,
+        resolvedWorkstationInstanceId: null,
+        resolutionReason: reason,
+      });
+      if (updated === null) {
+        throw timingError(
+          TimingErrorCode.SPLIT_ALREADY_RESOLVED,
+          'This split is already resolved.',
+          { splitId: split.splitId },
+        );
+      }
+      if (split.legacyMarkId !== null) {
+        await this.repository.cancelAnonymousSplit(tx, split.legacyMarkId);
+      }
+      await this.repository.insertEventAudit(tx, {
+        eventId,
+        actorUserId,
+        action: 'ANONYMOUS_SPLIT_CANCEL',
+        targetType: 'ANONYMOUS_SPLIT',
+        targetId: split.splitId,
+        oldValues: {
+          state: 'QUEUED',
+          capturedAt: split.captureInstant.toISOString(),
+          candidateAttemptIds: split.candidates.map((candidate) => candidate.attemptId),
+        },
+        newValues: { state: 'CANCELLED', resolvedAt: now.toISOString() },
+        reason,
+      });
+      return updated;
+    });
+    const labels = await this.loadLabels(eventId);
+    return toEventQueueEntry(retired, labels);
   }
 
   /**

@@ -146,6 +146,9 @@ function createRepositoryFake() {
       (): Promise<TimingEventSplitRow[]> => Promise.resolve([]),
     ),
     findEventSplit: jest.fn((): Promise<TimingEventSplitRow | null> => Promise.resolve(null)),
+    listBlockingEventSplitsForAttempt: jest.fn(
+      (): Promise<TimingEventSplitRow[]> => Promise.resolve([]),
+    ),
     assignEventSplit: jest.fn(),
     findRegistrationsByStartNumber: jest.fn(),
     listEnrollmentsForRegistration: jest.fn(),

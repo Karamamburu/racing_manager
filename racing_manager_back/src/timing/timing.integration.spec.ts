@@ -675,6 +675,10 @@ class InMemoryTimingRepository {
     return Promise.resolve(null);
   }
 
+  listBlockingEventSplitsForAttempt(): Promise<TimingEventSplitRow[]> {
+    return Promise.resolve([]);
+  }
+
   listAnonymousSplits(eventId: string): Promise<TimingAnonymousSplitRow[]> {
     const rows: TimingAnonymousSplitRow[] = [];
     for (const mark of this.marks) {
