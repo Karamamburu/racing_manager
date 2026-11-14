@@ -4869,6 +4869,10 @@ function missingReceiptSequences(
   for (const mark of marks) {
     if (mark.workstationInstanceId !== workstationInstanceId) continue;
     if (mark.deviceSequence === null) continue;
+    // A pass created by a split assignment carries the assignment's event
+    // sequence, not a capture sequence of this attempt. It must not expand the
+    // attempt's capture ceiling or look like an unconfirmed capture.
+    if (mark.sourceSplitId !== null && mark.sourceSplitId !== undefined) continue;
     highestMark = Math.max(highestMark, mark.deviceSequence);
   }
   for (const receipt of receipts) {

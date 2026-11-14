@@ -5799,6 +5799,34 @@ describe('TimingService', () => {
       expect(repository.updateAttemptStatus).not.toHaveBeenCalled();
     });
 
+    it('ignores a split-derived pass sequence in capture receipt coverage', async () => {
+      arrangeClosure({
+        participants: [participantRow({ enrollmentId: 'enrollment-a' })],
+        marks: [
+          ...passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+          markRow({
+            id: 'split-pass',
+            enrollmentId: null,
+            registrationId: null,
+            startNumber: null,
+            sourceSplitId: 'split-1',
+            deviceSequence: 99,
+            status: 'BOUND',
+          }),
+        ],
+        receipts: receiptRows([1, 2, 3]),
+      });
+
+      const closed = await service.completeAttempt(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        completeAttemptDto({ lastIssuedSequence: 3 }),
+      );
+
+      expect(closed.state).toBe('COMPLETED');
+    });
+
     it('cancels as CANCELLED and publishes nothing', async () => {
       const { published, auditInputs } = arrangeClosure({
         participants: [participantRow({ enrollmentId: 'enrollment-a' })],

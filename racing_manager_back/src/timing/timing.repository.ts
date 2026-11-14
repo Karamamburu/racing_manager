@@ -240,6 +240,7 @@ export type TimingMarkRow = {
   id: string;
   attemptId: string;
   clockEpochId: string | null;
+  sourceSplitId?: string | null;
   enrollmentId: string | null;
   registrationId: string | null;
   startNumber: number | null;
@@ -638,6 +639,7 @@ const MARK_SELECT = {
   id: true,
   sessionId: true,
   clockEpochId: true,
+  sourceSplitId: true,
   enrollmentId: true,
   registrationId: true,
   startNumber: true,
@@ -1313,6 +1315,7 @@ function toMarkRow(row: MarkQueryRow): TimingMarkRow {
     id: row.id,
     attemptId: row.sessionId,
     clockEpochId: row.clockEpochId,
+    sourceSplitId: row.sourceSplitId,
     enrollmentId: row.enrollmentId,
     registrationId: row.registrationId,
     startNumber: row.startNumber,
