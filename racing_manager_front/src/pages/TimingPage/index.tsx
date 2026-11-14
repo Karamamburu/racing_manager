@@ -6,9 +6,9 @@ import {
   Card,
   Col,
   Empty,
+  Modal,
   Result,
   Row,
-  Select,
   Skeleton,
   Space,
   Tag,
@@ -51,10 +51,6 @@ import type { EventDetails } from '../../shared/types/event';
 
 /** Session key of the workstation instance that owns this browser tab. */
 const WORKSTATION_STORAGE_KEY = 'timing-workstation-instance';
-
-/** Why an empty Enter created nothing: no current block has a running attempt. */
-const NO_CURRENT_BLOCK_MESSAGE =
-  'Не выбран текущий блок: Enter на пустом поле не создаёт сплит';
 
 const GENDER_LABELS: Record<string, string> = {
   M: 'Мужчины',
@@ -164,28 +160,6 @@ function describeBlock(
 }
 
 /**
- * The label of one block in the current-block selector. A heat is named by its
- * race, its stage and its heat, so it never reads as the category block it is
- * grouped with (FR-17, FR-51).
- */
-function describeBlockOption(
-  block: TimingCategoryBlockView,
-  event: EventDetails | undefined,
-  raceTitle: string | undefined,
-): string {
-  if (block.kind !== 'HEAT') {
-    const view = describeBlock(block, event);
-    return `${view.title} · ${view.subtitle}`;
-  }
-  const heat =
-    block.heatLabel?.trim() ||
-    (block.heatNumber === undefined ? 'Заезд' : `Заезд ${block.heatNumber}`);
-  return [raceTitle, block.stageLabel, heat]
-    .filter((part): part is string => (part ?? '').trim().length > 0)
-    .join(' · ');
-}
-
-/**
  * One stage header: the race, the stage and its state, plus the reason its
  * heats are missing or closed (U-12, F-12, S-06).
  */
@@ -257,8 +231,17 @@ export function TimingPage() {
   // The queued split in assignment mode and the block that is current; both
   // are page-session display state (AD-17, E-02).
   const [selectedSplitId, setSelectedSplitId] = useState<string | null>(null);
-  const [currentBlockKey, setCurrentBlockKey] = useState<string | null>(null);
   const [anonymousNotice, setAnonymousNotice] = useState<string | null>(null);
+  const [splitChoice, setSplitChoice] = useState<{
+    splitId: string;
+    startNumber: number;
+    attempts: Array<{
+      attemptId: string;
+      label: string;
+      passCount: number;
+      requiredLaps: number;
+    }>;
+  } | null>(null);
 
   const roles = sessionQuery.data?.roles ?? [];
   const canOperate = canOperateTiming(roles);
@@ -451,36 +434,10 @@ export function TimingPage() {
   const raceTitleOf = (raceId: string): string | undefined =>
     stageGroups.find((group) => group.raceId === raceId)?.raceTitle;
 
-  // Only a running attempt accepts an anonymous split, so only those blocks are
-  // offered as the current one (E-01, F-01). A running heat is offered with the
-  // same attempt identity a category block uses (E-02, FR-22).
-  const runningBlocks = surface.categories.filter(
-    (block) => block.state === 'RUNNING' && block.attemptId !== null,
-  );
-  const blockOptions = runningBlocks.map((block) => ({
-    key: blockIdentity(block),
-    label: describeBlockOption(
-      block,
-      event,
-      block.kind === 'HEAT' ? raceTitleOf(heatRaceIdentity(block)) : undefined,
-    ),
-  }));
-  const currentBlock =
-    runningBlocks.find((block) => blockIdentity(block) === currentBlockKey) ??
-    null;
-  const currentAttemptId = currentBlock?.attemptId ?? null;
-  const currentBlockLabel =
-    blockOptions.find((option) => option.key === currentBlockKey)?.label ?? null;
-
-  /**
-   * The Start press of one block also makes it current, so the first empty
-   * Enter after a start needs no second click (E-02). A refused start leaves
-   * the current block as it was and the hook reports the API message.
-   */
+  /** The Start press of one block; a refusal leaves capture state untouched. */
   const startBlock = (block: TimingCategoryBlockView) => {
     void capture.startAttempt(block).then(
       () => {
-        setCurrentBlockKey(blockIdentity(block));
         setAnonymousNotice(null);
       },
       (failure: unknown) => {
@@ -491,20 +448,63 @@ export function TimingPage() {
 
   /** Enter on the empty field: one anonymous split of the current attempt. */
   const captureAnonymousSplit = async () => {
-    if (currentAttemptId === null) {
-      setAnonymousNotice(NO_CURRENT_BLOCK_MESSAGE);
-      throw new Error(NO_CURRENT_BLOCK_MESSAGE);
-    }
-    await capture.captureAnonymous(currentAttemptId);
+    await capture.captureAnonymous();
     setAnonymousNotice(null);
   };
 
   /** A committed number in assignment mode belongs to the selected entry. */
   const assignSelectedSplit = async (startNumber: number) => {
     if (selectedSplit === null) return;
-    await capture.assignAnonymousSplit(selectedSplit.splitId, startNumber);
-    // Accepted: the entry leaves the queue and the field returns to capture.
+    try {
+      await capture.assignAnonymousSplit(selectedSplit.splitId, startNumber);
+      // Accepted: the entry leaves the queue and the field returns to capture.
+      setSelectedSplitId(null);
+    } catch (error) {
+      if (
+        error instanceof AxiosError &&
+        (error.response?.data as { code?: string } | undefined)?.code ===
+          'SPLIT_CHOICE_REQUIRED'
+      ) {
+        const details = (
+          error.response?.data as {
+            details?: {
+              candidates?: Array<{
+                attemptId: string;
+                passCount: number;
+                requiredLaps: number;
+              }>;
+            };
+          }
+        ).details;
+        const labels = selectedSplit.candidates ?? [];
+        setSplitChoice({
+          splitId: selectedSplit.splitId,
+          startNumber,
+          attempts: (details?.candidates ?? []).map((candidate) => ({
+            attemptId: candidate.attemptId,
+            label:
+              labels.find(
+                (entry) => entry.attemptId === candidate.attemptId,
+              )?.attemptLabel ?? candidate.attemptId,
+            passCount: candidate.passCount,
+            requiredLaps: candidate.requiredLaps,
+          })),
+        });
+        return;
+      }
+      throw error;
+    }
+  };
+
+  const chooseSplitAttempt = async (attemptId: string) => {
+    if (splitChoice === null) return;
+    await capture.assignAnonymousSplit(
+      splitChoice.splitId,
+      splitChoice.startNumber,
+      attemptId,
+    );
     setSelectedSplitId(null);
+    setSplitChoice(null);
   };
 
   /** A cancelled entry leaves the queue at once; the page clears the mode. */
@@ -680,34 +680,9 @@ export function TimingPage() {
                   onForceRelease={capture.forceRelease}
                 />
 
-                <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                  <Typography.Text strong>Текущий блок</Typography.Text>
-                  <Select
-                    aria-label="Текущий блок"
-                    placeholder="Блок не выбран"
-                    allowClear
-                    style={{ maxWidth: 420 }}
-                    value={
-                      currentBlock === null
-                        ? undefined
-                        : currentBlockKey ?? undefined
-                    }
-                    options={blockOptions.map((option) => ({
-                      value: option.key,
-                      label: option.label,
-                    }))}
-                    onChange={(value: string | undefined) => {
-                      setCurrentBlockKey(value ?? null);
-                      setAnonymousNotice(null);
-                    }}
-                  />
-                  <Typography.Text type="secondary">
-                    Текущая попытка: {currentBlockLabel ?? 'не выбрана'}
-                  </Typography.Text>
-                  {anonymousNotice === null ? null : (
-                    <Alert type="warning" showIcon message={anonymousNotice} />
-                  )}
-                </Space>
+                {anonymousNotice === null ? null : (
+                  <Alert type="warning" showIcon message={anonymousNotice} />
+                )}
 
               </Space>
             </Col>
@@ -763,6 +738,30 @@ export function TimingPage() {
         ) : (
           surfaceNodes
         )}
+
+        <Modal
+          open={splitChoice !== null}
+          title="Выберите попытку"
+          footer={null}
+          onCancel={() => setSplitChoice(null)}
+        >
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Typography.Text type="secondary">
+              Номер подходит нескольким идущим попыткам. Выберите одну.
+            </Typography.Text>
+            {(splitChoice?.attempts ?? []).map((attempt) => (
+              <Button
+                key={attempt.attemptId}
+                block
+                onClick={() => {
+                  void chooseSplitAttempt(attempt.attemptId);
+                }}
+              >
+                {attempt.label} · {attempt.passCount}/{attempt.requiredLaps}
+              </Button>
+            ))}
+          </Space>
+        </Modal>
 
         <AttemptRecordDrawer
           open={recordAttemptId !== null}

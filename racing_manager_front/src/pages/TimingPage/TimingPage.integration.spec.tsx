@@ -336,7 +336,7 @@ beforeEach(async () => {
   });
   vi.mocked(timingService.capturePass).mockResolvedValue(passView());
   vi.mocked(timingService.captureAnonymousSplit).mockResolvedValue(
-    passView({ enrollmentId: null, lapNumber: null, status: 'PENDING' }),
+    anonymousSplit(),
   );
   vi.mocked(timingService.assignAnonymousSplit).mockResolvedValue(passView());
   vi.mocked(timingService.cancelAnonymousSplit).mockResolvedValue(
@@ -356,7 +356,7 @@ afterEach(() => {
 });
 
 describe('TimingPage capture integration', () => {
-  it('starts a heat from its Start control, anchors the epoch and makes it current', async () => {
+  it('starts a heat from its Start control and anchors the epoch', async () => {
     const category = block({
       state: 'RUNNING',
       attemptId: 'attempt-cat',
@@ -416,13 +416,8 @@ describe('TimingPage capture integration', () => {
     // A heat start is its own route; the category route stays untouched.
     expect(timingService.startAttempt).not.toHaveBeenCalled();
 
-    // The Start press also makes the heat current, so the next empty Enter has
-    // a target without a second click (E-02).
-    expect(
-      await screen.findByText(
-        /Текущая попытка: Кубковая гонка · Квалификация · Заезд 1/,
-      ),
-    ).not.toBeNull();
+    // No block selector remains on the page.
+    expect(screen.queryByLabelText('Текущий блок')).toBeNull();
 
     // The start response anchors the epoch: only the category running at mount
     // ever asked for a clock epoch, never the heat.
@@ -436,7 +431,7 @@ describe('TimingPage capture integration', () => {
     expect(screen.getByText('Время: 01:05.000')).not.toBeNull();
   });
 
-  it('records an empty Enter on the current heat as one anonymous split with no number', async () => {
+  it('records an empty Enter as one anonymous split with no block selection', async () => {
     const category = block({
       state: 'RUNNING',
       attemptId: 'attempt-cat',
@@ -475,12 +470,6 @@ describe('TimingPage capture integration', () => {
 
     await screen.findByText('Заезд 1');
     fireEvent.click(enabledStart());
-    expect(
-      await screen.findByText(
-        /Текущая попытка: Кубковая гонка · Квалификация · Заезд 1/,
-      ),
-    ).not.toBeNull();
-
     const field = screen.getByLabelText('Номер участника') as HTMLInputElement;
     expect(field.disabled).toBe(false);
     fireEvent.keyDown(field, { key: 'Enter' });
@@ -493,11 +482,10 @@ describe('TimingPage capture integration', () => {
     ).mock.calls[0];
     expect(eventId).toBe('event-1');
     expect(payload).toEqual({
-      attemptId: 'attempt-heat-anon',
       kind: 'ANONYMOUS_SPLIT',
       clientCapturedAt: expect.any(String),
       clientElapsedMs: expect.any(Number),
-      clockEpochId: 'epoch-attempt-heat-anon',
+      clockEpochId: 'epoch-attempt-cat',
       workstationInstanceId: 'ws-1',
       deviceSequence: 1,
     });
@@ -510,11 +498,11 @@ describe('TimingPage capture integration', () => {
 
     const queue = await openTimingQueue();
     await waitFor(async () => {
-      const items = await queue.list('attempt-heat-anon');
+      const items = await queue.list('event:event-1');
       expect(items).toHaveLength(1);
       expect(items[0].status).toBe('APPLIED');
     });
-    const [queued] = await queue.list('attempt-heat-anon');
+    const [queued] = await queue.list('event:event-1');
     // The stored item is the sent request: one idempotency key, one sequence.
     expect(queued.id).toBe(key);
     expect(queued.operation).toBe('PASS');
@@ -580,7 +568,7 @@ describe('TimingPage capture integration', () => {
       {
         startNumber: 17,
         workstationInstanceId: 'ws-1',
-        deviceSequence: 1,
+        deviceSequence: expect.any(Number),
       },
       expect.any(String),
     );
@@ -690,11 +678,7 @@ describe('TimingPage capture integration', () => {
     );
     expect(timingService.startHeatAttempt).not.toHaveBeenCalled();
 
-    expect(
-      await screen.findByText(
-        /Текущая попытка: 5 км · Мужчины · Кубковая гонка/,
-      ),
-    ).not.toBeNull();
+    expect(screen.queryByLabelText('Текущий блок')).toBeNull();
     // The stage header and its heat block stay on the surface unchanged.
     expect(screen.getByText('Этап: Квалификация')).not.toBeNull();
   });

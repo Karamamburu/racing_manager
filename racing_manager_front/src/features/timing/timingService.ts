@@ -109,8 +109,8 @@ export class TimingService {
     eventId: string,
     payload: CaptureTimingPassRequest,
     idempotencyKey: string,
-  ): Promise<TimingPassView> {
-    return this.post<TimingPassView>(
+  ): Promise<TimingAnonymousSplitView> {
+    return this.post<TimingAnonymousSplitView>(
       `${this.base(eventId)}/passes`,
       payload,
       idempotencyKey,

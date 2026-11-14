@@ -307,7 +307,7 @@ beforeEach(async () => {
   );
   vi.mocked(timingService.capturePass).mockResolvedValue(passView());
   vi.mocked(timingService.captureAnonymousSplit).mockResolvedValue(
-    passView({ enrollmentId: null, lapNumber: null, status: 'PENDING' }),
+    anonymousSplit(),
   );
   vi.mocked(timingService.assignAnonymousSplit).mockResolvedValue(passView());
   vi.mocked(timingService.cancelAnonymousSplit).mockResolvedValue(
@@ -682,7 +682,7 @@ describe('useTimingCapture anonymous splits', () => {
 
     monotonicNow = 2500;
     await act(async () => {
-      await result.current.captureAnonymous('attempt-anon-capture');
+      await result.current.captureAnonymous();
     });
 
     expect(timingService.captureAnonymousSplit).toHaveBeenCalledTimes(1);
@@ -692,7 +692,6 @@ describe('useTimingCapture anonymous splits', () => {
     ).mock.calls[0];
     expect(eventId).toBe('event-1');
     expect(payload).toEqual({
-      attemptId: 'attempt-anon-capture',
       kind: 'ANONYMOUS_SPLIT',
       clientCapturedAt: expect.any(String),
       clientElapsedMs: 2500,
@@ -705,7 +704,7 @@ describe('useTimingCapture anonymous splits', () => {
     expect(typeof key).toBe('string');
 
     const queue = await openTimingQueue();
-    const items = await queue.list('attempt-anon-capture');
+    const items = await queue.list('event:event-1');
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
       id: key,
@@ -739,15 +738,15 @@ describe('useTimingCapture anonymous splits', () => {
     const call = vi.mocked(timingService.assignAnonymousSplit).mock.calls[0];
     expect(call[0]).toBe('event-1');
     expect(call[1]).toBe('split-assign');
-    expect(call[2]).toEqual({
+    expect(call[2]).toMatchObject({
       startNumber: 17,
       workstationInstanceId: 'ws-1',
-      deviceSequence: 1,
     });
+    expect(call[2].deviceSequence).toBeGreaterThan(0);
     expect(typeof call[3]).toBe('string');
 
     const queue = await openTimingQueue();
-    const items = await queue.list('attempt-anon-assign');
+    const items = await queue.list('event:event-1');
     expect(items.map((item) => [item.operation, item.status])).toEqual([
       ['ANONYMOUS_ASSIGN', 'APPLIED'],
     ]);
@@ -780,7 +779,7 @@ describe('useTimingCapture anonymous splits', () => {
     });
 
     const queue = await openTimingQueue();
-    const [item] = await queue.list('attempt-anon-refused');
+    const [item] = await queue.list('event:event-1');
     expect(item).toMatchObject({
       operation: 'ANONYMOUS_ASSIGN',
       status: 'REJECTED',
@@ -828,12 +827,12 @@ describe('useTimingCapture anonymous splits', () => {
     );
     await act(async () => {
       await expect(
-        result.current.captureAnonymous('attempt-anon-offline'),
+        result.current.captureAnonymous(),
       ).rejects.toThrow('Network Error');
     });
 
     const queue = await openTimingQueue();
-    const [queued] = await queue.list('attempt-anon-offline');
+    const [queued] = await queue.list('event:event-1');
     expect(queued).toMatchObject({ operation: 'PASS', status: 'PENDING' });
     expect(onError).toHaveBeenCalledWith('Network Error');
   });
@@ -913,14 +912,6 @@ describe('useTimingCapture heat start', () => {
     );
     expect(timingService.startAttempt).not.toHaveBeenCalled();
 
-    await act(async () => {
-      await result.current.captureAnonymous('attempt-heat');
-    });
-
-    const [, payload] = vi.mocked(timingService.captureAnonymousSplit).mock
-      .calls[0];
-    expect(payload.clockEpochId).toBe('epoch-attempt-heat');
-    expect(timingService.openClockEpoch).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
   });
 });

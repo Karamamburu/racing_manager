@@ -70,9 +70,13 @@ export interface UseTimingCaptureResult {
     attemptId: string,
   ) => Promise<void>;
   /** Queues one anonymous split of the attempt; it needs no number and no N. */
-  captureAnonymous: (attemptId: string) => Promise<void>;
+  captureAnonymous: () => Promise<void>;
   /** Binds one queued split to a start number of its own attempt. */
-  assignAnonymousSplit: (splitId: string, startNumber: number) => Promise<void>;
+  assignAnonymousSplit: (
+    splitId: string,
+    startNumber: number,
+    chosenAttemptId?: string,
+  ) => Promise<void>;
   /** Retires one queued split with a reason; a referee or an administrator. */
   cancelAnonymousSplit: (splitId: string, reason: string) => Promise<void>;
   bindPending: (pendingId: string, startNumber: number) => Promise<void>;
@@ -98,6 +102,8 @@ const EVENT_REQUIRED_MESSAGE = 'Хронометраж недоступен: м�
 const CANDIDATE_MISSING_MESSAGE = 'Участник не найден среди идущих заездов';
 const PENDING_MISSING_MESSAGE = 'Непривязанный финиш не найден на поверхности';
 const SPLIT_MISSING_MESSAGE = 'Неразмеченный сплит не найден в очереди';
+const NO_RUNNING_ATTEMPT_MESSAGE =
+  'Нет идущей попытки: неразмеченный сплит некуда записать';
 const HEAT_INCOMPLETE_MESSAGE = 'Блок заезда не готов к старту';
 
 /** The surface query key, shared with the page that owns the read. */
@@ -379,19 +385,26 @@ export function useTimingCapture(
    * number, N or the roster (AD-17).
    */
   const captureAnonymous = useCallback(
-    async (attemptId: string): Promise<void> => {
+    async (): Promise<void> => {
       const id = requireEvent();
+      const anchorAttempt = surface?.categories.find(
+        (block) => block.state === 'RUNNING' && block.attemptId !== null,
+      )?.attemptId;
+      if (anchorAttempt === undefined || anchorAttempt === null) {
+        report(NO_RUNNING_ATTEMPT_MESSAGE);
+        throw new Error(NO_RUNNING_ATTEMPT_MESSAGE);
+      }
       const capturedAt = new Date().toISOString();
       const monotonicMs = performance.now();
-      const anchor = await openEpoch(attemptId);
+      const anchor = await openEpoch(anchorAttempt);
       const queue = await openTimingQueue();
+      const eventScope = `event:${id}`;
       const deviceSequence = await queue.nextSequence(
-        attemptId,
+        eventScope,
         workstationInstanceId,
       );
       const key = newTimingMutationKey();
       const payload: CaptureTimingPassRequest = {
-        attemptId,
         kind: 'ANONYMOUS_SPLIT',
         clientCapturedAt: capturedAt,
         clientElapsedMs: elapsedFromAnchor(anchor, monotonicMs),
@@ -403,7 +416,7 @@ export function useTimingCapture(
       await deliver(
         queueItem(
           key,
-          attemptId,
+          eventScope,
           workstationInstanceId,
           deviceSequence,
           'PASS',
@@ -412,7 +425,7 @@ export function useTimingCapture(
         () => timingService.captureAnonymousSplit(id, payload, key),
       );
     },
-    [requireEvent, openEpoch, workstationInstanceId, deliver],
+    [requireEvent, surface, openEpoch, workstationInstanceId, deliver, report],
   );
 
   /**
@@ -559,7 +572,11 @@ export function useTimingCapture(
    * accepted assignment leaves the queue with the surface refetch (AD-17).
    */
   const assignAnonymousSplit = useCallback(
-    async (splitId: string, startNumber: number): Promise<void> => {
+    async (
+      splitId: string,
+      startNumber: number,
+      chosenAttemptId?: string,
+    ): Promise<void> => {
       const id = requireEvent();
       const split = surface?.anonymousSplits?.find(
         (entry) => entry.splitId === splitId,
@@ -568,15 +585,10 @@ export function useTimingCapture(
         report(SPLIT_MISSING_MESSAGE);
         throw new Error(SPLIT_MISSING_MESSAGE);
       }
-      const targetAttemptId =
-        split.attemptId ?? split.candidates?.[0]?.attemptId ?? null;
-      if (targetAttemptId === null) {
-        report(SPLIT_MISSING_MESSAGE);
-        throw new Error(SPLIT_MISSING_MESSAGE);
-      }
+      const eventScope = `event:${id}`;
       const queue = await openTimingQueue();
       const deviceSequence = await queue.nextSequence(
-        targetAttemptId,
+        eventScope,
         workstationInstanceId,
       );
       const key = newTimingMutationKey();
@@ -584,12 +596,13 @@ export function useTimingCapture(
         startNumber,
         workstationInstanceId,
         deviceSequence,
+        ...(chosenAttemptId === undefined ? {} : { chosenAttemptId }),
       };
       const payload: TimingAnonymousAssignPayload = { splitId, request };
       await deliver(
         queueItem(
           key,
-          targetAttemptId,
+          eventScope,
           workstationInstanceId,
           deviceSequence,
           'ANONYMOUS_ASSIGN',

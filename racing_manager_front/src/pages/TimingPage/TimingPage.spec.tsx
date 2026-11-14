@@ -816,7 +816,7 @@ describe('TimingPage', () => {
     expect(container.textContent ?? '').toContain('Номер участника');
   });
 
-  it('states that an empty Enter creates no split while no block is current', async () => {
+  it('queues an anonymous split without any block selection', async () => {
     sessionStorage.setItem('timing-workstation-instance', 'ws-1');
     mockSession(['REFEREE']);
     mockEvent();
@@ -831,48 +831,10 @@ describe('TimingPage', () => {
             elapsedMs: 65_000,
             startControlEnabled: false,
           }),
-        ],
-      }),
-    );
-    const capture = mockCapture();
-    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    renderPage();
-
-    expect(await screen.findByText(/Текущая попытка: не выбрана/)).not.toBeNull();
-
-    fireEvent.keyDown(screen.getByLabelText('Номер участника'), {
-      key: 'Enter',
-    });
-
-    expect(
-      await screen.findByText(
-        'Не выбран текущий блок: Enter на пустом поле не создаёт сплит',
-      ),
-    ).not.toBeNull();
-    expect(capture.captureAnonymous).not.toHaveBeenCalled();
-    consoleWarn.mockRestore();
-  });
-
-  it('routes an empty Enter to the block the referee chose as current', async () => {
-    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
-    mockSession(['REFEREE']);
-    mockEvent();
-    getSurface.mockResolvedValue(
-      surface({
-        captureWorkstationInstanceId: 'ws-1',
-        categories: [
-          block({
-            state: 'RUNNING',
-            attemptId: 'attempt-m',
-            officialStartedAt: '2026-11-13T09:00:00.000Z',
-            elapsedMs: 65_000,
-            startControlEnabled: false,
-          }),
           block({
             gender: 'F',
             state: 'RUNNING',
-            attemptId: 'attempt-f',
+            attemptId: 'attempt-2',
             officialStartedAt: '2026-11-13T09:00:00.000Z',
             elapsedMs: 65_000,
             startControlEnabled: false,
@@ -884,24 +846,15 @@ describe('TimingPage', () => {
 
     renderPage();
 
-    expect(await screen.findByText(/Текущая попытка: не выбрана/)).not.toBeNull();
-
-    fireEvent.mouseDown(screen.getByRole('combobox'));
-    fireEvent.click(
-      await screen.findByText('5 км · Женщины · Кубковая гонка — 10 км'),
-    );
-
-    expect(
-      await screen.findByText(/Текущая попытка: 5 км · Женщины/),
-    ).not.toBeNull();
+    expect(screen.queryByLabelText('Текущий блок')).toBeNull();
+    expect(await screen.findByText('Номер участника')).not.toBeNull();
 
     fireEvent.keyDown(screen.getByLabelText('Номер участника'), {
       key: 'Enter',
     });
 
-    await waitFor(() =>
-      expect(capture.captureAnonymous).toHaveBeenCalledWith('attempt-f'),
-    );
+    await waitFor(() => expect(capture.captureAnonymous).toHaveBeenCalled());
+    expect(capture.captureAnonymous).toHaveBeenCalledWith();
   });
 
   it('assigns the selected queue entry through the number field and leaves the mode', async () => {
@@ -1113,7 +1066,7 @@ describe('TimingPage', () => {
     });
   });
 
-  it('makes a running heat the current block and sends an empty Enter to it', async () => {
+  it('queues an anonymous split while a heat is running, without a block selector', async () => {
     sessionStorage.setItem('timing-workstation-instance', 'ws-1');
     mockSession(['REFEREE']);
     mockEvent();
@@ -1136,24 +1089,15 @@ describe('TimingPage', () => {
 
     renderPage();
 
-    expect(await screen.findByText(/Текущая попытка: не выбрана/)).not.toBeNull();
-
-    fireEvent.mouseDown(screen.getByRole('combobox'));
-    fireEvent.click(
-      await screen.findByText('Кубковая гонка · Квалификация · Заезд 1'),
-    );
-
-    expect(
-      await screen.findByText(/Текущая попытка: Кубковая гонка · Квалификация/),
-    ).not.toBeNull();
+    expect(await screen.findByText('Номер участника')).not.toBeNull();
+    expect(screen.queryByLabelText('Текущий блок')).toBeNull();
 
     fireEvent.keyDown(screen.getByLabelText('Номер участника'), {
       key: 'Enter',
     });
 
-    await waitFor(() =>
-      expect(capture.captureAnonymous).toHaveBeenCalledWith('attempt-heat'),
-    );
+    await waitFor(() => expect(capture.captureAnonymous).toHaveBeenCalled());
+    expect(capture.captureAnonymous).toHaveBeenCalledWith();
   });
 
   it('assigns a queued split of a heat attempt through the number field', async () => {
