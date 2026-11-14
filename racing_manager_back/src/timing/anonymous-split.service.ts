@@ -668,11 +668,20 @@ export class AnonymousSplitService {
       passCount: number;
     }> = [];
     for (const candidate of split.candidates) {
-      const matching = enrollments.filter(
-        (enrollment) =>
-          enrollment.startId === candidate.startId &&
-          enrollment.formatId === candidate.formatId,
-      );
+      const matching =
+        enrollmentId !== null
+          ? [
+              {
+                enrollmentId,
+                startId: candidate.startId,
+                formatId: candidate.formatId,
+              },
+            ]
+          : enrollments.filter(
+              (enrollment) =>
+                enrollment.startId === candidate.startId &&
+                enrollment.formatId === candidate.formatId,
+            );
       if (matching.length === 0) {
         failures.push({ attemptId: candidate.attemptId, reason: 'NOT_ENROLLED' });
         continue;
