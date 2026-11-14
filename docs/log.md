@@ -145,3 +145,7 @@ Anonymous splits are now event-scoped: Enter queues one with no current block, t
 ## 2026-11-14 — split sequence provenance guard
 
 A split-derived pass must not borrow the assignment's event sequence as its attempt capture sequence: a closure that counted marks as capture evidence then demanded receipts for those numbers. The closure coverage now ignores split provenance, and SQL normalises existing split-derived marks to `device_sequence = NULL` and adds `timing_marks_split_capture_sequence_check` (`source_split_id IS NULL OR device_sequence IS NULL`), so a stale reader cannot reproduce the false gap. See `migrate_manual_timing_3_2026_11_14_split_sequence_guard.sql`.
+
+## 2026-11-14 — timing totals in a multi-stage stage panel
+
+A timing heat closure writes one total and no per-lap rows. The stage panel treated a multi-lap slot as incomplete unless every event lap had a row, so the timing total was invisible and «Зафиксировать этап» never appeared. A slot with status `OK` and a total is now filled regardless of per-lap detail; the starter card shows the timing total as «Итог» beside the optional lap rows.
