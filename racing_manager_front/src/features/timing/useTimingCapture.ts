@@ -568,9 +568,15 @@ export function useTimingCapture(
         report(SPLIT_MISSING_MESSAGE);
         throw new Error(SPLIT_MISSING_MESSAGE);
       }
+      const targetAttemptId =
+        split.attemptId ?? split.candidates?.[0]?.attemptId ?? null;
+      if (targetAttemptId === null) {
+        report(SPLIT_MISSING_MESSAGE);
+        throw new Error(SPLIT_MISSING_MESSAGE);
+      }
       const queue = await openTimingQueue();
       const deviceSequence = await queue.nextSequence(
-        split.attemptId,
+        targetAttemptId,
         workstationInstanceId,
       );
       const key = newTimingMutationKey();
@@ -583,7 +589,7 @@ export function useTimingCapture(
       await deliver(
         queueItem(
           key,
-          split.attemptId,
+          targetAttemptId,
           workstationInstanceId,
           deviceSequence,
           'ANONYMOUS_ASSIGN',

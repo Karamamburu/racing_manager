@@ -729,7 +729,10 @@ export function TimingPage() {
                     ? null
                     : {
                         splitId: selectedSplit.splitId,
-                        attemptLabel: selectedSplit.attemptLabel,
+                        attemptLabel:
+                          selectedSplit.attemptLabel ??
+                          selectedSplit.candidates?.[0]?.attemptLabel ??
+                          '',
                       }
                 }
                 onAssign={assignSelectedSplit}

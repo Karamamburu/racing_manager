@@ -44,9 +44,13 @@ export interface AnonymousSplitQueueProps {
 
 /** One queued entry as the referee reads it: split, attempt, moment, elapsed. */
 function entryLabel(entry: TimingAnonymousSplitView, ordinal: number): string {
-  return `Сплит ${ordinal}: ${entry.attemptLabel}, отметка ${formatTimingClock(
+  const label =
+    entry.attemptLabel ?? entry.candidates?.[0]?.attemptLabel ?? '—';
+  const elapsed =
+    entry.officialElapsedMs ?? entry.candidates?.[0]?.officialElapsedMs ?? 0;
+  return `Сплит ${ordinal}: ${label}, отметка ${formatTimingClock(
     entry.capturedAt,
-  )}, прошло ${formatElapsed(entry.officialElapsedMs)}`;
+  )}, прошло ${formatElapsed(elapsed)}`;
 }
 
 function entryStyle(selected: boolean): CSSProperties {
@@ -206,11 +210,18 @@ export function AnonymousSplitQueue({
                     }}
                   >
                     <Typography.Text strong style={{ fontSize: 12 }}>
-                      Сплит {ordinal} · {entry.attemptLabel}
+                      Сплит {ordinal} ·{' '}
+                      {entry.attemptLabel ??
+                        entry.candidates?.[0]?.attemptLabel ??
+                        '—'}
                     </Typography.Text>
                     <Typography.Text type="secondary" style={{ fontSize: 11 }}>
                       Отметка: {formatTimingClock(entry.capturedAt)} · прошло{' '}
-                      {formatElapsed(entry.officialElapsedMs)}
+                      {formatElapsed(
+                        entry.officialElapsedMs ??
+                          entry.candidates?.[0]?.officialElapsedMs ??
+                          0,
+                      )}
                     </Typography.Text>
                   </button>
                   {canCancel ? (
