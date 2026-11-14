@@ -125,3 +125,7 @@ A category closure no longer releases the event-wide capture lock: the workstati
 ## 2026-11-14 — timing UI density and protocol splits
 
 The timing page now keeps the capture controls, current-block selector and number field in the left column of the top control block and the anonymous split queue in its right column with a shorter fixed area. Every category and heat block collapses independently while its header, state tag and actions stay visible. Participant tiles are compact and filled with the colour of their state, so more tiles fit on screen. In the event protocol the «Отсечки» column renders every split as `hh:mm:ss.mmm` and stacks the lap time over the cumulative time. No API or stored value changed. Updated [domains/timing.md](domains/timing.md).
+
+## 2026-11-14 — protocol split columns
+
+The «Отсечки» column of the event protocol lays laps side by side: each lap reads `N - lap time` with the cumulative time directly under the lap time, and laps wrap inside the column when they no longer fit. Times stay `hh:mm:ss.mmm`. Presentation-only.

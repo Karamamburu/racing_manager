@@ -329,8 +329,7 @@ function isIncompleteProfileError(text: string): boolean {
 
 /**
  * FR-43/U-12: a split shows the lap time and the cumulative elapsed time of
- * that lap. Short races read as seconds with milliseconds (`10.000`); anything
- * an hour or longer keeps the protocol's `hh:mm:ss` form.
+ * that lap, always as `hh:mm:ss.mmm`.
  */
 function formatSplitTime(milliseconds: number): string {
   const safe = Math.max(0, Math.trunc(milliseconds));
@@ -348,13 +347,21 @@ function formatSplitTime(milliseconds: number): string {
  * A row without `lapSplits` — a hand-entered total, a race row or a legacy
  * result — renders nothing here, and the legacy `laps` array is not read.
  *
- * The lap time and the cumulative time are stacked, so a narrow column keeps
- * both readable and one split never spans two columns.
+ * Each lap is a small grid: `N - lap time` on the first line and the cumulative
+ * time directly under the lap time on the second. Laps sit side by side and
+ * wrap when the column is narrower than their total width.
  */
 function LapSplitsCell({ splits }: { splits: ParticipantLapSplit[] | undefined }) {
   if (!splits || splits.length === 0) return null;
   return (
-    <Space direction="vertical" size={4}>
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        columnGap: 16,
+        rowGap: 4,
+      }}
+    >
       {splits.map((split) => {
         const lapTime = formatSplitTime(split.lapTimeMs);
         const cumulative = formatSplitTime(split.cumulativeMs);
@@ -365,19 +372,24 @@ function LapSplitsCell({ splits }: { splits: ParticipantLapSplit[] | undefined }
             title={label}
             aria-label={label}
             style={{
+              display: 'grid',
+              gridTemplateColumns: 'auto auto',
+              columnGap: 4,
               fontVariantNumeric: 'tabular-nums',
               whiteSpace: 'nowrap',
               lineHeight: 1.25,
             }}
           >
-            <div>
-              Круг {split.lapNumber}: {lapTime}
-            </div>
-            <div>Итог: {cumulative}</div>
+            <span>
+              {split.lapNumber} -
+            </span>
+            <span>{lapTime}</span>
+            <span />
+            <span>{cumulative}</span>
           </div>
         );
       })}
-    </Space>
+    </div>
   );
 }
 
@@ -486,7 +498,7 @@ function getParticipantColumns(options: {
     {
       title: 'Отсечки',
       key: 'lapSplits',
-      width: 190,
+      width: 230,
       render: (_value: unknown, record: ProtocolParticipant) => (
         <LapSplitsCell splits={record.lapSplits} />
       ),

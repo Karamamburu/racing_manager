@@ -632,20 +632,19 @@ describe('EventPage protocol splits', () => {
 
     const row = protocolRow('Иван Сплитов');
 
-    expect(within(row).getByText('Круг 1: 00:00:10.000')).not.toBeNull();
-    expect(within(row).getByText('Итог: 00:00:10.000')).not.toBeNull();
-    expect(within(row).getByText('Круг 2: 00:00:15.000')).not.toBeNull();
-    expect(within(row).getByText('Итог: 00:00:25.000')).not.toBeNull();
-    expect(
-      within(row).getByLabelText(
-        'Круг 1 из 2: круг 00:00:10.000, итог 00:00:10.000',
-      ),
-    ).not.toBeNull();
-    expect(
-      within(row).getByLabelText(
-        'Круг 2 из 2: круг 00:00:15.000, итог 00:00:25.000',
-      ),
-    ).not.toBeNull();
+    const first = within(row).getByLabelText(
+      'Круг 1 из 2: круг 00:00:10.000, итог 00:00:10.000',
+    );
+    expect(within(first).getByText('1 -')).not.toBeNull();
+    expect(within(first).getAllByText('00:00:10.000')).toHaveLength(2);
+
+    const second = within(row).getByLabelText(
+      'Круг 2 из 2: круг 00:00:15.000, итог 00:00:25.000',
+    );
+    expect(within(second).getByText('2 -')).not.toBeNull();
+    expect(within(second).getByText('00:00:15.000')).not.toBeNull();
+    expect(within(second).getByText('00:00:25.000')).not.toBeNull();
+
     expect(within(row).getByText('00:00:25')).not.toBeNull();
   });
 
@@ -655,7 +654,7 @@ describe('EventPage protocol splits', () => {
     const row = protocolRow('Пётр Ручной');
 
     expect(within(row).queryByLabelText(/^Круг \d/)).toBeNull();
-    expect(within(row).queryByText(/^Итог: /)).toBeNull();
+    expect(within(row).queryByText(/^\d+ -$/)).toBeNull();
     expect(within(row).getByText('01:00:00')).not.toBeNull();
   });
 
