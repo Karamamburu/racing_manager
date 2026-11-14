@@ -1,3 +1,4 @@
+import { CloseOutlined } from '@ant-design/icons';
 import { Button, Card, Input, Modal, Space, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
@@ -19,7 +20,7 @@ import { describeTimingError } from './useTimingCapture';
  */
 
 /** Fixed height of the entry area: the queue never grows with its entries. */
-export const ANONYMOUS_QUEUE_AREA_HEIGHT = 148;
+export const ANONYMOUS_QUEUE_AREA_HEIGHT = 104;
 
 const LIST_LABEL = 'Очередь неразмеченных сплитов';
 const EMPTY_LABEL = 'Очередь пуста: Enter на пустом поле номера добавит сплит';
@@ -55,7 +56,7 @@ function entryStyle(selected: boolean): CSSProperties {
     gap: 2,
     flex: '1 1 auto',
     minWidth: 0,
-    padding: '6px 8px',
+    padding: '4px 6px',
     border: '1px solid #f0f0f0',
     // The outline marks the selection without changing the box, so a selected
     // entry never resizes the row and never shifts the area around it.
@@ -127,12 +128,7 @@ export function AnonymousSplitQueue({
         </Tag>
       }
     >
-      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-        <Typography.Text type="secondary">
-          Enter на пустом поле номера добавляет сплит; номер назначает его
-          участнику.
-        </Typography.Text>
-
+      <Space direction="vertical" size={6} style={{ width: '100%' }}>
         <ul
           aria-label={LIST_LABEL}
           style={{
@@ -145,7 +141,7 @@ export function AnonymousSplitQueue({
             gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
             gridAutoRows: 'min-content',
             alignContent: 'start',
-            gap: 8,
+            gap: 6,
           }}
         >
           {splits.length === 0 ? (
@@ -169,7 +165,7 @@ export function AnonymousSplitQueue({
                   key={entry.splitId}
                   style={{
                     display: 'flex',
-                    gap: 8,
+                    gap: 6,
                     alignItems: 'stretch',
                     // Rows never shrink into the fixed area: a long queue
                     // scrolls inside it instead of compressing its entries.
@@ -187,22 +183,24 @@ export function AnonymousSplitQueue({
                       cursor: selectionDisabled ? 'default' : 'pointer',
                     }}
                   >
-                    <Typography.Text strong>
+                    <Typography.Text strong style={{ fontSize: 12 }}>
                       Сплит {ordinal} · {entry.attemptLabel}
                     </Typography.Text>
-                    <Typography.Text type="secondary">
+                    <Typography.Text type="secondary" style={{ fontSize: 11 }}>
                       Отметка: {formatTimingClock(entry.capturedAt)} · прошло{' '}
                       {formatElapsed(entry.officialElapsedMs)}
                     </Typography.Text>
                   </button>
                   {canCancel ? (
                     <Button
+                      size="small"
+                      type="text"
+                      danger
+                      icon={<CloseOutlined />}
                       aria-label={`Отменить сплит ${ordinal}`}
                       disabled={busy}
                       onClick={() => openCancel(entry.splitId)}
-                    >
-                      Отменить
-                    </Button>
+                    />
                   ) : null}
                 </li>
               );

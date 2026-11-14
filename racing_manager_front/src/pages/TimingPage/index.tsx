@@ -4,8 +4,10 @@ import {
   Alert,
   Button,
   Card,
+  Col,
   Empty,
   Result,
+  Row,
   Select,
   Skeleton,
   Space,
@@ -636,88 +638,97 @@ export function TimingPage() {
         )}
 
         <Card size="small">
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Space wrap size={16} align="center">
-              <Typography.Text>Захват: {holderLabel}</Typography.Text>
-              <Typography.Text type="secondary">
-                Станция: {workstationInstanceId}
-              </Typography.Text>
-              <Typography.Text
-                type={capture.pendingCount > 0 ? 'warning' : 'secondary'}
-              >
-                Не синхронизировано: {capture.pendingCount}
-              </Typography.Text>
-              <Button
-                size="small"
-                onClick={() => {
-                  void queryClient.invalidateQueries({
-                    queryKey: surfaceQueryKey,
-                  });
-                }}
-              >
-                Обновить
-              </Button>
-            </Space>
+          <Row gutter={[16, 12]}>
+            <Col xs={24} xl={15}>
+              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                <Space wrap size={16} align="center">
+                  <Typography.Text>Захват: {holderLabel}</Typography.Text>
+                  <Typography.Text type="secondary">
+                    Станция: {workstationInstanceId}
+                  </Typography.Text>
+                  <Typography.Text
+                    type={capture.pendingCount > 0 ? 'warning' : 'secondary'}
+                  >
+                    Не синхронизировано: {capture.pendingCount}
+                  </Typography.Text>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      void queryClient.invalidateQueries({
+                        queryKey: surfaceQueryKey,
+                      });
+                    }}
+                  >
+                    Обновить
+                  </Button>
+                </Space>
 
-            <CaptureControls
-              capture={captureView}
-              workstationInstanceId={workstationInstanceId}
-              canAdminister={canAdminister}
-              onTake={capture.takeCapture}
-              onTransfer={capture.transferCapture}
-              onForceRelease={capture.forceRelease}
-            />
+                <CaptureControls
+                  capture={captureView}
+                  workstationInstanceId={workstationInstanceId}
+                  canAdminister={canAdminister}
+                  onTake={capture.takeCapture}
+                  onTransfer={capture.transferCapture}
+                  onForceRelease={capture.forceRelease}
+                />
 
-            <AnonymousSplitQueue
-              splits={anonymousSplits}
-              selectedSplitId={selectedSplitId}
-              onSelect={setSelectedSplitId}
-              onCancel={cancelAnonymousSplit}
-              canCancel={canOperate}
-              selectionDisabled={!isCaptureHolder}
-            />
-
-            <Space direction="vertical" size={4} style={{ width: '100%' }}>
-              <Typography.Text strong>Текущий блок</Typography.Text>
-              <Select
-                aria-label="Текущий блок"
-                placeholder="Блок не выбран"
-                allowClear
-                style={{ maxWidth: 420 }}
-                value={currentBlock === null ? undefined : currentBlockKey ?? undefined}
-                options={blockOptions.map((option) => ({
-                  value: option.key,
-                  label: option.label,
-                }))}
-                onChange={(value: string | undefined) => {
-                  setCurrentBlockKey(value ?? null);
-                  setAnonymousNotice(null);
-                }}
-              />
-              <Typography.Text type="secondary">
-                Текущая попытка: {currentBlockLabel ?? 'не выбрана'}
-              </Typography.Text>
-              {anonymousNotice === null ? null : (
-                <Alert type="warning" showIcon message={anonymousNotice} />
-              )}
-            </Space>
-
-            <NumberCaptureField
-              disabled={!hasRunningBlock || !isCaptureHolder}
-              resolve={capture.resolveCandidates}
-              onCommit={capture.commitNumber}
-              assignment={
-                selectedSplit === null
-                  ? null
-                  : {
-                      splitId: selectedSplit.splitId,
-                      attemptLabel: selectedSplit.attemptLabel,
+                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                  <Typography.Text strong>Текущий блок</Typography.Text>
+                  <Select
+                    aria-label="Текущий блок"
+                    placeholder="Блок не выбран"
+                    allowClear
+                    style={{ maxWidth: 420 }}
+                    value={
+                      currentBlock === null
+                        ? undefined
+                        : currentBlockKey ?? undefined
                     }
-              }
-              onAssign={assignSelectedSplit}
-              onAnonymousSplit={captureAnonymousSplit}
-            />
-          </Space>
+                    options={blockOptions.map((option) => ({
+                      value: option.key,
+                      label: option.label,
+                    }))}
+                    onChange={(value: string | undefined) => {
+                      setCurrentBlockKey(value ?? null);
+                      setAnonymousNotice(null);
+                    }}
+                  />
+                  <Typography.Text type="secondary">
+                    Текущая попытка: {currentBlockLabel ?? 'не выбрана'}
+                  </Typography.Text>
+                  {anonymousNotice === null ? null : (
+                    <Alert type="warning" showIcon message={anonymousNotice} />
+                  )}
+                </Space>
+
+                <NumberCaptureField
+                  disabled={!hasRunningBlock || !isCaptureHolder}
+                  resolve={capture.resolveCandidates}
+                  onCommit={capture.commitNumber}
+                  assignment={
+                    selectedSplit === null
+                      ? null
+                      : {
+                          splitId: selectedSplit.splitId,
+                          attemptLabel: selectedSplit.attemptLabel,
+                        }
+                  }
+                  onAssign={assignSelectedSplit}
+                  onAnonymousSplit={captureAnonymousSplit}
+                />
+              </Space>
+            </Col>
+            <Col xs={24} xl={9}>
+              <AnonymousSplitQueue
+                splits={anonymousSplits}
+                selectedSplitId={selectedSplitId}
+                onSelect={setSelectedSplitId}
+                onCancel={cancelAnonymousSplit}
+                canCancel={canOperate}
+                selectionDisabled={!isCaptureHolder}
+              />
+            </Col>
+          </Row>
         </Card>
 
         {surface.categories.length === 0 && stageGroups.length === 0 ? (

@@ -801,11 +801,9 @@ describe('TimingPage', () => {
       screen.getByRole('button', { name: /^Сплит 1:/ }),
     ).not.toBeNull();
 
-    // Pinned above the number field: the queue precedes the field in the page.
-    const text = container.textContent ?? '';
-    expect(text.indexOf('Неразмеченные сплиты')).toBeLessThan(
-      text.indexOf('Номер участника'),
-    );
+    // The queue shares the top block with the controls and sits in its right
+    // column; the number field stays in the left column.
+    expect(container.textContent ?? '').toContain('Номер участника');
   });
 
   it('states that an empty Enter creates no split while no block is current', async () => {
