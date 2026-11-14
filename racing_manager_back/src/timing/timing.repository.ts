@@ -11,10 +11,12 @@ import {
   type ResultOutcome,
   type StartPurposeType,
   type TimingAttemptKind,
+  type TimingCaptureOrigin,
   type TimingMarkKind,
   type TimingMarkStatus,
   type TimingReceiptStatus,
   type TimingSessionStatus,
+  type TimingSplitState,
 } from '../../generated/prisma';
 import { PrismaService } from '../prisma/prisma.service';
 import type { TimingLapSplit } from './timing.domain';
@@ -305,6 +307,7 @@ export type TimingCaptureLockRow = {
 export type TimingReceiptRow = {
   attemptId: string;
   workstationInstanceId: string;
+  origin?: TimingCaptureOrigin;
   deviceSequence: number;
   status: TimingReceiptStatus;
   reason: string | null;
@@ -481,6 +484,8 @@ export type ReleaseCaptureLockInput = {
 export type CreateReceiptInput = {
   attemptId: string;
   workstationInstanceId: string;
+  /** Absent means a capture receipt; an assignment passes `SPLIT_ASSIGN`. */
+  origin?: TimingCaptureOrigin;
   deviceSequence: number;
   status: TimingReceiptStatus;
   reason: string | null;
@@ -495,6 +500,67 @@ export type CreateRejectedReceiptInput = {
   workstationInstanceId: string;
   deviceSequence: number;
   reason: string;
+};
+
+/** What a block-free capture writes in one transaction. */
+export type CreateEventSplitInput = {
+  eventId: string;
+  captureInstant: Date;
+  anchorClockEpochId: string;
+  anchorAttemptId: string;
+  anchorElapsedAnchorMs: number;
+  clientCapturedAt: Date;
+  clientElapsedMs: number;
+  capturedByUserId: string | null;
+  captureWorkstationInstanceId: string;
+  captureDeviceSequence: number;
+  candidateAttemptIds: readonly string[];
+  legacyMarkId?: string | null;
+  boundAttemptId?: string | null;
+};
+
+/** The assignment attribution written over one queued split. */
+export type AssignEventSplitInput = {
+  assignedAttemptId: string;
+  assignedAt: Date;
+  assignedByUserId: string;
+  assignedWorkstationInstanceId: string;
+  assignmentDeviceSequence: number;
+  offeredAttemptIds: readonly string[];
+  chosenByReferee: boolean;
+  resolvedAt: Date;
+  resolvedByUserId: string;
+  resolvedWorkstationInstanceId: string;
+};
+
+/** A split retired by undo or cancellation. */
+export type RetireEventSplitInput = {
+  state: Extract<TimingSplitState, 'UNDONE' | 'CANCELLED'>;
+  resolvedAt: Date;
+  resolvedByUserId: string;
+  resolvedWorkstationInstanceId: string | null;
+  resolutionReason: string | null;
+};
+
+export type CreateEventReceiptInput = {
+  eventId: string;
+  workstationInstanceId: string;
+  deviceSequence: number;
+  status: TimingReceiptStatus;
+  reason: string | null;
+  splitId: string | null;
+  resolvedAttemptId: string | null;
+};
+
+export type InsertEventAuditInput = {
+  eventId: string;
+  actorUserId: string | null;
+  action: string;
+  targetType: string;
+  targetId: string;
+  oldValues: Prisma.InputJsonValue | null;
+  newValues: Prisma.InputJsonValue | null;
+  reason: string | null;
 };
 
 export type InsertAuditInput = {
@@ -607,6 +673,7 @@ type ClockEpochQueryRow = Prisma.TimingClockEpochGetPayload<{
 const RECEIPT_SELECT = {
   sessionId: true,
   workstationInstanceId: true,
+  origin: true,
   deviceSequence: true,
   status: true,
   reason: true,
@@ -733,6 +800,165 @@ const ANONYMOUS_SPLIT_SELECT = {
 
 export type AnonymousSplitQueryRow = Prisma.TimingMarkGetPayload<{
   select: typeof ANONYMOUS_SPLIT_SELECT;
+}>;
+
+/** One candidate attempt of an event-scoped split. */
+export type TimingSplitCandidateRow = {
+  attemptId: string;
+  attemptKind: TimingAttemptKind;
+  attemptStatus: TimingSessionStatus;
+  eventId: string;
+  startId: string;
+  formatId: number;
+  gender: GenderType;
+  classCompetitionId: string | null;
+  stageId: string | null;
+  heatNumber: number | null;
+  officialStartedAt: Date;
+};
+
+/** One event-scoped anonymous split and its frozen candidates. */
+export type TimingEventSplitRow = {
+  splitId: string;
+  eventId: string;
+  state: TimingSplitState;
+  captureInstant: Date;
+  anchorClockEpochId: string;
+  anchorAttemptId: string;
+  anchorElapsedAnchorMs: number;
+  clientCapturedAt: Date;
+  clientElapsedMs: number;
+  capturedByUserId: string | null;
+  captureWorkstationInstanceId: string;
+  captureDeviceSequence: number | null;
+  legacyMarkId: string | null;
+  boundAttemptId: string | null;
+  assignedAttemptId: string | null;
+  assignedAt: Date | null;
+  assignedByUserId: string | null;
+  assignedWorkstationInstanceId: string | null;
+  assignmentDeviceSequence: number | null;
+  offeredAttemptIds: unknown;
+  chosenByReferee: boolean;
+  resolvedAt: Date | null;
+  resolvedByUserId: string | null;
+  resolvedWorkstationInstanceId: string | null;
+  resolutionReason: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  candidates: TimingSplitCandidateRow[];
+};
+
+/** One event-wide capture/assignment receipt. */
+export type TimingEventReceiptRow = {
+  eventId: string;
+  workstationInstanceId: string;
+  deviceSequence: number;
+  status: TimingReceiptStatus;
+  reason: string | null;
+  splitId: string | null;
+  resolvedAttemptId: string | null;
+  createdAt: Date;
+};
+
+/** One event-scoped audit row. */
+export type TimingEventAuditRow = {
+  auditId: string;
+  eventId: string;
+  actorUserId: string | null;
+  action: string;
+  targetType: string;
+  targetId: string;
+  oldValues: Record<string, unknown> | null;
+  newValues: Record<string, unknown> | null;
+  reason: string | null;
+  createdAt: Date;
+};
+
+const EVENT_SPLIT_SELECT = {
+  id: true,
+  eventId: true,
+  state: true,
+  captureInstant: true,
+  anchorClockEpochId: true,
+  anchorAttemptId: true,
+  anchorElapsedAnchorMs: true,
+  clientCapturedAt: true,
+  clientElapsedMs: true,
+  capturedByUserId: true,
+  captureWorkstationInstanceId: true,
+  captureDeviceSequence: true,
+  legacyMarkId: true,
+  boundAttemptId: true,
+  assignedAttemptId: true,
+  assignedAt: true,
+  assignedByUserId: true,
+  assignedWorkstationInstanceId: true,
+  assignmentDeviceSequence: true,
+  offeredAttemptIds: true,
+  chosenByReferee: true,
+  resolvedAt: true,
+  resolvedByUserId: true,
+  resolvedWorkstationInstanceId: true,
+  resolutionReason: true,
+  createdAt: true,
+  updatedAt: true,
+  candidates: {
+    select: {
+      attemptId: true,
+      attempt: {
+        select: {
+          attemptKind: true,
+          status: true,
+          eventId: true,
+          startId: true,
+          formatId: true,
+          gender: true,
+          classCompetitionId: true,
+          stageId: true,
+          heatNumber: true,
+          officialStartedAt: true,
+        },
+      },
+    },
+    orderBy: { attemptId: 'asc' },
+  },
+} satisfies Prisma.TimingEventSplitSelect;
+
+type EventSplitQueryRow = Prisma.TimingEventSplitGetPayload<{
+  select: typeof EVENT_SPLIT_SELECT;
+}>;
+
+const EVENT_RECEIPT_SELECT = {
+  eventId: true,
+  workstationInstanceId: true,
+  deviceSequence: true,
+  status: true,
+  reason: true,
+  splitId: true,
+  resolvedAttemptId: true,
+  createdAt: true,
+} satisfies Prisma.TimingEventCaptureReceiptSelect;
+
+type EventReceiptQueryRow = Prisma.TimingEventCaptureReceiptGetPayload<{
+  select: typeof EVENT_RECEIPT_SELECT;
+}>;
+
+const EVENT_AUDIT_SELECT = {
+  id: true,
+  eventId: true,
+  actorUserId: true,
+  action: true,
+  targetType: true,
+  targetId: true,
+  oldValues: true,
+  newValues: true,
+  reason: true,
+  createdAt: true,
+} satisfies Prisma.TimingEventAuditSelect;
+
+type EventAuditQueryRow = Prisma.TimingEventAuditGetPayload<{
+  select: typeof EVENT_AUDIT_SELECT;
 }>;
 
 const HEAT_ENROLLMENT_SELECT = {
@@ -1120,8 +1346,82 @@ function toReceiptRow(row: ReceiptQueryRow): TimingReceiptRow {
   return {
     attemptId: row.sessionId,
     workstationInstanceId: row.workstationInstanceId,
+    origin: row.origin,
     deviceSequence: row.deviceSequence,
     status: row.status,
+    reason: row.reason,
+    createdAt: row.createdAt,
+  };
+}
+
+function toEventSplitRow(row: EventSplitQueryRow): TimingEventSplitRow {
+  return {
+    splitId: row.id,
+    eventId: row.eventId,
+    state: row.state,
+    captureInstant: row.captureInstant,
+    anchorClockEpochId: row.anchorClockEpochId,
+    anchorAttemptId: row.anchorAttemptId,
+    anchorElapsedAnchorMs: row.anchorElapsedAnchorMs,
+    clientCapturedAt: row.clientCapturedAt,
+    clientElapsedMs: row.clientElapsedMs,
+    capturedByUserId: row.capturedByUserId,
+    captureWorkstationInstanceId: row.captureWorkstationInstanceId,
+    captureDeviceSequence: row.captureDeviceSequence,
+    legacyMarkId: row.legacyMarkId,
+    boundAttemptId: row.boundAttemptId,
+    assignedAttemptId: row.assignedAttemptId,
+    assignedAt: row.assignedAt,
+    assignedByUserId: row.assignedByUserId,
+    assignedWorkstationInstanceId: row.assignedWorkstationInstanceId,
+    assignmentDeviceSequence: row.assignmentDeviceSequence,
+    offeredAttemptIds: row.offeredAttemptIds,
+    chosenByReferee: row.chosenByReferee,
+    resolvedAt: row.resolvedAt,
+    resolvedByUserId: row.resolvedByUserId,
+    resolvedWorkstationInstanceId: row.resolvedWorkstationInstanceId,
+    resolutionReason: row.resolutionReason,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    candidates: row.candidates.map((candidate) => ({
+      attemptId: candidate.attemptId,
+      attemptKind: candidate.attempt.attemptKind,
+      attemptStatus: candidate.attempt.status,
+      eventId: candidate.attempt.eventId,
+      startId: candidate.attempt.startId,
+      formatId: candidate.attempt.formatId,
+      gender: candidate.attempt.gender,
+      classCompetitionId: candidate.attempt.classCompetitionId,
+      stageId: candidate.attempt.stageId,
+      heatNumber: candidate.attempt.heatNumber,
+      officialStartedAt: candidate.attempt.officialStartedAt,
+    })),
+  };
+}
+
+function toEventReceiptRow(row: EventReceiptQueryRow): TimingEventReceiptRow {
+  return {
+    eventId: row.eventId,
+    workstationInstanceId: row.workstationInstanceId,
+    deviceSequence: row.deviceSequence,
+    status: row.status,
+    reason: row.reason,
+    splitId: row.splitId,
+    resolvedAttemptId: row.resolvedAttemptId,
+    createdAt: row.createdAt,
+  };
+}
+
+function toEventAuditRow(row: EventAuditQueryRow): TimingEventAuditRow {
+  return {
+    auditId: row.id,
+    eventId: row.eventId,
+    actorUserId: row.actorUserId,
+    action: row.action,
+    targetType: row.targetType,
+    targetId: row.targetId,
+    oldValues: toJsonRecord(row.oldValues),
+    newValues: toJsonRecord(row.newValues),
     reason: row.reason,
     createdAt: row.createdAt,
   };
@@ -1891,6 +2191,226 @@ export class TimingRepository {
     return this.updateMark(tx, splitId, buildAnonymousSplitCancellation());
   }
 
+  /** Writes the event-scoped split and its frozen candidate attempts. */
+  async createEventSplit(
+    tx: TimingTx,
+    input: CreateEventSplitInput,
+  ): Promise<TimingEventSplitRow> {
+    const row = await tx.timingEventSplit.create({
+      data: {
+        eventId: input.eventId,
+        captureInstant: input.captureInstant,
+        anchorClockEpochId: input.anchorClockEpochId,
+        anchorAttemptId: input.anchorAttemptId,
+        anchorElapsedAnchorMs: input.anchorElapsedAnchorMs,
+        clientCapturedAt: input.clientCapturedAt,
+        clientElapsedMs: input.clientElapsedMs,
+        capturedByUserId: input.capturedByUserId,
+        captureWorkstationInstanceId: input.captureWorkstationInstanceId,
+        captureDeviceSequence: input.captureDeviceSequence,
+        legacyMarkId: input.legacyMarkId ?? null,
+        boundAttemptId: input.boundAttemptId ?? null,
+        candidates: {
+          create: input.candidateAttemptIds.map((attemptId) => ({ attemptId })),
+        },
+      },
+      select: EVENT_SPLIT_SELECT,
+    });
+    return toEventSplitRow(row);
+  }
+
+  /** Every queued split of the event, oldest capture first. */
+  async listQueuedEventSplits(
+    eventId: string,
+    tx?: TimingTx,
+  ): Promise<TimingEventSplitRow[]> {
+    const rows = await this.db(tx).timingEventSplit.findMany({
+      where: { eventId, state: 'QUEUED' },
+      select: EVENT_SPLIT_SELECT,
+      orderBy: [{ captureInstant: 'asc' }, { id: 'asc' }],
+    });
+    return rows.map(toEventSplitRow);
+  }
+
+  async findEventSplit(
+    splitId: string,
+    tx?: TimingTx,
+  ): Promise<TimingEventSplitRow | null> {
+    const row = await this.db(tx).timingEventSplit.findUnique({
+      where: { id: splitId },
+      select: EVENT_SPLIT_SELECT,
+    });
+    return row === null ? null : toEventSplitRow(row);
+  }
+
+  /**
+   * Assigns one still-queued split. The `state = 'QUEUED'` predicate is the
+   * concurrency guard: a second submission updates zero rows.
+   */
+  async assignEventSplit(
+    tx: TimingTx,
+    splitId: string,
+    input: AssignEventSplitInput,
+  ): Promise<TimingEventSplitRow | null> {
+    const updated = await tx.timingEventSplit.updateMany({
+      where: { id: splitId, state: 'QUEUED' },
+      data: {
+        state: 'ASSIGNED',
+        assignedAttemptId: input.assignedAttemptId,
+        assignedAt: input.assignedAt,
+        assignedByUserId: input.assignedByUserId,
+        assignedWorkstationInstanceId: input.assignedWorkstationInstanceId,
+        assignmentDeviceSequence: input.assignmentDeviceSequence,
+        offeredAttemptIds: input.offeredAttemptIds,
+        chosenByReferee: input.chosenByReferee,
+        resolvedAt: input.resolvedAt,
+        resolvedByUserId: input.resolvedByUserId,
+        resolvedWorkstationInstanceId: input.resolvedWorkstationInstanceId,
+      },
+    });
+    if (updated.count === 0) return null;
+    return this.findEventSplit(splitId, tx);
+  }
+
+  /** Retires one still-queued split by undo or cancellation. */
+  async retireEventSplit(
+    tx: TimingTx,
+    splitId: string,
+    input: RetireEventSplitInput,
+  ): Promise<TimingEventSplitRow | null> {
+    const updated = await tx.timingEventSplit.updateMany({
+      where: { id: splitId, state: 'QUEUED' },
+      data: {
+        state: input.state,
+        resolvedAt: input.resolvedAt,
+        resolvedByUserId: input.resolvedByUserId,
+        resolvedWorkstationInstanceId: input.resolvedWorkstationInstanceId,
+        resolutionReason: input.resolutionReason,
+      },
+    });
+    if (updated.count === 0) return null;
+    return this.findEventSplit(splitId, tx);
+  }
+
+  /** Queued splits that still name this attempt as a candidate. */
+  async listBlockingEventSplitsForAttempt(
+    attemptId: string,
+    tx?: TimingTx,
+  ): Promise<TimingEventSplitRow[]> {
+    const rows = await this.db(tx).timingEventSplit.findMany({
+      where: {
+        state: 'QUEUED',
+        candidates: { some: { attemptId } },
+      },
+      select: EVENT_SPLIT_SELECT,
+      orderBy: [{ captureInstant: 'asc' }, { id: 'asc' }],
+    });
+    return rows.map(toEventSplitRow);
+  }
+
+  async createEventReceipt(
+    tx: TimingTx,
+    input: CreateEventReceiptInput,
+  ): Promise<TimingEventReceiptRow> {
+    const row = await tx.timingEventCaptureReceipt.create({
+      data: {
+        eventId: input.eventId,
+        workstationInstanceId: input.workstationInstanceId,
+        deviceSequence: input.deviceSequence,
+        status: input.status,
+        reason: input.reason,
+        splitId: input.splitId,
+        resolvedAttemptId: input.resolvedAttemptId,
+      },
+      select: EVENT_RECEIPT_SELECT,
+    });
+    return toEventReceiptRow(row);
+  }
+
+  async findEventReceipt(
+    tx: TimingTx,
+    eventId: string,
+    workstationInstanceId: string,
+    deviceSequence: number,
+  ): Promise<TimingEventReceiptRow | null> {
+    const row = await tx.timingEventCaptureReceipt.findUnique({
+      where: {
+        eventId_workstationInstanceId_deviceSequence: {
+          eventId,
+          workstationInstanceId,
+          deviceSequence,
+        },
+      },
+      select: EVENT_RECEIPT_SELECT,
+    });
+    return row === null ? null : toEventReceiptRow(row);
+  }
+
+  /** The newest applied event-ledger action of one workstation. */
+  async maxAppliedEventReceiptAt(
+    eventId: string,
+    workstationInstanceId: string,
+    tx?: TimingTx,
+  ): Promise<Date | null> {
+    const row = await this.db(tx).timingEventCaptureReceipt.findFirst({
+      where: { eventId, workstationInstanceId, status: 'APPLIED' },
+      select: { createdAt: true },
+      orderBy: [{ createdAt: 'desc' }],
+    });
+    return row === null ? null : row.createdAt;
+  }
+
+  /** The newest applied ordinary capture receipt of one workstation. */
+  async maxAppliedAttemptReceiptAt(
+    eventId: string,
+    workstationInstanceId: string,
+    tx?: TimingTx,
+  ): Promise<Date | null> {
+    const row = await this.db(tx).timingCaptureReceipt.findFirst({
+      where: {
+        session: { is: { eventId } },
+        workstationInstanceId,
+        origin: 'CAPTURE',
+        status: 'APPLIED',
+      },
+      select: { createdAt: true },
+      orderBy: [{ createdAt: 'desc' }],
+    });
+    return row === null ? null : row.createdAt;
+  }
+
+  async insertEventAudit(
+    tx: TimingTx,
+    input: InsertEventAuditInput,
+  ): Promise<TimingEventAuditRow> {
+    const row = await tx.timingEventAudit.create({
+      data: {
+        eventId: input.eventId,
+        actorUserId: input.actorUserId,
+        action: input.action,
+        targetType: input.targetType,
+        targetId: input.targetId,
+        oldValues: input.oldValues === null ? Prisma.DbNull : input.oldValues,
+        newValues: input.newValues === null ? Prisma.DbNull : input.newValues,
+        reason: input.reason,
+      },
+      select: EVENT_AUDIT_SELECT,
+    });
+    return toEventAuditRow(row);
+  }
+
+  async listEventAudit(
+    eventId: string,
+    tx?: TimingTx,
+  ): Promise<TimingEventAuditRow[]> {
+    const rows = await this.db(tx).timingEventAudit.findMany({
+      where: { eventId },
+      select: EVENT_AUDIT_SELECT,
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    return rows.map(toEventAuditRow);
+  }
+
   async createMark(
     tx: TimingTx,
     input: CreateMarkInput,
@@ -2133,6 +2653,7 @@ export class TimingRepository {
       data: {
         sessionId: input.attemptId,
         workstationInstanceId: input.workstationInstanceId,
+        origin: input.origin ?? 'CAPTURE',
         deviceSequence: input.deviceSequence,
         status: input.status,
         reason: input.reason,
