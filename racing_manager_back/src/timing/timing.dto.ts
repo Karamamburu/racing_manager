@@ -12,6 +12,7 @@ import {
   IsIn,
   IsISO8601,
   IsInt,
+  IsOptional,
   IsString,
   IsUUID,
   Min,
@@ -176,6 +177,8 @@ export class OpenClockEpochDto {
 
 /** `POST /events/:eventId/timing/passes` — one number, tile, unbound finish or anonymous split. */
 export class CaptureTimingPassDto {
+  /** Required for every kind except the block-free `ANONYMOUS_SPLIT`. */
+  @ValidateIf((body: CaptureTimingPassDto) => body.kind !== 'ANONYMOUS_SPLIT')
   @IsUUID()
   attemptId!: string;
 
@@ -273,6 +276,11 @@ export class AssignAnonymousSplitDto {
   @SelectsExactlyOneIdentity()
   workstationInstanceId!: string;
 
+  /** One qualifying attempt the referee confirmed when the number was ambiguous. */
+  @IsOptional()
+  @IsUUID()
+  chosenAttemptId?: string;
+
   @IsInt()
   @Min(1)
   deviceSequence!: number;
@@ -328,6 +336,18 @@ export class QuickUndoTimingPassDto {
   workstationInstanceId!: string;
 
   /** The last sequence this workstation issued and now withdraws. */
+  @IsInt()
+  @Min(1)
+  deviceSequence!: number;
+}
+
+/** `POST /events/:eventId/timing/splits/:splitId/undo`. */
+export class QuickUndoTimingSplitDto {
+  @IsString()
+  @MinLength(1)
+  workstationInstanceId!: string;
+
+  /** The event sequence of the split capture being withdrawn. */
   @IsInt()
   @Min(1)
   deviceSequence!: number;

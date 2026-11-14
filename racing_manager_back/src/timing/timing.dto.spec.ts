@@ -14,6 +14,7 @@ import {
   ForceReleaseCaptureDto,
   OpenClockEpochDto,
   QuickUndoTimingPassDto,
+  QuickUndoTimingSplitDto,
   RebindTimingPassDto,
   SetRefereeRoleDto,
   StartHeatAttemptDto,
@@ -72,6 +73,7 @@ function anonymousCapture(
 ): Record<string, unknown> {
   return capturePass({
     kind: 'ANONYMOUS_SPLIT',
+    attemptId: undefined,
     startNumber: undefined,
     ...overrides,
   });
@@ -292,6 +294,15 @@ describe('CaptureTimingPassDto', () => {
       refused(CaptureTimingPassDto, capturePass({ attemptId: 'attempt-1' })),
     ).resolves.toContain('attemptId');
   });
+  it('accepts a block-free ANONYMOUS_SPLIT with no attempt id', async () => {
+    const payload = capturePass({
+      kind: 'ANONYMOUS_SPLIT',
+      attemptId: undefined,
+      startNumber: undefined,
+    });
+
+    await expect(refused(CaptureTimingPassDto, payload)).resolves.toEqual([]);
+  });
 
   it('refuses a device sequence below 1', async () => {
     for (const deviceSequence of [0, -1, 2.5]) {
@@ -332,7 +343,6 @@ describe('CaptureTimingPassDto', () => {
   );
 
   it.each([
-    'attemptId',
     'clockEpochId',
     'workstationInstanceId',
     'deviceSequence',

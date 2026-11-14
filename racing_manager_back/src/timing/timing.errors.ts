@@ -32,6 +32,22 @@ export const TimingErrorCode = {
   NUMBER_UNKNOWN: 'NUMBER_UNKNOWN',
   /** The committed number resolves to two or more eligible enrollments. */
   NUMBER_AMBIGUOUS: 'NUMBER_AMBIGUOUS',
+  /** Two registrations of the event carry the same committed number. */
+  NUMBER_DUPLICATE: 'NUMBER_DUPLICATE',
+  /** A block-free split capture found no attempt of the event running. */
+  NO_RUNNING_ATTEMPT: 'NO_RUNNING_ATTEMPT',
+  /** Two or more candidate attempts qualify; the referee must choose one. */
+  SPLIT_CHOICE_REQUIRED: 'SPLIT_CHOICE_REQUIRED',
+  /** The chosen attempt is not one of the offered qualifying attempts. */
+  SPLIT_CHOICE_INVALID: 'SPLIT_CHOICE_INVALID',
+  /** The split was already assigned, undone or cancelled. */
+  SPLIT_ALREADY_RESOLVED: 'SPLIT_ALREADY_RESOLVED',
+  /** No candidate attempt can receive the split; every reason is named. */
+  SPLIT_CANDIDATE_UNAVAILABLE: 'SPLIT_CANDIDATE_UNAVAILABLE',
+  /** The resolved attempt started at or after the split's capture instant. */
+  ATTEMPT_STARTED_AFTER_CAPTURE: 'ATTEMPT_STARTED_AFTER_CAPTURE',
+  /** The split is not the workstation's newest capture-side action. */
+  SPLIT_UNDO_NOT_LAST: 'SPLIT_UNDO_NOT_LAST',
   /** The participant is excluded from this attempt. */
   EXCLUDED_PARTICIPANT: 'EXCLUDED_PARTICIPANT',
   /** The participant already holds N passes, so no further pass may exist. */
