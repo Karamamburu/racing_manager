@@ -159,7 +159,7 @@ export class TimingController {
     @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
     @Body() dto: CaptureTimingPassDto,
     @Headers('idempotency-key') idempotencyKey?: string,
-  ): Promise<TimingPassView> {
+  ): Promise<TimingPassView | TimingAnonymousSplitView> {
     return this.timingService.capturePass(
       req.session?.userSub,
       eventId,

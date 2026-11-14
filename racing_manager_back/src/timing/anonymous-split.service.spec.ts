@@ -18,6 +18,7 @@ import {
   type InsertAuditInput,
   type TimingAnonymousSplitRow,
   type TimingAttemptRow,
+  type TimingEventSplitRow,
   type TimingCaptureLockRow,
   type TimingClassCompetitionRow,
   type TimingMarkRow,
@@ -200,6 +201,9 @@ function createRepositoryFake() {
     ),
     listAnonymousSplits: jest.fn(
       (): Promise<TimingAnonymousSplitRow[]> => Promise.resolve([]),
+    ),
+    listQueuedEventSplits: jest.fn(
+      (): Promise<TimingEventSplitRow[]> => Promise.resolve([]),
     ),
     listStarts: jest.fn((): Promise<TimingStartRow[]> => Promise.resolve([])),
     listClassCompetitions: jest.fn(

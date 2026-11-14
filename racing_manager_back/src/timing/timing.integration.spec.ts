@@ -44,6 +44,7 @@ import {
   type TimingClockEpochRow,
   type TimingEnrollmentRow,
   type TimingEventRow,
+  type TimingEventSplitRow,
   type TimingFormatRow,
   type TimingHeatRosterEnrollmentRow,
   type TimingHeatTimeRow,
@@ -664,6 +665,10 @@ class InMemoryTimingRepository {
           mark.status === 'PENDING',
       ),
     );
+  }
+
+  listQueuedEventSplits(): Promise<TimingEventSplitRow[]> {
+    return Promise.resolve([]);
   }
 
   listAnonymousSplits(eventId: string): Promise<TimingAnonymousSplitRow[]> {

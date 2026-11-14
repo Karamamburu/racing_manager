@@ -96,6 +96,7 @@ import {
 } from './timing.repository';
 import type {
   ClockEpochView,
+  TimingAnonymousSplitView,
   StartTimingAttemptResult,
   TimingAttemptRecordView,
   TimingAttemptRef,
@@ -1199,11 +1200,14 @@ export class TimingService {
     eventId: string,
     dto: CaptureTimingPassDto,
     idempotencyKey?: string,
-  ): Promise<TimingPassView> {
+  ): Promise<TimingPassView | TimingAnonymousSplitView> {
     await this.rolesService.assertHasAnyRole(
       authentikId,
       TIMING_OPERATE_ROLE_CODES,
     );
+    if (dto.kind === 'ANONYMOUS_SPLIT' && dto.attemptId === undefined) {
+      return this.captureBlockFreeSplit(authentikId, eventId, dto, idempotencyKey);
+    }
     const attempt = await this.repository.findAttempt(dto.attemptId);
     if (attempt === null || attempt.eventId !== eventId) {
       throw timingError(
@@ -1404,6 +1408,202 @@ export class TimingService {
         });
       }
       throw error;
+    }
+  }
+
+  /**
+   * A block-free anonymous split: one event-scoped capture with no attempt,
+   * no block and no participant. The open epoch of any running attempt anchors
+   * the press instant; the attempts running strictly before that instant become
+   * its frozen candidates. The split, its candidates, the event receipt and the
+   * event audit commit together.
+   */
+  private async captureBlockFreeSplit(
+    authentikId: string | undefined,
+    eventId: string,
+    dto: CaptureTimingPassDto,
+    idempotencyKey?: string,
+  ): Promise<TimingAnonymousSplitView> {
+    const actorUserId = await this.requireUserId(authentikId);
+    const now = new Date();
+    try {
+      const event = await this.repository.findEvent(eventId);
+      if (event === null) {
+        throw timingError(TimingErrorCode.NOT_FOUND, 'Event not found.', {
+          eventId,
+        });
+      }
+      if (!isEventRecordable(event, now)) {
+        throw timingError(
+          TimingErrorCode.NOT_AVAILABLE,
+          TIMING_NOT_AVAILABLE_MESSAGE,
+          { eventId },
+        );
+      }
+      const lock = await this.repository.getCaptureLock(eventId);
+      if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
+        throw timingError(
+          TimingErrorCode.CAPTURE_NOT_HELD,
+          'This workstation does not hold capture.',
+          {
+            workstationInstanceId: dto.workstationInstanceId,
+            holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
+          },
+        );
+      }
+      const epoch = await this.repository.findClockEpochById(dto.clockEpochId);
+      if (
+        epoch === null ||
+        epoch.closedAt !== null ||
+        epoch.workstationInstanceId !== dto.workstationInstanceId
+      ) {
+        throw timingError(
+          TimingErrorCode.CAPTURE_NOT_HELD,
+          'This workstation has no open clock epoch for the capture.',
+          {
+            clockEpochId: dto.clockEpochId,
+            workstationInstanceId: dto.workstationInstanceId,
+          },
+        );
+      }
+      const anchorAttempt = await this.repository.findAttempt(epoch.attemptId);
+      if (
+        anchorAttempt === null ||
+        anchorAttempt.eventId !== eventId ||
+        anchorAttempt.status !== 'RUNNING'
+      ) {
+        throw timingError(
+          TimingErrorCode.CAPTURE_NOT_HELD,
+          'The clock epoch is not anchored on a running attempt of this event.',
+          { clockEpochId: dto.clockEpochId, attemptId: epoch.attemptId },
+        );
+      }
+      const captureInstant = new Date(
+        epoch.openedAt.getTime() +
+          Math.max(0, dto.clientElapsedMs - epoch.officialElapsedAnchorMs),
+      );
+      const running = await this.repository.listRunningAttempts(eventId);
+      const candidateAttemptIds = running
+        .filter((attempt) => attempt.officialStartedAt < captureInstant)
+        .map((attempt) => attempt.attemptId);
+      if (candidateAttemptIds.length === 0) {
+        throw timingError(
+          TimingErrorCode.NO_RUNNING_ATTEMPT,
+          'No attempt of the event is running for this split.',
+          { eventId, captureInstant: captureInstant.toISOString() },
+        );
+      }
+
+      const key = normalizeIdempotencyKey(idempotencyKey);
+      const split = await this.repository.withTransaction(async (tx) => {
+        const existing = await this.repository.findEventReceipt(
+          tx,
+          eventId,
+          dto.workstationInstanceId,
+          dto.deviceSequence,
+        );
+        if (existing !== null) {
+          throw timingError(
+            TimingErrorCode.CONFLICT,
+            'This event sequence already has a receipt.',
+            {
+              eventId,
+              workstationInstanceId: dto.workstationInstanceId,
+              deviceSequence: dto.deviceSequence,
+            },
+          );
+        }
+        const created = await this.repository.createEventSplit(tx, {
+          eventId,
+          captureInstant,
+          anchorClockEpochId: epoch.id,
+          anchorAttemptId: epoch.attemptId,
+          anchorElapsedAnchorMs: epoch.officialElapsedAnchorMs,
+          clientCapturedAt: new Date(dto.clientCapturedAt),
+          clientElapsedMs: dto.clientElapsedMs,
+          capturedByUserId: actorUserId,
+          captureWorkstationInstanceId: dto.workstationInstanceId,
+          captureDeviceSequence: dto.deviceSequence,
+          candidateAttemptIds,
+        });
+        await this.repository.createEventReceipt(tx, {
+          eventId,
+          workstationInstanceId: dto.workstationInstanceId,
+          deviceSequence: dto.deviceSequence,
+          status: 'APPLIED',
+          reason: null,
+          splitId: created.splitId,
+          resolvedAttemptId: null,
+        });
+        await this.repository.insertEventAudit(tx, {
+          eventId,
+          actorUserId,
+          action: 'ANONYMOUS_SPLIT_CAPTURE',
+          targetType: 'ANONYMOUS_SPLIT',
+          targetId: created.splitId,
+          oldValues: null,
+          newValues: {
+            kind: 'ANONYMOUS_SPLIT',
+            capturedAt: created.captureInstant.toISOString(),
+            clockEpochId: epoch.id,
+            anchorAttemptId: epoch.attemptId,
+            workstationInstanceId: dto.workstationInstanceId,
+            deviceSequence: dto.deviceSequence,
+            candidateAttemptIds,
+            idempotencyKey: key,
+          },
+          reason: null,
+        });
+        return created;
+      });
+
+      return this.anonymousSplitService.getQueuedEntry(eventId, split.splitId);
+    } catch (error) {
+      if (error instanceof TimingDomainError) {
+        await this.safeRejectedEventReceipt({
+          eventId,
+          workstationInstanceId: dto.workstationInstanceId,
+          deviceSequence: dto.deviceSequence,
+          reason: error.code,
+        });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * A refused block-free capture must not leave an unconfirmed event sequence.
+   * A duplicate or an unknown event is skipped; the original refusal wins.
+   */
+  private async safeRejectedEventReceipt(input: {
+    eventId: string;
+    workstationInstanceId: string;
+    deviceSequence: number;
+    reason: string;
+  }): Promise<void> {
+    try {
+      await this.repository.withTransaction(async (tx) => {
+        const existing = await this.repository.findEventReceipt(
+          tx,
+          input.eventId,
+          input.workstationInstanceId,
+          input.deviceSequence,
+        );
+        if (existing !== null) return;
+        await this.repository.createEventReceipt(tx, {
+          eventId: input.eventId,
+          workstationInstanceId: input.workstationInstanceId,
+          deviceSequence: input.deviceSequence,
+          status: 'REJECTED',
+          reason: input.reason,
+          splitId: null,
+          resolvedAttemptId: null,
+        });
+      });
+    } catch (error) {
+      this.logger.warn(
+        `timing: could not record a rejected event receipt for sequence ${input.deviceSequence}: ${String(error)}`,
+      );
     }
   }
 

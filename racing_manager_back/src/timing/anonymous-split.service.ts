@@ -21,6 +21,7 @@ import {
   TimingRepository,
   type TimingAnonymousSplitRow,
   type TimingAttemptRow,
+  type TimingEventSplitRow,
   type TimingClassCompetitionRow,
   type TimingMarkRow,
   type TimingParticipantRow,
@@ -95,12 +96,40 @@ export class AnonymousSplitService {
     tx?: TimingTx,
   ): Promise<TimingAnonymousSplitView[]> {
     const [rows, labels] = await Promise.all([
-      this.repository.listAnonymousSplits(eventId, tx),
+      this.repository.listQueuedEventSplits(eventId, tx),
       this.loadLabels(eventId, tx),
     ]);
-    return rows
+    if (rows.length > 0) {
+      return rows.map((row) => toEventQueueEntry(row, labels));
+    }
+    // Transitional read for a database that has not run the MANUAL-TIMING-3
+    // backfill yet. The migration copies every pending mark into the new
+    // table, so this branch disappears with the old queue.
+    const legacy = await this.repository.listAnonymousSplits(eventId, tx);
+    return legacy
       .filter((row) => row.status === 'PENDING')
       .map((row) => toQueueEntry(row, labels));
+  }
+
+  /** One queued event split as the surface renders it. */
+  async getQueuedEntry(
+    eventId: string,
+    splitId: string,
+    tx?: TimingTx,
+  ): Promise<TimingAnonymousSplitView> {
+    const [rows, labels] = await Promise.all([
+      this.repository.listQueuedEventSplits(eventId, tx),
+      this.loadLabels(eventId, tx),
+    ]);
+    const row = rows.find((entry) => entry.splitId === splitId);
+    if (row === undefined) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'Anonymous split not found in the queue.',
+        { splitId },
+      );
+    }
+    return toEventQueueEntry(row, labels);
   }
 
   /**
@@ -590,6 +619,40 @@ function toQueueEntry(
       },
     ],
     captureDeviceSequence: null,
+  };
+}
+
+/** One event-scoped split with its frozen candidate labels. */
+function toEventQueueEntry(
+  row: TimingEventSplitRow,
+  labels: AttemptLabels,
+): TimingAnonymousSplitView {
+  const candidates = row.candidates.map((candidate) => ({
+    attemptId: candidate.attemptId,
+    blockKey: attemptBlockKey(candidate),
+    attemptLabel: attemptLabel(candidate, labels),
+    officialElapsedMs: Math.max(
+      0,
+      row.captureInstant.getTime() - candidate.officialStartedAt.getTime(),
+    ),
+  }));
+  const bound = row.legacyMarkId !== null;
+  const first = candidates[0];
+  return {
+    splitId: row.splitId,
+    attemptId: bound ? row.boundAttemptId : null,
+    ...(bound && first !== undefined
+      ? {
+          blockKey: first.blockKey,
+          attemptLabel: first.attemptLabel,
+          officialElapsedMs: first.officialElapsedMs,
+        }
+      : {}),
+    capturedAt: row.captureInstant.toISOString(),
+    status: 'QUEUED',
+    bound,
+    candidates,
+    captureDeviceSequence: row.captureDeviceSequence,
   };
 }
 

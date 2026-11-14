@@ -2219,6 +2219,37 @@ export class TimingRepository {
     return toEventSplitRow(row);
   }
 
+  /** One clock epoch by id, with no attempt filter; the caller validates it. */
+  async findClockEpochById(
+    epochId: string,
+    tx?: TimingTx,
+  ): Promise<TimingClockEpochRow | null> {
+    const row = await this.db(tx).timingClockEpoch.findUnique({
+      where: { id: epochId },
+      select: CLOCK_EPOCH_SELECT,
+    });
+    return row === null ? null : toClockEpochRow(row);
+  }
+
+  /** Every running attempt of the event, oldest official start first. */
+  async listRunningAttempts(
+    eventId: string,
+    tx?: TimingTx,
+  ): Promise<
+    Array<{ attemptId: string; officialStartedAt: Date; status: TimingSessionStatus }>
+  > {
+    const rows = await this.db(tx).timingSession.findMany({
+      where: { eventId, status: 'RUNNING' },
+      select: { id: true, officialStartedAt: true, status: true },
+      orderBy: [{ officialStartedAt: 'asc' }, { id: 'asc' }],
+    });
+    return rows.map((row) => ({
+      attemptId: row.id,
+      officialStartedAt: row.officialStartedAt,
+      status: row.status,
+    }));
+  }
+
   /** Every queued split of the event, oldest capture first. */
   async listQueuedEventSplits(
     eventId: string,

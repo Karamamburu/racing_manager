@@ -47,6 +47,7 @@ import type {
   TimingClosureReportRecord,
   TimingEnrollmentRow,
   TimingEventRow,
+  TimingEventSplitRow,
   TimingFormatRow,
   TimingHeatRosterEnrollmentRow,
   TimingHeatTimeRow,
@@ -68,6 +69,7 @@ import { TimingService } from './timing.service';
 import type {
   TimingAnonymousSplitView,
   TimingClosureReportView,
+  TimingPassView,
 } from './timing.views';
 
 /**
@@ -139,6 +141,9 @@ function createRepositoryFake() {
     ),
     listAnonymousSplits: jest.fn(
       (): Promise<TimingAnonymousSplitRow[]> => Promise.resolve([]),
+    ),
+    listQueuedEventSplits: jest.fn(
+      (): Promise<TimingEventSplitRow[]> => Promise.resolve([]),
     ),
     findLatestAttemptNumber: jest.fn((): Promise<number> => Promise.resolve(0)),
     createAttempt: jest.fn(),
@@ -3110,12 +3115,12 @@ describe('TimingService', () => {
         ],
       });
 
-      const pass = await service.capturePass(
+      const pass = (await service.capturePass(
         USER_ID,
         EVENT_ID,
         capturePassDto({ deviceSequence: 3 }),
         'key-3',
-      );
+      )) as TimingPassView;
 
       expect(repository.updateMark.mock.calls).toEqual([
         [TX, 'mark-new', { lapNumber: 1 }],
