@@ -862,6 +862,17 @@ export class AnonymousSplitService {
             { splitId: split.splitId },
           );
         }
+        const freshAttempt = await this.repository.findAttempt(
+          chosen.attemptId,
+          tx,
+        );
+        if (freshAttempt === null || freshAttempt.status !== 'RUNNING') {
+          throw timingError(
+            TimingErrorCode.ATTEMPT_CLOSED,
+            'The resolved attempt is not running.',
+            { attemptId: chosen.attemptId },
+          );
+        }
         await this.repository.lockParticipant(
           tx,
           chosen.attemptId,

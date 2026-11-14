@@ -1165,6 +1165,16 @@ describe('event-scoped number-only assignment', () => {
         ]),
       ),
       findParticipant: jest.fn(() => Promise.resolve(participant)),
+      findAttempt: jest.fn(() =>
+        Promise.resolve(
+          attemptRow({
+            id: ATTEMPT_ID,
+            eventId: EVENT_ID,
+            status: 'RUNNING',
+            officialStartedAt: new Date(NOW.getTime() - 60_000),
+          }),
+        ),
+      ),
       lockParticipant: jest.fn(() => Promise.resolve()),
       listMarks: jest.fn(() => Promise.resolve([])),
       withTransaction: jest.fn((run: (tx: TimingTx) => Promise<unknown>) =>
