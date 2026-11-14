@@ -1,4 +1,3 @@
-import { Tag, Typography } from 'antd';
 import type { CSSProperties } from 'react';
 import type {
   TimingParticipantTileState,
@@ -13,12 +12,24 @@ const STATE_LABELS: Record<TimingParticipantTileState, string> = {
   EXCLUDED: 'Исключён',
 };
 
-const STATE_COLORS: Record<TimingParticipantTileState, string> = {
-  WAITING: 'default',
-  RACING: 'blue',
-  RECORDED: 'green',
-  INCOMPLETE: 'orange',
-  EXCLUDED: 'red',
+/** The whole tile is filled with its state colour (U-04 compact tiles). */
+const STATE_STYLES: Record<
+  TimingParticipantTileState,
+  Pick<CSSProperties, 'background' | 'borderColor' | 'color'>
+> = {
+  WAITING: { background: '#f0f0f0', borderColor: '#d9d9d9', color: '#262626' },
+  RACING: { background: '#1677ff', borderColor: '#1677ff', color: '#ffffff' },
+  RECORDED: {
+    background: '#389e0d',
+    borderColor: '#389e0d',
+    color: '#ffffff',
+  },
+  INCOMPLETE: {
+    background: '#d46b08',
+    borderColor: '#d46b08',
+    color: '#ffffff',
+  },
+  EXCLUDED: { background: '#cf1322', borderColor: '#cf1322', color: '#ffffff' },
 };
 
 /**
@@ -46,30 +57,34 @@ function displayNumber(startNumber: number): string {
     : '—';
 }
 
-function tileStyle(excluded: boolean): CSSProperties {
+function tileStyle(
+  state: TimingParticipantTileState,
+  interactive: boolean,
+): CSSProperties {
   return {
     display: 'block',
     boxSizing: 'border-box',
     width: '100%',
     height: '100%',
-    padding: 12,
-    border: excluded ? '1px dashed #d9d9d9' : '1px solid #f0f0f0',
-    borderRadius: 8,
-    background: excluded ? '#fafafa' : '#ffffff',
-    opacity: excluded ? 0.65 : 1,
+    padding: '6px 8px',
+    border: '1px solid',
+    borderRadius: 6,
+    ...STATE_STYLES[state],
+    cursor: interactive ? 'pointer' : 'default',
     textAlign: 'left',
     font: 'inherit',
-    color: 'inherit',
   };
 }
 
 /**
  * One participant of a category block.
  *
- * The tile is a read-only view of the frozen roster facts and the live capture
- * state. It carries no capture logic: a tile click is reported to the caller,
- * and the capture wave decides what it means. An excluded participant keeps its
- * reason on screen and is never a control.
+ * The tile is a compact, read-only view of the frozen roster facts and the live
+ * capture state. Its whole surface carries the state colour, so a running or
+ * finished participant is readable at a glance and more tiles fit on screen.
+ * It carries no capture logic: a tile click is reported to the caller, and the
+ * capture wave decides what it means. An excluded participant keeps its reason
+ * on screen and is never a control.
  */
 export function ParticipantTile({
   participant,
@@ -78,41 +93,78 @@ export function ParticipantTile({
   participant: TimingParticipantTileView;
   onClick?: () => void;
 }) {
-  const excluded = participant.state === 'EXCLUDED';
+  const state = participant.state;
+  const excluded = state === 'EXCLUDED';
   const interactive = onClick !== undefined && !excluded;
   const number = displayNumber(participant.startNumber);
 
   const content = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        minWidth: 0,
+      }}
+    >
       <div
         style={{
           display: 'flex',
           alignItems: 'baseline',
           justifyContent: 'space-between',
-          gap: 8,
+          gap: 6,
         }}
       >
-        <Typography.Text strong style={{ fontSize: 20 }}>
+        <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.1 }}>
           {number}
-        </Typography.Text>
-        <Tag color={STATE_COLORS[participant.state]}>
-          {STATE_LABELS[participant.state]}
-        </Tag>
+        </span>
+        <span
+          style={{
+            fontSize: 10,
+            lineHeight: 1.2,
+            opacity: 0.9,
+            textAlign: 'right',
+          }}
+        >
+          {STATE_LABELS[state]}
+        </span>
       </div>
-      <Typography.Text strong>{participant.fullName}</Typography.Text>
-      <Typography.Text type="secondary">
+      <span
+        title={participant.fullName}
+        style={{
+          fontSize: 12,
+          fontWeight: 600,
+          lineHeight: 1.2,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {participant.fullName}
+      </span>
+      <span
+        title={participant.sectionId || '—'}
+        style={{
+          fontSize: 10,
+          lineHeight: 1.2,
+          opacity: 0.8,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
         Раздел: {participant.sectionId || '—'}
-      </Typography.Text>
-      <Typography.Text>
+      </span>
+      <span style={{ fontSize: 11, lineHeight: 1.2 }}>
         Круги: {participant.passCount} / {participant.requiredLaps}
-      </Typography.Text>
-      <Typography.Text>
+      </span>
+      <span style={{ fontSize: 10, lineHeight: 1.2, opacity: 0.85 }}>
         Последняя отметка: {formatTimingClock(participant.lastPassAt)}
-      </Typography.Text>
+      </span>
       {excluded && participant.excludedReason ? (
-        <Typography.Text type="danger">
+        <span style={{ fontSize: 10, lineHeight: 1.2 }}>
           Причина: {participant.excludedReason}
-        </Typography.Text>
+        </span>
       ) : null}
     </div>
   );
@@ -123,12 +175,12 @@ export function ParticipantTile({
         type="button"
         onClick={onClick}
         aria-label={`${number} ${participant.fullName}`}
-        style={{ ...tileStyle(false), cursor: 'pointer' }}
+        style={tileStyle(state, true)}
       >
         {content}
       </button>
     );
   }
 
-  return <div style={tileStyle(excluded)}>{content}</div>;
+  return <div style={tileStyle(state, false)}>{content}</div>;
 }

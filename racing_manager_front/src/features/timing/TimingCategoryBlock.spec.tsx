@@ -570,3 +570,61 @@ describe('race-captured participants in a category block', () => {
     ).toBeNull();
   });
 });
+
+describe('independent block collapse', () => {
+  it('folds the body while the header, state and actions stay visible', () => {
+    render(
+      <TimingCategoryBlock
+        block={block()}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Иван Петров')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Свернуть блок' }));
+
+    expect(screen.queryByText('Иван Петров')).toBeNull();
+    expect(screen.getByText('5 км · Мужчины')).not.toBeNull();
+    expect(screen.getByText('Старт')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Развернуть блок' }));
+    expect(screen.getByText('Иван Петров')).not.toBeNull();
+  });
+
+  it('keeps the collapse of one block independent from another', () => {
+    render(
+      <>
+        <TimingCategoryBlock
+          block={block()}
+          title="5 км · Мужчины"
+          isCaptureHolder
+          onStart={vi.fn()}
+        />
+        <TimingCategoryBlock
+          block={block({
+            participants: [
+              participant({
+                enrollmentId: 'enrollment-2',
+                fullName: 'Анна Вторая',
+              }),
+            ],
+          })}
+          title="10 км · Женщины"
+          isCaptureHolder
+          onStart={vi.fn()}
+        />
+      </>,
+    );
+
+    const toggles = screen.getAllByRole('button', { name: 'Свернуть блок' });
+    fireEvent.click(toggles[0]);
+
+    expect(screen.queryByText('Иван Петров')).toBeNull();
+    expect(screen.getByText('Анна Вторая')).not.toBeNull();
+    expect(
+      screen.getAllByRole('button', { name: 'Развернуть блок' }),
+    ).toHaveLength(1);
+  });
+});

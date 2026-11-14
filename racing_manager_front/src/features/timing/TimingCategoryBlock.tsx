@@ -1,9 +1,12 @@
 import {
+  DownOutlined,
   FileTextOutlined,
   PlayCircleOutlined,
   UnlockOutlined,
+  UpOutlined,
 } from '@ant-design/icons';
 import { Alert, Button, Card, Col, Row, Space, Tag, Typography } from 'antd';
+import { useState } from 'react';
 import { ParticipantTile, formatTimingClock } from './ParticipantTile';
 import type {
   TimingCategoryBlockView,
@@ -119,6 +122,10 @@ export function TimingCategoryBlock({
     officialStartedAt: block.officialStartedAt,
     elapsedMs: block.elapsedMs,
   });
+  // Every rendered block collapses independently: the header, the state tag and
+  // the actions stay visible, and only this block's body folds away. The state
+  // is page-session local and keyed by the component instance (U-04).
+  const [collapsed, setCollapsed] = useState(false);
 
   return (
     <Card
@@ -157,36 +164,45 @@ export function TimingCategoryBlock({
               Захват у другой станции
             </Typography.Text>
           ) : null}
+          <Button
+            type="text"
+            size="small"
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? 'Развернуть блок' : 'Свернуть блок'}
+            icon={collapsed ? <DownOutlined /> : <UpOutlined />}
+            onClick={() => setCollapsed((current) => !current)}
+          />
         </Space>
       }
     >
-      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-        {subtitle ? (
-          <Typography.Text type="secondary">{subtitle}</Typography.Text>
-        ) : null}
-        {isHeat && block.stageLabel ? (
-          <Typography.Text type="secondary">
-            Этап: {block.stageLabel}
-          </Typography.Text>
-        ) : null}
-
-        <Space wrap size={[16, 4]}>
-          <Typography.Text>Круги: {block.lapCount}</Typography.Text>
-          <Typography.Text>
-            Старт: {formatTimingClock(block.officialStartedAt)}
-          </Typography.Text>
-          {displayedElapsedMs === null ? null : (
-            <Typography.Text
-              style={{
-                display: 'inline-block',
-                minWidth: 118,
-                fontVariantNumeric: 'tabular-nums',
-              }}
-            >
-              Время: {formatElapsed(displayedElapsedMs)}
+      {collapsed ? null : (
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          {subtitle ? (
+            <Typography.Text type="secondary">{subtitle}</Typography.Text>
+          ) : null}
+          {isHeat && block.stageLabel ? (
+            <Typography.Text type="secondary">
+              Этап: {block.stageLabel}
             </Typography.Text>
-          )}
-          <Typography.Text>Участники: {visibleParticipants.length}</Typography.Text>
+          ) : null}
+
+          <Space wrap size={[16, 4]}>
+            <Typography.Text>Круги: {block.lapCount}</Typography.Text>
+            <Typography.Text>
+              Старт: {formatTimingClock(block.officialStartedAt)}
+            </Typography.Text>
+            {displayedElapsedMs === null ? null : (
+              <Typography.Text
+                style={{
+                  display: 'inline-block',
+                  minWidth: 118,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                Время: {formatElapsed(displayedElapsedMs)}
+              </Typography.Text>
+            )}
+            <Typography.Text>Участники: {visibleParticipants.length}</Typography.Text>
         </Space>
 
         {raceSectionExcluded.length > 0 ? (
@@ -213,14 +229,16 @@ export function TimingCategoryBlock({
               : 'В категории нет участников для хронометража'}
           </Typography.Text>
         ) : (
-          <Row gutter={[8, 8]}>
+          <Row gutter={[6, 6]}>
             {visibleParticipants.map((participant) => (
               <Col
                 key={participant.enrollmentId}
-                xs={24}
-                sm={12}
-                md={8}
-                xl={6}
+                xs={12}
+                sm={8}
+                md={6}
+                lg={4}
+                xl={4}
+                xxl={3}
               >
                 <ParticipantTile
                   participant={participant}
@@ -234,7 +252,8 @@ export function TimingCategoryBlock({
             ))}
           </Row>
         )}
-      </Space>
+        </Space>
+      )}
     </Card>
   );
 }
