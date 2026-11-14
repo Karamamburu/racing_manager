@@ -138,6 +138,16 @@ function splitView(): TimingAnonymousSplitView {
     capturedAt: '2026-11-13T09:00:07.500Z',
     officialElapsedMs: 7500,
     status: 'QUEUED',
+    bound: false,
+    candidates: [
+      {
+        attemptId: 'attempt-1',
+        blockKey: 'CATEGORY_1:start-1',
+        attemptLabel: 'Заезд 1',
+        officialElapsedMs: 7500,
+      },
+    ],
+    captureDeviceSequence: 3,
   };
 }
 

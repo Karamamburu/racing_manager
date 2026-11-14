@@ -142,6 +142,16 @@ function anonymousSplit(
     capturedAt: '2026-11-13T09:00:03.000Z',
     officialElapsedMs: 3000,
     status: 'QUEUED',
+    bound: false,
+    candidates: [
+      {
+        attemptId: 'attempt-a',
+        blockKey: 'CATEGORY_1:start-a',
+        attemptLabel: 'Заезд 1',
+        officialElapsedMs: 3000,
+      },
+    ],
+    captureDeviceSequence: 2,
     ...overrides,
   };
 }

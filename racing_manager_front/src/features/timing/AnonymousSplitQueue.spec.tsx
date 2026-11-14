@@ -28,6 +28,16 @@ function split(
     capturedAt: localIso(9, 1, 0),
     officialElapsedMs: 60_000,
     status: 'QUEUED',
+    bound: false,
+    candidates: [
+      {
+        attemptId: 'attempt-1',
+        blockKey: 'start-a:1:M',
+        attemptLabel: '5 км · Мужчины · Кубковая гонка — 10 км',
+        officialElapsedMs: 60_000,
+      },
+    ],
+    captureDeviceSequence: 1,
     ...overrides,
   };
 }

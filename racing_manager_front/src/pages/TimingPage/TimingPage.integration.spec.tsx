@@ -212,6 +212,16 @@ function anonymousSplit(
     capturedAt: '2026-11-13T09:00:01.000Z',
     officialElapsedMs: 1000,
     status: 'QUEUED',
+    bound: false,
+    candidates: [
+      {
+        attemptId: 'attempt-1',
+        blockKey: 'start-a:1:M',
+        attemptLabel: '5 км · Мужчины · Кубковая гонка — 10 км',
+        officialElapsedMs: 1000,
+      },
+    ],
+    captureDeviceSequence: 4,
     ...overrides,
   };
 }
