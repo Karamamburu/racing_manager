@@ -175,6 +175,22 @@ enum TimingReceiptStatus {
   @@map("timing_receipt_status")
 }
 
+enum TimingSplitState {
+  QUEUED
+  ASSIGNED
+  UNDONE
+  CANCELLED
+
+  @@map("timing_split_state")
+}
+
+enum TimingCaptureOrigin {
+  CAPTURE
+  SPLIT_ASSIGN
+
+  @@map("timing_capture_origin")
+}
+
 model User {
   id            String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   authentikId   String                 @unique @map("authentik_id")
@@ -200,6 +216,8 @@ model User {
   timingClockEpochsOpened TimingClockEpoch[]
   timingCaptureLocksHeld  TimingCaptureLock[]
   timingAuditEntries      TimingAudit[]
+  timingSplitsCaptured    TimingEventSplit[]  @relation("TimingSplitCapturedBy")
+  timingEventAuditEntries TimingEventAudit[]  @relation("TimingEventAuditActor")
 
   @@map("users")
 }
@@ -267,6 +285,9 @@ model Event {
   ageSplitCategories AgeSplitCategory[]
   timingSessions     TimingSession[]
   timingCaptureLock  TimingCaptureLock?
+  timingEventSplits  TimingEventSplit[]
+  timingEventReceipts TimingEventCaptureReceipt[]
+  timingEventAudit   TimingEventAudit[]
 
   @@index([trackId], map: "idx_events_track_id")
   @@index([eventDate], map: "idx_events_date")
@@ -631,6 +652,10 @@ model TimingSession {
   receipts           TimingCaptureReceipt[]
   auditEntries       TimingAudit[]
   results            Result[]
+  splitAnchors       TimingEventSplit[]       @relation("TimingSplitAnchorAttempt")
+  splitBound         TimingEventSplit[]       @relation("TimingSplitBoundAttempt")
+  splitAssigned      TimingEventSplit[]       @relation("TimingSplitAssignedAttempt")
+  splitCandidates    TimingAnonymousSplitCandidate[]
 
   // The SQL migration also adds composite foreign keys to
   // starts(id, event_id) and start_formats(start_id, format_id). Prisma
@@ -688,6 +713,7 @@ model TimingClockEpoch {
   openedByUserId          String?       @map("opened_by_user_id") @db.Uuid
   openedBy                User?         @relation(fields: [openedByUserId], references: [id], onDelete: SetNull)
   marks                   TimingMark[]
+  splitAnchors            TimingEventSplit[] @relation("TimingSplitAnchorEpoch")
 
   @@index([sessionId, workstationInstanceId], map: "idx_timing_clock_epochs_session_workstation")
   @@map("timing_clock_epochs")
@@ -697,8 +723,8 @@ model TimingMark {
   id                    String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   sessionId             String           @map("session_id") @db.Uuid
   session               TimingSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  clockEpochId          String           @map("clock_epoch_id") @db.Uuid
-  clockEpoch            TimingClockEpoch @relation(fields: [clockEpochId], references: [id], onDelete: Cascade)
+  clockEpochId          String?          @map("clock_epoch_id") @db.Uuid
+  clockEpoch            TimingClockEpoch? @relation(fields: [clockEpochId], references: [id], onDelete: SetNull)
   enrollmentId          String?          @map("enrollment_id") @db.Uuid
   enrollment            Enrollment?      @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
   registrationId        String?          @map("registration_id") @db.Uuid
@@ -714,6 +740,8 @@ model TimingMark {
   workstationInstanceId String           @map("workstation_instance_id")
   deviceSequence        Int?             @map("device_sequence")
   idempotencyKey        String           @map("idempotency_key")
+  sourceSplitId         String?          @unique @map("source_split_id") @db.Uuid
+  sourceSplit           TimingEventSplit? @relation("TimingSplitPass", fields: [sourceSplitId], references: [id], onDelete: SetNull)
   createdAt             DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -727,12 +755,13 @@ model TimingCaptureReceipt {
   sessionId             String              @map("session_id") @db.Uuid
   session               TimingSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   workstationInstanceId String              @map("workstation_instance_id")
+  origin                TimingCaptureOrigin @default(CAPTURE) @map("origin")
   deviceSequence        Int                 @map("device_sequence")
   status                TimingReceiptStatus
   reason                String?
   createdAt             DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@id([sessionId, workstationInstanceId, deviceSequence])
+  @@id([sessionId, workstationInstanceId, origin, deviceSequence])
   @@map("timing_capture_receipts")
 }
 
@@ -747,6 +776,92 @@ model TimingCaptureLock {
   lastSeenAt            DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
 
   @@map("timing_capture_locks")
+}
+
+model TimingEventSplit {
+  id                            String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  eventId                       String            @map("event_id") @db.Uuid
+  event                         Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  state                         TimingSplitState  @default(QUEUED)
+  captureInstant                DateTime          @map("capture_instant") @db.Timestamptz(6)
+  anchorClockEpochId            String            @map("anchor_clock_epoch_id") @db.Uuid
+  anchorClockEpoch              TimingClockEpoch  @relation("TimingSplitAnchorEpoch", fields: [anchorClockEpochId], references: [id], onDelete: Restrict)
+  anchorAttemptId               String            @map("anchor_attempt_id") @db.Uuid
+  anchorAttempt                 TimingSession     @relation("TimingSplitAnchorAttempt", fields: [anchorAttemptId], references: [id], onDelete: Restrict)
+  anchorElapsedAnchorMs         Int               @map("anchor_elapsed_anchor_ms")
+  clientCapturedAt              DateTime          @map("client_captured_at") @db.Timestamptz(6)
+  clientElapsedMs               Int               @map("client_elapsed_ms")
+  capturedByUserId              String?           @map("captured_by_user_id") @db.Uuid
+  capturedBy                    User?             @relation("TimingSplitCapturedBy", fields: [capturedByUserId], references: [id], onDelete: SetNull)
+  captureWorkstationInstanceId  String            @map("capture_workstation_instance_id")
+  captureDeviceSequence         Int?              @map("capture_device_sequence")
+  legacyMarkId                  String?           @unique @map("legacy_mark_id") @db.Uuid
+  boundAttemptId                String?           @map("bound_attempt_id") @db.Uuid
+  boundAttempt                  TimingSession?    @relation("TimingSplitBoundAttempt", fields: [boundAttemptId], references: [id], onDelete: Restrict)
+  assignedAttemptId             String?           @map("assigned_attempt_id") @db.Uuid
+  assignedAttempt               TimingSession?    @relation("TimingSplitAssignedAttempt", fields: [assignedAttemptId], references: [id], onDelete: Restrict)
+  assignedAt                    DateTime?         @map("assigned_at") @db.Timestamptz(6)
+  assignedByUserId              String?           @map("assigned_by_user_id") @db.Uuid
+  assignedWorkstationInstanceId String?           @map("assigned_workstation_instance_id")
+  assignmentDeviceSequence      Int?              @map("assignment_device_sequence")
+  offeredAttemptIds             Json?             @map("offered_attempt_ids")
+  chosenByReferee               Boolean           @default(false) @map("chosen_by_referee")
+  resolvedAt                    DateTime?         @map("resolved_at") @db.Timestamptz(6)
+  resolvedByUserId              String?           @map("resolved_by_user_id") @db.Uuid
+  resolvedWorkstationInstanceId String?           @map("resolved_workstation_instance_id")
+  resolutionReason              String?           @map("resolution_reason")
+  createdAt                     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                     DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  candidates                    TimingAnonymousSplitCandidate[]
+  pass                          TimingMark?       @relation("TimingSplitPass")
+
+  @@index([eventId, state, captureInstant], map: "idx_timing_event_splits_event_state")
+  @@map("timing_event_splits")
+}
+
+model TimingAnonymousSplitCandidate {
+  splitId   String           @map("split_id") @db.Uuid
+  split     TimingEventSplit @relation(fields: [splitId], references: [id], onDelete: Cascade)
+  attemptId String           @map("attempt_id") @db.Uuid
+  attempt   TimingSession    @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@id([splitId, attemptId])
+  @@index([attemptId], map: "idx_timing_split_candidates_attempt")
+  @@map("timing_anonymous_split_candidates")
+}
+
+model TimingEventCaptureReceipt {
+  eventId               String              @map("event_id") @db.Uuid
+  event                 Event               @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  workstationInstanceId String              @map("workstation_instance_id")
+  deviceSequence        Int                 @map("device_sequence")
+  status                TimingReceiptStatus
+  reason                String?
+  splitId               String?             @map("split_id") @db.Uuid
+  resolvedAttemptId     String?             @map("resolved_attempt_id") @db.Uuid
+  createdAt             DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([eventId, workstationInstanceId, deviceSequence])
+  @@index([eventId, workstationInstanceId, createdAt], map: "idx_timing_event_receipts_workstation_time")
+  @@map("timing_event_capture_receipts")
+}
+
+model TimingEventAudit {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  eventId     String   @map("event_id") @db.Uuid
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  actor       User?    @relation("TimingEventAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  action      String
+  targetType  String   @map("target_type")
+  targetId    String   @map("target_id")
+  oldValues   Json?    @map("old_values")
+  newValues   Json?    @map("new_values")
+  reason      String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([eventId, createdAt], map: "idx_timing_event_audit_event_created_at")
+  @@map("timing_event_audit")
 }
 
 model TimingAudit {

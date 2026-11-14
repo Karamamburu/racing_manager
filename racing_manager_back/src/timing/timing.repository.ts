@@ -237,7 +237,7 @@ export type TimingHeatTimeRow = {
 export type TimingMarkRow = {
   id: string;
   attemptId: string;
-  clockEpochId: string;
+  clockEpochId: string | null;
   enrollmentId: string | null;
   registrationId: string | null;
   startNumber: number | null;
@@ -273,7 +273,7 @@ export type TimingAnonymousSplitRow = {
   stageId: string | null;
   heatNumber: number | null;
   officialStartedAt: Date;
-  clockEpochId: string;
+  clockEpochId: string | null;
   /** The capture instant the queue orders and displays; the official one. */
   capturedAt: Date;
   officialElapsedMs: number;
@@ -2162,9 +2162,10 @@ export class TimingRepository {
   ): Promise<TimingReceiptRow | null> {
     const row = await tx.timingCaptureReceipt.findUnique({
       where: {
-        sessionId_workstationInstanceId_deviceSequence: {
+        sessionId_workstationInstanceId_origin_deviceSequence: {
           sessionId: attemptId,
           workstationInstanceId,
+          origin: 'CAPTURE',
           deviceSequence,
         },
       },
