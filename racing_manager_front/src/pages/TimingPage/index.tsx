@@ -639,8 +639,16 @@ export function TimingPage() {
 
         <Card size="small">
           <Row gutter={[16, 12]}>
-            <Col xs={24} xl={8}>
-              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            <Col
+              xs={24}
+              xl={8}
+              style={{ display: 'flex', flexDirection: 'column' }}
+            >
+              <Space
+                direction="vertical"
+                size={10}
+                style={{ width: '100%', flex: 1 }}
+              >
                 <Space wrap size={16} align="center">
                   <Typography.Text>Захват: {holderLabel}</Typography.Text>
                   <Typography.Text type="secondary">
@@ -728,7 +736,11 @@ export function TimingPage() {
                 onAnonymousSplit={captureAnonymousSplit}
               />
             </Col>
-            <Col xs={24} xl={8}>
+            <Col
+              xs={24}
+              xl={8}
+              style={{ display: 'flex', flexDirection: 'column' }}
+            >
               <AnonymousSplitQueue
                 splits={anonymousSplits}
                 selectedSplitId={selectedSplitId}

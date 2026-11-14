@@ -19,7 +19,7 @@ import { describeTimingError } from './useTimingCapture';
  * required reason. Every rule and every message of a refusal belongs to the API.
  */
 
-/** Fixed height of the entry area: the queue never grows with its entries. */
+/** Minimum height of the entry area when its column has no spare height. */
 export const ANONYMOUS_QUEUE_AREA_HEIGHT = 104;
 
 const LIST_LABEL = 'Очередь неразмеченных сплитов';
@@ -122,17 +122,39 @@ export function AnonymousSplitQueue({
     <Card
       size="small"
       title="Неразмеченные сплиты"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        height: '100%',
+      }}
+      styles={{
+        body: {
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          minHeight: 0,
+        },
+      }}
       extra={
         <Tag color={splits.length > 0 ? 'orange' : 'default'}>
           В очереди: {splits.length}
         </Tag>
       }
     >
-      <Space direction="vertical" size={6} style={{ width: '100%' }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          minHeight: 0,
+        }}
+      >
         <ul
           aria-label={LIST_LABEL}
           style={{
-            height: ANONYMOUS_QUEUE_AREA_HEIGHT,
+            flex: 1,
+            minHeight: ANONYMOUS_QUEUE_AREA_HEIGHT,
             overflowY: 'auto',
             margin: 0,
             padding: 0,
@@ -207,7 +229,7 @@ export function AnonymousSplitQueue({
             })
           )}
         </ul>
-      </Space>
+      </div>
 
       <Modal
         open={cancelTargetId !== null}

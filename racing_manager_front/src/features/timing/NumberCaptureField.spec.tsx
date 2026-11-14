@@ -293,9 +293,9 @@ describe('NumberCaptureField', () => {
       screen.queryByText(/Сплит будет назначен попытке/),
     ).toBeNull();
     expect(numberInput().placeholder).toBe('№');
-    expect(numberInput().style.width).toBe('132px');
-    expect(numberInput().style.height).toBe('132px');
-    expect(numberInput().style.fontSize).toBe('48px');
+    expect(numberInput().style.width).toBe('264px');
+    expect(numberInput().style.height).toBe('264px');
+    expect(numberInput().style.fontSize).toBe('96px');
     expect(document.activeElement).toBe(numberInput());
   });
 

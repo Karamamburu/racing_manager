@@ -82,7 +82,9 @@ describe('AnonymousSplitQueue layout', () => {
         'Очередь пуста: Enter на пустом поле номера добавит сплит',
       ),
     ).not.toBeNull();
-    expect(queueArea().style.height).toBe(`${ANONYMOUS_QUEUE_AREA_HEIGHT}px`);
+    expect(queueArea().style.minHeight).toBe(
+      `${ANONYMOUS_QUEUE_AREA_HEIGHT}px`,
+    );
   });
 
   it('keeps the same fixed area when entries are added, so nothing around it moves', () => {
@@ -94,7 +96,7 @@ describe('AnonymousSplitQueue layout', () => {
         onCancel={vi.fn()}
       />,
     );
-    const emptyHeight = queueArea().style.height;
+    const emptyHeight = queueArea().style.minHeight;
 
     rerender(
       <AnonymousSplitQueue
@@ -110,7 +112,7 @@ describe('AnonymousSplitQueue layout', () => {
     );
 
     expect(screen.getByText('В очереди: 3')).not.toBeNull();
-    expect(queueArea().style.height).toBe(emptyHeight);
+    expect(queueArea().style.minHeight).toBe(emptyHeight);
     expect(queueArea().style.overflowY).toBe('auto');
   });
 });

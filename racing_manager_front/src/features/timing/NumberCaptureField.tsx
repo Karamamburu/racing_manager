@@ -312,10 +312,10 @@ export function NumberCaptureField({
         }}
         onKeyDown={handleKeyDown}
         style={{
-          width: 132,
-          height: 132,
+          width: 264,
+          height: 264,
           padding: 0,
-          fontSize: 48,
+          fontSize: 96,
           fontWeight: 700,
           textAlign: 'center',
           borderRadius: 12,

@@ -133,3 +133,7 @@ The «Отсечки» column of the event protocol lays laps side by side: each
 ## 2026-11-14 — timing number field
 
 The top control block of the timing page is three symmetric columns: capture controls and current-block selector, a large square number field in the middle, and the anonymous split queue on the right. The number field is 132×132 px with 48 px centred digits, so it is easy to hit and the typed number is readable at a glance. Presentation-only.
+
+## 2026-11-14 — full-height timing controls
+
+The three columns of the timing top block now share its full height. The number field doubles to 264×264 px with 96 px centred digits, and the anonymous split queue stretches with its column instead of keeping a fixed 104 px area (104 px stays as the minimum). Presentation-only.
