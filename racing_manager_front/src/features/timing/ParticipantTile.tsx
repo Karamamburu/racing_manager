@@ -65,7 +65,9 @@ function tileStyle(
     display: 'block',
     boxSizing: 'border-box',
     width: '100%',
-    height: '100%',
+    // A fixed 3:4 portrait card is easier to aim at and looks the same in
+    // every block, whatever the number of columns (U-04).
+    aspectRatio: '3 / 4',
     padding: '6px 8px',
     border: '1px solid',
     borderRadius: 6,
@@ -80,11 +82,11 @@ function tileStyle(
  * One participant of a category block.
  *
  * The tile is a compact, read-only view of the frozen roster facts and the live
- * capture state. Its whole surface carries the state colour, so a running or
- * finished participant is readable at a glance and more tiles fit on screen.
- * It carries no capture logic: a tile click is reported to the caller, and the
- * capture wave decides what it means. An excluded participant keeps its reason
- * on screen and is never a control.
+ * capture state. Its whole surface carries the state colour and keeps a fixed
+ * 3:4 shape, so a running or finished participant is readable at a glance and
+ * the whole card is an easy click target. It carries no capture logic: a tile
+ * click is reported to the caller, and the capture wave decides what it means.
+ * An excluded participant is never a control.
  */
 export function ParticipantTile({
   participant,
@@ -103,7 +105,9 @@ export function ParticipantTile({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: 1,
+        justifyContent: 'space-between',
+        height: '100%',
+        gap: 4,
         minWidth: 0,
       }}
     >
@@ -129,29 +133,38 @@ export function ParticipantTile({
           {STATE_LABELS[state]}
         </span>
       </div>
-      <span
-        title={participant.fullName}
+      <div
         style={{
-          fontSize: 12,
-          fontWeight: 600,
-          lineHeight: 1.2,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 1,
+          minWidth: 0,
         }}
       >
-        {participant.fullName}
-      </span>
-      <span
-        title={`Круги: ${participant.passCount} из ${participant.requiredLaps}`}
-        style={{
-          fontSize: 12,
-          lineHeight: 1.15,
-          fontVariantNumeric: 'tabular-nums',
-        }}
-      >
-        {participant.passCount}/{participant.requiredLaps}
-      </span>
+        <span
+          title={participant.fullName}
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            lineHeight: 1.2,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {participant.fullName}
+        </span>
+        <span
+          title={`Круги: ${participant.passCount} из ${participant.requiredLaps}`}
+          style={{
+            fontSize: 12,
+            lineHeight: 1.15,
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {participant.passCount}/{participant.requiredLaps}
+        </span>
+      </div>
     </div>
   );
 
