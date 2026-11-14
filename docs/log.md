@@ -121,3 +121,7 @@ Added anonymous Enter splits with a fixed top queue and number assignment/cancel
 ## 2026-11-14 — MANUAL-TIMING-2 capture retention and closure gaps
 
 A category closure no longer releases the event-wide capture lock: the workstation that timed one category keeps the hold for the next one, and releasing stays explicit (`force-release`/`transfer`). A capture refused by the capture-lock or clock-epoch check now writes a `REJECTED` receipt for its issued sequence instead of leaving a gap that later blocks closure with `UNCONFIRMED_MUTATIONS`; closure-gate messages are Russian. The anonymous split queue renders as two columns and the number field focuses itself in assignment mode without the attempt caption; the elapsed time cell has a fixed width and tabular digits. Updated [domains/timing.md](domains/timing.md).
+
+## 2026-11-14 — timing UI density and protocol splits
+
+The timing page now keeps the capture controls, current-block selector and number field in the left column of the top control block and the anonymous split queue in its right column with a shorter fixed area. Every category and heat block collapses independently while its header, state tag and actions stay visible. Participant tiles are compact and filled with the colour of their state, so more tiles fit on screen. In the event protocol the «Отсечки» column renders every split as `hh:mm:ss.mmm` and stacks the lap time over the cumulative time. No API or stored value changed. Updated [domains/timing.md](domains/timing.md).
