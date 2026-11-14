@@ -103,7 +103,7 @@ export function ParticipantTile({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: 2,
+        gap: 1,
         minWidth: 0,
       }}
     >
@@ -115,7 +115,7 @@ export function ParticipantTile({
           gap: 6,
         }}
       >
-        <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.1 }}>
+        <span style={{ fontSize: 22, fontWeight: 700, lineHeight: 1.05 }}>
           {number}
         </span>
         <span
@@ -143,29 +143,15 @@ export function ParticipantTile({
         {participant.fullName}
       </span>
       <span
-        title={participant.sectionId || '—'}
+        title={`Круги: ${participant.passCount} из ${participant.requiredLaps}`}
         style={{
-          fontSize: 10,
-          lineHeight: 1.2,
-          opacity: 0.8,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
+          fontSize: 12,
+          lineHeight: 1.15,
+          fontVariantNumeric: 'tabular-nums',
         }}
       >
-        Раздел: {participant.sectionId || '—'}
+        {participant.passCount}/{participant.requiredLaps}
       </span>
-      <span style={{ fontSize: 11, lineHeight: 1.2 }}>
-        Круги: {participant.passCount} / {participant.requiredLaps}
-      </span>
-      <span style={{ fontSize: 10, lineHeight: 1.2, opacity: 0.85 }}>
-        Последняя отметка: {formatTimingClock(participant.lastPassAt)}
-      </span>
-      {excluded && participant.excludedReason ? (
-        <span style={{ fontSize: 10, lineHeight: 1.2 }}>
-          Причина: {participant.excludedReason}
-        </span>
-      ) : null}
     </div>
   );
 
