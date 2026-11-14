@@ -1165,6 +1165,7 @@ describe('event-scoped number-only assignment', () => {
         ]),
       ),
       findParticipant: jest.fn(() => Promise.resolve(participant)),
+      lockParticipant: jest.fn(() => Promise.resolve()),
       listMarks: jest.fn(() => Promise.resolve([])),
       withTransaction: jest.fn((run: (tx: TimingTx) => Promise<unknown>) =>
         run(TX),

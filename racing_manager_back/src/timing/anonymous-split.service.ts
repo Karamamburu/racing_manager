@@ -862,7 +862,17 @@ export class AnonymousSplitService {
             { splitId: split.splitId },
           );
         }
-        assertCanAddPass(chosen.passCount, chosen.participant.requiredLaps);
+        await this.repository.lockParticipant(
+          tx,
+          chosen.attemptId,
+          chosen.participant.enrollmentId,
+        );
+        const freshMarks = await this.repository.listMarks(chosen.attemptId, tx);
+        const freshPassCount = boundPassCount(
+          freshMarks,
+          chosen.participant.enrollmentId,
+        );
+        assertCanAddPass(freshPassCount, chosen.participant.requiredLaps);
         const created = await this.repository.createMark(tx, {
           attemptId: chosen.attemptId,
           clockEpochId: null,
@@ -885,7 +895,7 @@ export class AnonymousSplitService {
           tx,
           chosen.attemptId,
           chosen.participant.enrollmentId,
-          chosen.marks,
+          freshMarks,
           created,
         );
         const assigned = await this.repository.assignEventSplit(

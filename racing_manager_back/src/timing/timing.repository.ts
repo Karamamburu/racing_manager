@@ -2487,6 +2487,21 @@ export class TimingRepository {
     return rows.map(toEventAuditRow);
   }
 
+  /** Serializes the N check of one frozen participant inside a transaction. */
+  async lockParticipant(
+    tx: TimingTx,
+    attemptId: string,
+    enrollmentId: string,
+  ): Promise<void> {
+    await tx.$queryRaw(Prisma.sql`
+      SELECT 1
+      FROM timing_session_participants
+      WHERE session_id = ${attemptId}::uuid
+        AND enrollment_id = ${enrollmentId}::uuid
+      FOR UPDATE
+    `);
+  }
+
   async createMark(
     tx: TimingTx,
     input: CreateMarkInput,
