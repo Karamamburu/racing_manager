@@ -639,7 +639,7 @@ export function TimingPage() {
 
         <Card size="small">
           <Row gutter={[16, 12]}>
-            <Col xs={24} xl={15}>
+            <Col xs={24} xl={8}>
               <Space direction="vertical" size={10} style={{ width: '100%' }}>
                 <Space wrap size={16} align="center">
                   <Typography.Text>Захват: {holderLabel}</Typography.Text>
@@ -701,24 +701,34 @@ export function TimingPage() {
                   )}
                 </Space>
 
-                <NumberCaptureField
-                  disabled={!hasRunningBlock || !isCaptureHolder}
-                  resolve={capture.resolveCandidates}
-                  onCommit={capture.commitNumber}
-                  assignment={
-                    selectedSplit === null
-                      ? null
-                      : {
-                          splitId: selectedSplit.splitId,
-                          attemptLabel: selectedSplit.attemptLabel,
-                        }
-                  }
-                  onAssign={assignSelectedSplit}
-                  onAnonymousSplit={captureAnonymousSplit}
-                />
               </Space>
             </Col>
-            <Col xs={24} xl={9}>
+            <Col
+              xs={24}
+              xl={8}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+              }}
+            >
+              <NumberCaptureField
+                disabled={!hasRunningBlock || !isCaptureHolder}
+                resolve={capture.resolveCandidates}
+                onCommit={capture.commitNumber}
+                assignment={
+                  selectedSplit === null
+                    ? null
+                    : {
+                        splitId: selectedSplit.splitId,
+                        attemptLabel: selectedSplit.attemptLabel,
+                      }
+                }
+                onAssign={assignSelectedSplit}
+                onAnonymousSplit={captureAnonymousSplit}
+              />
+            </Col>
+            <Col xs={24} xl={8}>
               <AnonymousSplitQueue
                 splits={anonymousSplits}
                 selectedSplitId={selectedSplitId}

@@ -285,17 +285,22 @@ export function NumberCaptureField({
   };
 
   return (
-    <Space direction="vertical" size={4} style={{ width: '100%' }}>
+    <Space
+      direction="vertical"
+      size={6}
+      align="center"
+      style={{ width: '100%' }}
+    >
       <Typography.Text strong>Номер участника</Typography.Text>
       {assignment === null ? (
-        <Typography.Text type="secondary">
+        <Typography.Text type="secondary" style={{ textAlign: 'center' }}>
           Enter на пустом поле добавит неразмеченный сплит
         </Typography.Text>
       ) : null}
       <Input
         ref={inputRef}
         aria-label="Номер участника"
-        placeholder="Номер"
+        placeholder="№"
         inputMode="numeric"
         autoComplete="off"
         status={error ? 'error' : undefined}
@@ -306,7 +311,16 @@ export function NumberCaptureField({
           setError(null);
         }}
         onKeyDown={handleKeyDown}
-        style={{ maxWidth: 180 }}
+        style={{
+          width: 132,
+          height: 132,
+          padding: 0,
+          fontSize: 48,
+          fontWeight: 700,
+          textAlign: 'center',
+          borderRadius: 12,
+          fontVariantNumeric: 'tabular-nums',
+        }}
       />
       {busyLabel === null ? null : (
         <Space size={6}>
@@ -315,7 +329,7 @@ export function NumberCaptureField({
         </Space>
       )}
       {error ? (
-        <Typography.Text type="danger" role="alert">
+        <Typography.Text type="danger" role="alert" style={{ textAlign: 'center' }}>
           {error}
         </Typography.Text>
       ) : null}

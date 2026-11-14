@@ -129,3 +129,7 @@ The timing page now keeps the capture controls, current-block selector and numbe
 ## 2026-11-14 — protocol split columns
 
 The «Отсечки» column of the event protocol lays laps side by side: each lap reads `N - lap time` with the cumulative time directly under the lap time, and laps wrap inside the column when they no longer fit. Times stay `hh:mm:ss.mmm`. Presentation-only.
+
+## 2026-11-14 — timing number field
+
+The top control block of the timing page is three symmetric columns: capture controls and current-block selector, a large square number field in the middle, and the anonymous split queue on the right. The number field is 132×132 px with 48 px centred digits, so it is easy to hit and the typed number is readable at a glance. Presentation-only.

@@ -292,7 +292,10 @@ describe('NumberCaptureField', () => {
     expect(
       screen.queryByText(/Сплит будет назначен попытке/),
     ).toBeNull();
-    expect(numberInput().placeholder).toBe('Номер');
+    expect(numberInput().placeholder).toBe('№');
+    expect(numberInput().style.width).toBe('132px');
+    expect(numberInput().style.height).toBe('132px');
+    expect(numberInput().style.fontSize).toBe('48px');
     expect(document.activeElement).toBe(numberInput());
   });
 
