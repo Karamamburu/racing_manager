@@ -162,6 +162,16 @@ export class AnonymousSplitService {
       authentikId,
       TIMING_OPERATE_ROLE_CODES,
     );
+    const eventSplit = await this.repository.findEventSplit(splitId);
+    if (eventSplit !== null) {
+      return this.assignBlockFreeSplit(
+        authentikId,
+        eventId,
+        eventSplit,
+        dto,
+        idempotencyKey,
+      );
+    }
     const split = await this.loadSplit(splitId, eventId);
     if (split.attempt.status !== 'RUNNING') {
       throw timingError(
@@ -387,6 +397,414 @@ export class AnonymousSplitService {
     // (E-08); the durable state is `CANCELLED` on the mark and the audit row,
     // because the frozen split view describes a queue entry only.
     return toRetiredQueueEntry(mark, attempt, labels);
+  }
+
+  /**
+   * Number-only assignment of an event-scoped split. The number resolves to a
+   * registration of the event, then to the split's frozen candidate attempts;
+   * the split's captured instant is expressed in the receiving attempt's scale.
+   * A split is never attached to an attempt that is not a candidate.
+   */
+  private async assignBlockFreeSplit(
+    authentikId: string | undefined,
+    eventId: string,
+    split: TimingEventSplitRow,
+    dto: AssignAnonymousSplitDto,
+    idempotencyKey?: string,
+  ): Promise<TimingPassView> {
+    if (split.eventId !== eventId) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'Anonymous split not found.',
+        { splitId: split.splitId },
+      );
+    }
+    if (split.state !== 'QUEUED') {
+      throw timingError(
+        TimingErrorCode.SPLIT_ALREADY_RESOLVED,
+        'This split is already resolved.',
+        { splitId: split.splitId, state: split.state },
+      );
+    }
+    const lock = await this.repository.getCaptureLock(eventId);
+    if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
+      throw timingError(
+        TimingErrorCode.CAPTURE_NOT_HELD,
+        'This workstation does not hold capture.',
+        {
+          workstationInstanceId: dto.workstationInstanceId,
+          holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
+        },
+      );
+    }
+    if (split.legacyMarkId !== null) {
+      return this.assignLegacySplit(authentikId, eventId, split, dto, idempotencyKey);
+    }
+
+    const actorUserId = await this.requireUserId(authentikId);
+    let registrationId: string;
+    let enrollmentId: string | null = null;
+    if (dto.startNumber !== undefined) {
+      const registrations = await this.repository.findRegistrationsByStartNumber(
+        eventId,
+        dto.startNumber,
+      );
+      if (registrations.length === 0) {
+        await this.rejectEventAssignment(eventId, split.splitId, dto, 'NUMBER_UNKNOWN');
+        throw timingError(
+          TimingErrorCode.NUMBER_UNKNOWN,
+          'No registration of this event carries the number.',
+          { startNumber: dto.startNumber },
+        );
+      }
+      if (registrations.length > 1) {
+        await this.rejectEventAssignment(eventId, split.splitId, dto, 'NUMBER_DUPLICATE');
+        throw timingError(
+          TimingErrorCode.NUMBER_DUPLICATE,
+          'Two registrations of this event carry the same number.',
+          {
+            startNumber: dto.startNumber,
+            registrations: registrations.map((row) => ({
+              registrationId: row.registrationId,
+              name: `${row.firstName} ${row.lastName}`.trim(),
+            })),
+          },
+        );
+      }
+      registrationId = registrations[0].registrationId;
+    } else if (dto.enrollmentId !== undefined) {
+      const participants = await Promise.all(
+        split.candidates.map((candidate) =>
+          this.repository.findParticipant(candidate.attemptId, dto.enrollmentId as string),
+        ),
+      );
+      const participant = participants.find((row) => row !== null);
+      if (participant === undefined || participant === null) {
+        await this.rejectEventAssignment(eventId, split.splitId, dto, 'NOT_FOUND');
+        throw timingError(
+          TimingErrorCode.NOT_FOUND,
+          'The enrollment is not a frozen participant of this split.',
+          { splitId: split.splitId, enrollmentId: dto.enrollmentId },
+        );
+      }
+      registrationId = participant.registrationId;
+      enrollmentId = participant.enrollmentId;
+    } else {
+      throw timingError(
+        TimingErrorCode.NUMBER_REQUIRED,
+        'An assignment requires a start number or an enrollment.',
+        { splitId: split.splitId },
+      );
+    }
+
+    const enrollments = enrollmentId === null
+      ? await this.repository.listEnrollmentsForRegistration(eventId, registrationId)
+      : [{ enrollmentId, startId: '', formatId: 0 }];
+
+    const failures: Array<Record<string, unknown>> = [];
+    const qualifying: Array<{
+      attemptId: string;
+      participant: TimingParticipantRow;
+      marks: TimingMarkRow[];
+      passCount: number;
+    }> = [];
+    for (const candidate of split.candidates) {
+      const matching = enrollments.filter(
+        (enrollment) =>
+          enrollment.startId === candidate.startId &&
+          enrollment.formatId === candidate.formatId,
+      );
+      if (matching.length === 0) {
+        failures.push({ attemptId: candidate.attemptId, reason: 'NOT_ENROLLED' });
+        continue;
+      }
+      let found: TimingParticipantRow | null = null;
+      for (const enrollment of matching) {
+        found = await this.repository.findParticipant(
+          candidate.attemptId,
+          enrollment.enrollmentId,
+        );
+        if (found !== null) break;
+      }
+      if (found === null) {
+        failures.push({ attemptId: candidate.attemptId, reason: 'NOT_ENROLLED' });
+        continue;
+      }
+      if (found.excludedReason !== null) {
+        failures.push({
+          attemptId: candidate.attemptId,
+          reason: 'EXCLUDED',
+          excludedReason: found.excludedReason,
+        });
+        continue;
+      }
+      if (candidate.attemptStatus !== 'RUNNING') {
+        failures.push({ attemptId: candidate.attemptId, reason: 'ATTEMPT_CLOSED' });
+        continue;
+      }
+      if (candidate.officialStartedAt >= split.captureInstant) {
+        failures.push({
+          attemptId: candidate.attemptId,
+          reason: 'ATTEMPT_STARTED_AFTER_CAPTURE',
+        });
+        continue;
+      }
+      const marks = await this.repository.listMarks(candidate.attemptId);
+      const passCount = boundPassCount(marks, found.enrollmentId);
+      if (passCount >= found.requiredLaps) {
+        failures.push({
+          attemptId: candidate.attemptId,
+          reason: 'ALREADY_N_PASSES',
+          passCount,
+          requiredLaps: found.requiredLaps,
+        });
+        continue;
+      }
+      qualifying.push({
+        attemptId: candidate.attemptId,
+        participant: found,
+        marks,
+        passCount,
+      });
+    }
+
+    if (qualifying.length === 0) {
+      await this.rejectEventAssignment(
+        eventId,
+        split.splitId,
+        dto,
+        'SPLIT_CANDIDATE_UNAVAILABLE',
+      );
+      throw timingError(
+        TimingErrorCode.SPLIT_CANDIDATE_UNAVAILABLE,
+        'No candidate attempt can receive this split.',
+        { splitId: split.splitId, candidates: failures },
+      );
+    }
+    const chosen =
+      dto.chosenAttemptId === undefined
+        ? qualifying.length === 1
+          ? qualifying[0]
+          : null
+        : qualifying.find((candidate) => candidate.attemptId === dto.chosenAttemptId) ??
+          null;
+    if (chosen === null) {
+      if (dto.chosenAttemptId !== undefined) {
+        throw timingError(
+          TimingErrorCode.SPLIT_CHOICE_INVALID,
+          'The chosen attempt does not qualify for this split.',
+          { splitId: split.splitId, chosenAttemptId: dto.chosenAttemptId },
+        );
+      }
+      await this.rejectEventAssignment(
+        eventId,
+        split.splitId,
+        dto,
+        'SPLIT_CHOICE_REQUIRED',
+      );
+      throw timingError(
+        TimingErrorCode.SPLIT_CHOICE_REQUIRED,
+        'More than one candidate attempt qualifies; choose one.',
+        {
+          splitId: split.splitId,
+          candidates: qualifying.map((candidate) => ({
+            attemptId: candidate.attemptId,
+            passCount: candidate.passCount,
+            requiredLaps: candidate.participant.requiredLaps,
+          })),
+        },
+      );
+    }
+
+    const chosenCandidate = split.candidates.find(
+      (candidate) => candidate.attemptId === chosen.attemptId,
+    );
+    const officialElapsedMs = chosenCandidate
+      ? split.captureInstant.getTime() - chosenCandidate.officialStartedAt.getTime()
+      : 0;
+    if (officialElapsedMs <= 0) {
+      throw timingError(
+        TimingErrorCode.ATTEMPT_STARTED_AFTER_CAPTURE,
+        'The resolved attempt started at or after the split was captured.',
+        { splitId: split.splitId, attemptId: chosen.attemptId },
+      );
+    }
+    const key = normalizeIdempotencyKey(idempotencyKey);
+    try {
+      return await this.repository.withTransaction(async (tx) => {
+        const current = await this.repository.findEventSplit(split.splitId, tx);
+        if (current === null || current.state !== 'QUEUED') {
+          throw timingError(
+            TimingErrorCode.SPLIT_ALREADY_RESOLVED,
+            'This split is already resolved.',
+            { splitId: split.splitId },
+          );
+        }
+        assertCanAddPass(chosen.passCount, chosen.participant.requiredLaps);
+        const created = await this.repository.createMark(tx, {
+          attemptId: chosen.attemptId,
+          clockEpochId: null,
+          sourceSplitId: split.splitId,
+          enrollmentId: chosen.participant.enrollmentId,
+          registrationId: chosen.participant.registrationId,
+          startNumber: chosen.participant.startNumber,
+          kind: 'PASS',
+          rawCapturedAt: split.captureInstant,
+          rawElapsedMs: officialElapsedMs,
+          officialAt: split.captureInstant,
+          officialElapsedMs,
+          lapNumber: null,
+          status: 'BOUND',
+          workstationInstanceId: dto.workstationInstanceId,
+          deviceSequence: dto.deviceSequence,
+          idempotencyKey: key,
+        });
+        const applied = await this.reindexLaps(
+          tx,
+          chosen.attemptId,
+          chosen.participant.enrollmentId,
+          chosen.marks,
+          created,
+        );
+        const assigned = await this.repository.assignEventSplit(tx, split.splitId, {
+          assignedAttemptId: chosen.attemptId,
+          assignedAt: new Date(),
+          assignedByUserId: actorUserId,
+          assignedWorkstationInstanceId: dto.workstationInstanceId,
+          assignmentDeviceSequence: dto.deviceSequence,
+          offeredAttemptIds: qualifying.map((candidate) => candidate.attemptId),
+          chosenByReferee: dto.chosenAttemptId !== undefined,
+          resolvedAt: new Date(),
+          resolvedByUserId: actorUserId,
+          resolvedWorkstationInstanceId: dto.workstationInstanceId,
+        });
+        if (assigned === null) {
+          throw timingError(
+            TimingErrorCode.SPLIT_ALREADY_RESOLVED,
+            'This split is already resolved.',
+            { splitId: split.splitId },
+          );
+        }
+        await this.repository.createReceipt(tx, {
+          attemptId: chosen.attemptId,
+          workstationInstanceId: dto.workstationInstanceId,
+          origin: 'SPLIT_ASSIGN',
+          deviceSequence: dto.deviceSequence,
+          status: 'APPLIED',
+          reason: null,
+        });
+        await this.repository.createEventReceipt(tx, {
+          eventId,
+          workstationInstanceId: dto.workstationInstanceId,
+          deviceSequence: dto.deviceSequence,
+          status: 'APPLIED',
+          reason: null,
+          splitId: split.splitId,
+          resolvedAttemptId: chosen.attemptId,
+        });
+        await this.repository.insertAudit(tx, {
+          attemptId: chosen.attemptId,
+          actorUserId,
+          action: 'ANONYMOUS_SPLIT_ASSIGN',
+          targetType: 'PASS',
+          targetId: applied.id,
+          oldValues: {
+            splitId: split.splitId,
+            captureInstant: split.captureInstant.toISOString(),
+            candidateAttemptIds: split.candidates.map((candidate) => candidate.attemptId),
+          },
+          newValues: {
+            enrollmentId: chosen.participant.enrollmentId,
+            startNumber: chosen.participant.startNumber,
+            lapNumber: applied.lapNumber,
+            officialAt: applied.officialAt.toISOString(),
+            officialElapsedMs,
+            offeredAttemptIds: qualifying.map((candidate) => candidate.attemptId),
+            chosenByReferee: dto.chosenAttemptId !== undefined,
+            deviceSequence: dto.deviceSequence,
+            idempotencyKey: key,
+          },
+          reason: null,
+        });
+        return {
+          passId: applied.id,
+          attemptId: chosen.attemptId,
+          enrollmentId: chosen.participant.enrollmentId,
+          lapNumber: applied.lapNumber,
+          rawCapturedAt: applied.rawCapturedAt.toISOString(),
+          officialAt: applied.officialAt.toISOString(),
+          officialElapsedMs: applied.officialElapsedMs,
+          status: 'BOUND' as const,
+        };
+      });
+    } catch (error) {
+      if (error instanceof TimingDomainError && error.code !== TimingErrorCode.CONFLICT) {
+        await this.rejectEventAssignment(eventId, split.splitId, dto, error.code);
+      }
+      throw error;
+    }
+  }
+
+  private async assignLegacySplit(
+    authentikId: string | undefined,
+    eventId: string,
+    split: TimingEventSplitRow,
+    dto: AssignAnonymousSplitDto,
+    idempotencyKey?: string,
+  ): Promise<TimingPassView> {
+    // A legacy entry keeps the accepted attempt-bound assignment; the split row
+    // is retired after the mark accepts it.
+    const legacy = await this.repository.findMark(split.legacyMarkId as string);
+    if (legacy === null || legacy.status !== 'PENDING') {
+      throw timingError(
+        TimingErrorCode.SPLIT_ALREADY_RESOLVED,
+        'This split is already resolved.',
+        { splitId: split.splitId },
+      );
+    }
+    const result = await this.assign(authentikId, eventId, legacy.id, dto, idempotencyKey);
+    const actorUserId = await this.requireUserId(authentikId);
+    await this.repository.withTransaction(async (tx) => {
+      await this.repository.assignEventSplit(tx, split.splitId, {
+        assignedAttemptId: result.attemptId,
+        assignedAt: new Date(),
+        assignedByUserId: actorUserId,
+        assignedWorkstationInstanceId: dto.workstationInstanceId,
+        assignmentDeviceSequence: dto.deviceSequence,
+        offeredAttemptIds: [split.boundAttemptId as string],
+        chosenByReferee: false,
+        resolvedAt: new Date(),
+        resolvedByUserId: actorUserId,
+        resolvedWorkstationInstanceId: dto.workstationInstanceId,
+      });
+    });
+    return result;
+  }
+
+  private async rejectEventAssignment(
+    eventId: string,
+    splitId: string,
+    dto: AssignAnonymousSplitDto,
+    reason: string,
+  ): Promise<void> {
+    await this.repository.withTransaction(async (tx) => {
+      const existing = await this.repository.findEventReceipt(
+        tx,
+        eventId,
+        dto.workstationInstanceId,
+        dto.deviceSequence,
+      );
+      if (existing !== null) return;
+      await this.repository.createEventReceipt(tx, {
+        eventId,
+        workstationInstanceId: dto.workstationInstanceId,
+        deviceSequence: dto.deviceSequence,
+        status: 'REJECTED',
+        reason,
+        splitId,
+        resolvedAttemptId: null,
+      });
+    });
   }
 
   /** The split and the attempt it was captured in; the mark may be resolved. */

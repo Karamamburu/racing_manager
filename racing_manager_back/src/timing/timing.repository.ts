@@ -419,7 +419,8 @@ export type UpdateAttemptStatusInput = {
 /** The generic mark write: a new pass or a new unbound finish. */
 export type CreateMarkInput = {
   attemptId: string;
-  clockEpochId: string;
+  clockEpochId: string | null;
+  sourceSplitId?: string | null;
   enrollmentId: string | null;
   registrationId: string | null;
   startNumber: number | null;
@@ -1644,6 +1645,42 @@ export class TimingRepository {
    * a slot with no row here has no enrollment in the race's start and is
    * excluded by the service.
    */
+  /** Every registration of the event carrying the committed number. */
+  async findRegistrationsByStartNumber(
+    eventId: string,
+    startNumber: number,
+    tx?: TimingTx,
+  ): Promise<Array<{ registrationId: string; firstName: string; lastName: string }>> {
+    const rows = await this.db(tx).registration.findMany({
+      where: { eventId, startNumber },
+      select: { id: true, firstName: true, lastName: true },
+      orderBy: { id: 'asc' },
+    });
+    return rows.map((row) => ({
+      registrationId: row.id,
+      firstName: row.firstName,
+      lastName: row.lastName,
+    }));
+  }
+
+  /** Active enrollments of one registration across the event. */
+  async listEnrollmentsForRegistration(
+    eventId: string,
+    registrationId: string,
+    tx?: TimingTx,
+  ): Promise<Array<{ enrollmentId: string; startId: string; formatId: number }>> {
+    const rows = await this.db(tx).enrollment.findMany({
+      where: { eventId, registrationId, status: 'REGISTERED' },
+      select: { id: true, startId: true, formatId: true },
+      orderBy: { id: 'asc' },
+    });
+    return rows.map((row) => ({
+      enrollmentId: row.id,
+      startId: row.startId,
+      formatId: row.formatId,
+    }));
+  }
+
   async listEnrollmentsForRegistrations(
     eventId: string,
     startId: string,
@@ -2450,6 +2487,7 @@ export class TimingRepository {
       data: {
         sessionId: input.attemptId,
         clockEpochId: input.clockEpochId,
+        sourceSplitId: input.sourceSplitId ?? null,
         enrollmentId: input.enrollmentId,
         registrationId: input.registrationId,
         startNumber: input.startNumber,

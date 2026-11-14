@@ -205,6 +205,10 @@ function createRepositoryFake() {
     listQueuedEventSplits: jest.fn(
       (): Promise<TimingEventSplitRow[]> => Promise.resolve([]),
     ),
+    findEventSplit: jest.fn((): Promise<TimingEventSplitRow | null> => Promise.resolve(null)),
+    assignEventSplit: jest.fn(),
+    findRegistrationsByStartNumber: jest.fn(),
+    listEnrollmentsForRegistration: jest.fn(),
     listStarts: jest.fn((): Promise<TimingStartRow[]> => Promise.resolve([])),
     listClassCompetitions: jest.fn(
       (): Promise<TimingClassCompetitionRow[]> => Promise.resolve([]),
