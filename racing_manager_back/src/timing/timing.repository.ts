@@ -382,6 +382,7 @@ export type CreateHeatTimeInput = {
   heatNumber: number;
   registrationId: string;
   timeMilliseconds: number;
+  laps?: Array<{ lapNumber: number; timeMilliseconds: number }>;
 };
 
 /**
@@ -3017,6 +3018,38 @@ export class TimingRepository {
    * overwritten here; the service decides whether it is a conflict, and the
    * create fails on the unique key if it raced one in.
    */
+  async listEventLaps(
+    eventId: string,
+    tx?: TimingTx,
+  ): Promise<Array<{ eventLapId: string; lapNumber: number }>> {
+    const rows = await this.db(tx).eventLap.findMany({
+      where: { eventId },
+      select: { id: true, lapNumber: true },
+      orderBy: { lapNumber: 'asc' },
+    });
+    return rows.map((row) => ({
+      eventLapId: row.id,
+      lapNumber: row.lapNumber,
+    }));
+  }
+
+  async createHeatLapTime(
+    tx: TimingTx,
+    input: {
+      classHeatTimeId: string;
+      eventLapId: string;
+      timeMilliseconds: number;
+    },
+  ): Promise<void> {
+    await tx.classHeatLapTime.create({
+      data: {
+        classHeatTimeId: input.classHeatTimeId,
+        eventLapId: input.eventLapId,
+        timeMilliseconds: input.timeMilliseconds,
+      },
+    });
+  }
+
   async createHeatTime(
     tx: TimingTx,
     input: CreateHeatTimeInput,

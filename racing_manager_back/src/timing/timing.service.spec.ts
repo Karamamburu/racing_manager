@@ -192,6 +192,8 @@ function createRepositoryFake() {
     publishResult: jest.fn(),
     replaceResultSplits: jest.fn(),
     createHeatTime: jest.fn(),
+    createHeatLapTime: jest.fn(),
+    listEventLaps: jest.fn((): Promise<Array<{ eventLapId: string; lapNumber: number }>> => Promise.resolve([])),
     updateAttemptStatus: jest.fn(),
     listEnrollmentStatuses: jest.fn(
       (
@@ -6079,6 +6081,7 @@ describe('TimingService', () => {
           marks?: TimingMarkRow[];
           receipts?: TimingReceiptRow[];
           heatTimes?: TimingHeatTimeRow[];
+          eventLaps?: Array<{ eventLapId: string; lapNumber: number }>;
           withdrawn?: string[];
           lock?: TimingCaptureLockRow | null;
         } = {},
@@ -6111,6 +6114,7 @@ describe('TimingService', () => {
         repository.listHeatTimesForHeat.mockResolvedValue(
           overrides.heatTimes ?? [],
         );
+        repository.listEventLaps.mockResolvedValue(overrides.eventLaps ?? []);
         repository.getCaptureLock.mockResolvedValue(
           overrides.lock === undefined ? lockRow() : overrides.lock,
         );
@@ -6228,6 +6232,11 @@ describe('TimingService', () => {
           heatTimes: [
             heatTimeRow({ registrationId: 'registration-enrollment-excluded' }),
           ],
+          eventLaps: [
+            { eventLapId: 'event-lap-1', lapNumber: 1 },
+            { eventLapId: 'event-lap-2', lapNumber: 2 },
+            { eventLapId: 'event-lap-3', lapNumber: 3 },
+          ],
           withdrawn: ['enrollment-withdrawn'],
         });
 
@@ -6256,7 +6265,19 @@ describe('TimingService', () => {
           },
         ]);
         expect(transactionOf(repository.createHeatTime)).toBe(TX);
-        // U-18, U-16: no ordinary result, no split and no per-lap row.
+        // A multi-lap heat publishes the per-lap heat times from the same marks.
+        expect(repository.createHeatLapTime).toHaveBeenCalledTimes(6);
+        expect(repository.createHeatLapTime).toHaveBeenCalledWith(TX, {
+          classHeatTimeId: 'heat-time-registration-enrollment-a',
+          eventLapId: 'event-lap-1',
+          timeMilliseconds: 30_000,
+        });
+        expect(repository.createHeatLapTime).toHaveBeenCalledWith(TX, {
+          classHeatTimeId: 'heat-time-registration-enrollment-b',
+          eventLapId: 'event-lap-3',
+          timeMilliseconds: 40_000,
+        });
+        // U-18: no ordinary result and no enrollment split.
         expect(repository.publishResult).not.toHaveBeenCalled();
         expect(repository.replaceResultSplits).not.toHaveBeenCalled();
 

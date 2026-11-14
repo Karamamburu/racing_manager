@@ -390,6 +390,7 @@ type ClosurePlan = {
 type HeatPublication = {
   registrationId: string;
   totalMs: number;
+  splits: TimingLapSplit[];
 };
 
 /** A heat closure's report: both registration lists are always present. */
@@ -2868,14 +2869,30 @@ export class TimingService {
           input.status !== 'CANCELLED',
         );
         const heat = heatAttemptTarget(current);
+        const eventLaps = await this.repository.listEventLaps(
+          current.eventId,
+          tx,
+        );
+        const lapIdByNumber = new Map(
+          eventLaps.map((lap) => [lap.lapNumber, lap.eventLapId]),
+        );
         for (const publication of heatPlan.publications) {
-          await this.repository.createHeatTime(tx, {
+          const heatTime = await this.repository.createHeatTime(tx, {
             classCompetitionId: heat.classCompetitionId,
             stageId: heat.stageId,
             heatNumber: heat.heatNumber,
             registrationId: publication.registrationId,
             timeMilliseconds: publication.totalMs,
           });
+          for (const split of publication.splits) {
+            const eventLapId = lapIdByNumber.get(split.lapNumber);
+            if (eventLapId === undefined) continue;
+            await this.repository.createHeatLapTime(tx, {
+              classHeatTimeId: heatTime.id,
+              eventLapId,
+              timeMilliseconds: split.lapTimeMs,
+            });
+          }
         }
         report = heatPlan.report;
       } else {
@@ -3216,9 +3233,11 @@ export class TimingService {
         conflictRegistrationIds.push(participant.registrationId);
         continue;
       }
+      const publication = participantPublication(attempt, participant, marks);
       publications.push({
         registrationId: participant.registrationId,
-        totalMs: participantPublication(attempt, participant, marks).totalMs,
+        totalMs: publication.totalMs,
+        splits: publication.splits,
       });
       publishedRegistrationIds.push(participant.registrationId);
     }

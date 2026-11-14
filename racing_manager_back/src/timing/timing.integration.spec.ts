@@ -1059,6 +1059,14 @@ class InMemoryTimingRepository {
     );
   }
 
+  listEventLaps(): Promise<Array<{ eventLapId: string; lapNumber: number }>> {
+    return Promise.resolve([]);
+  }
+
+  createHeatLapTime(): Promise<void> {
+    return Promise.resolve();
+  }
+
   createHeatTime(
     _tx: TimingTx,
     input: CreateHeatTimeInput,
