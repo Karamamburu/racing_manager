@@ -1059,3 +1059,181 @@ describe('AnonymousSplitService', () => {
     });
   });
 });
+
+describe('event-scoped number-only assignment', () => {
+  const split: TimingEventSplitRow = {
+    splitId: SPLIT_ID,
+    eventId: EVENT_ID,
+    state: 'QUEUED',
+    captureInstant: NOW,
+    anchorClockEpochId: 'epoch-a',
+    anchorAttemptId: ATTEMPT_ID,
+    anchorElapsedAnchorMs: 0,
+    clientCapturedAt: NOW,
+    clientElapsedMs: 0,
+    capturedByUserId: USER_ID,
+    captureWorkstationInstanceId: WORKSTATION,
+    captureDeviceSequence: 4,
+    legacyMarkId: null,
+    boundAttemptId: null,
+    assignedAttemptId: null,
+    assignedAt: null,
+    assignedByUserId: null,
+    assignedWorkstationInstanceId: null,
+    assignmentDeviceSequence: null,
+    offeredAttemptIds: null,
+    chosenByReferee: false,
+    resolvedAt: null,
+    resolvedByUserId: null,
+    resolvedWorkstationInstanceId: null,
+    resolutionReason: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+    candidates: [
+      {
+        attemptId: ATTEMPT_ID,
+        attemptKind: 'CATEGORY',
+        attemptStatus: 'RUNNING',
+        eventId: EVENT_ID,
+        startId: START_ID,
+        formatId: 1,
+        gender: 'M',
+        classCompetitionId: null,
+        stageId: null,
+        heatNumber: null,
+        officialStartedAt: new Date(NOW.getTime() - 60_000),
+      },
+    ],
+  };
+  const participant = participantRow({
+    enrollmentId: 'enrollment-a',
+    registrationId: 'registration-a',
+    startNumber: 31,
+    requiredLaps: 2,
+    excludedReason: null,
+  });
+  const createdMark: TimingMarkRow = {
+    id: 'pass-new',
+    attemptId: ATTEMPT_ID,
+    clockEpochId: null,
+    enrollmentId: 'enrollment-a',
+    registrationId: 'registration-a',
+    startNumber: 31,
+    kind: 'PASS',
+    rawCapturedAt: NOW,
+    rawElapsedMs: 60_000,
+    officialAt: NOW,
+    officialElapsedMs: 60_000,
+    lapNumber: null,
+    status: 'BOUND',
+    workstationInstanceId: WORKSTATION,
+    deviceSequence: 9,
+    idempotencyKey: 'key-assign',
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+
+  function repositoryForAssignment(): {
+    repository: TimingRepository;
+    updateMark: jest.Mock;
+    createMark: jest.Mock;
+    assignEventSplit: jest.Mock;
+    createReceipt: jest.Mock;
+  } {
+    const updateMark = jest.fn(
+      (_tx: TimingTx, _id: string, input: UpdateMarkInput) =>
+        Promise.resolve({ ...createdMark, ...input }),
+    );
+    const createMark = jest.fn(() => Promise.resolve(createdMark));
+    const assignEventSplit = jest.fn(() =>
+      Promise.resolve({ ...split, state: 'ASSIGNED' as const }),
+    );
+    const createReceipt = jest.fn(() => Promise.resolve({}));
+    const repository = {
+      findEventSplit: jest.fn(() => Promise.resolve(split)),
+      getCaptureLock: jest.fn(() =>
+        Promise.resolve(lockRow({ workstationInstanceId: WORKSTATION })),
+      ),
+      findRegistrationsByStartNumber: jest.fn(() =>
+        Promise.resolve([
+          { registrationId: 'registration-a', firstName: 'Иван', lastName: 'Петров' },
+        ]),
+      ),
+      listEnrollmentsForRegistration: jest.fn(() =>
+        Promise.resolve([
+          { enrollmentId: 'enrollment-a', startId: START_ID, formatId: 1 },
+        ]),
+      ),
+      findParticipant: jest.fn(() => Promise.resolve(participant)),
+      listMarks: jest.fn(() => Promise.resolve([])),
+      withTransaction: jest.fn((run: (tx: TimingTx) => Promise<unknown>) =>
+        run(TX),
+      ),
+      findUserIdByAuthentikId: jest.fn(() => Promise.resolve(USER_ID)),
+      createMark,
+      updateMark,
+      assignEventSplit,
+      createReceipt,
+      createEventReceipt: jest.fn(() => Promise.resolve({})),
+      insertAudit: jest.fn(() => Promise.resolve({})),
+      findEventReceipt: jest.fn(() => Promise.resolve(null)),
+    } as unknown as TimingRepository;
+    return { repository, updateMark, createMark, assignEventSplit, createReceipt };
+  }
+
+  it('assigns exactly one qualifying candidate at the captured instant', async () => {
+    const { repository, createMark, assignEventSplit, createReceipt } =
+      repositoryForAssignment();
+    const service = new AnonymousSplitService(repository, {
+      assertHasAnyRole: jest.fn(),
+    } as unknown as RolesService);
+
+    const result = await service.assign(
+      USER_ID,
+      EVENT_ID,
+      SPLIT_ID,
+      {
+        startNumber: 31,
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 9,
+      } as AssignAnonymousSplitDto,
+      'key-assign',
+    );
+
+    expect(result).toMatchObject({
+      passId: 'pass-new',
+      attemptId: ATTEMPT_ID,
+      enrollmentId: 'enrollment-a',
+      lapNumber: 1,
+      status: 'BOUND',
+    });
+    expect(createMark).toHaveBeenCalledWith(
+      TX,
+      expect.objectContaining({
+        attemptId: ATTEMPT_ID,
+        clockEpochId: null,
+        sourceSplitId: SPLIT_ID,
+        officialAt: NOW,
+        officialElapsedMs: 60_000,
+        rawElapsedMs: 60_000,
+      }),
+    );
+    expect(assignEventSplit).toHaveBeenCalledWith(
+      TX,
+      SPLIT_ID,
+      expect.objectContaining({
+        assignedAttemptId: ATTEMPT_ID,
+        offeredAttemptIds: [ATTEMPT_ID],
+        chosenByReferee: false,
+      }),
+    );
+    expect(createReceipt).toHaveBeenCalledWith(
+      TX,
+      expect.objectContaining({
+        attemptId: ATTEMPT_ID,
+        origin: 'SPLIT_ASSIGN',
+        status: 'APPLIED',
+      }),
+    );
+  });
+});
