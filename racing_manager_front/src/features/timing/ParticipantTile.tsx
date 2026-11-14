@@ -65,9 +65,9 @@ function tileStyle(
     display: 'block',
     boxSizing: 'border-box',
     width: '100%',
-    // A fixed 3:4 portrait card is easier to aim at and looks the same in
+    // A fixed 4:3 landscape card is easier to aim at and looks the same in
     // every block, whatever the number of columns (U-04).
-    aspectRatio: '3 / 4',
+    aspectRatio: '4 / 3',
     padding: '6px 8px',
     border: '1px solid',
     borderRadius: 6,
@@ -83,7 +83,7 @@ function tileStyle(
  *
  * The tile is a compact, read-only view of the frozen roster facts and the live
  * capture state. Its whole surface carries the state colour and keeps a fixed
- * 3:4 shape, so a running or finished participant is readable at a glance and
+ * 4:3 shape, so a running or finished participant is readable at a glance and
  * the whole card is an easy click target. It carries no capture logic: a tile
  * click is reported to the caller, and the capture wave decides what it means.
  * An excluded participant is never a control.

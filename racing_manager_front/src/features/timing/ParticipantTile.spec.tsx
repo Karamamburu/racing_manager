@@ -45,13 +45,13 @@ describe('ParticipantTile', () => {
     expect(screen.queryByText(/Последняя отметка:/)).toBeNull();
   });
 
-  it('keeps a fixed 3:4 card shape for an easy click target', () => {
+  it('keeps a fixed 4:3 card shape for an easy click target', () => {
     const { container } = render(
       <ParticipantTile participant={participant()} />,
     );
 
     const tile = container.firstElementChild as HTMLElement;
-    expect(tile.style.aspectRatio).toBe('3 / 4');
+    expect(tile.style.aspectRatio).toBe('4 / 3');
   });
 
   it('renders a dash for a missing number and the bare lap count', () => {
