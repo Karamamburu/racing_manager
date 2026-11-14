@@ -238,6 +238,7 @@ function captureResult(
     captureAnonymous: vi.fn(() => Promise.resolve()),
     assignAnonymousSplit: vi.fn(() => Promise.resolve()),
     cancelAnonymousSplit: vi.fn(() => Promise.resolve()),
+    undoAnonymousSplit: vi.fn(() => Promise.resolve()),
     bindPending: vi.fn(() => Promise.resolve()),
     quickUndo: vi.fn(() => Promise.resolve()),
     startAttempt: vi.fn(() => Promise.resolve()),

@@ -1,4 +1,4 @@
-import { CloseOutlined } from '@ant-design/icons';
+import { CloseOutlined, UndoOutlined } from '@ant-design/icons';
 import { Button, Card, Input, Modal, Space, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
@@ -36,8 +36,12 @@ export interface AnonymousSplitQueueProps {
   onSelect: (splitId: string) => void;
   /** Retires one entry with its required reason; the page owns the API call. */
   onCancel: (splitId: string, reason: string) => Promise<void>;
+  /** Withdraws the workstation's newest capture; absent hides the control. */
+  onUndo?: (splitId: string, deviceSequence: number) => Promise<void>;
   /** Cancellation is a REFEREE/ADMINISTRATOR correction (E-08, F-07). */
   canCancel?: boolean;
+  /** True while the workstation may withdraw its own newest capture. */
+  canUndo?: boolean;
   /** True while the workstation may not take an assignment (no capture lock). */
   selectionDisabled?: boolean;
 }
@@ -94,6 +98,8 @@ export function AnonymousSplitQueue({
   onSelect,
   onCancel,
   canCancel = false,
+  onUndo,
+  canUndo = false,
   selectionDisabled = false,
 }: AnonymousSplitQueueProps) {
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
@@ -248,6 +254,25 @@ export function AnonymousSplitQueue({
                       </Typography.Text>
                     ) : null}
                   </button>
+                  {canUndo &&
+                  onUndo !== undefined &&
+                  !entry.bound &&
+                  entry.captureDeviceSequence !== null &&
+                  entry.captureDeviceSequence !== undefined ? (
+                    <Button
+                      size="small"
+                      type="text"
+                      icon={<UndoOutlined />}
+                      aria-label={`Отменить последний захват ${ordinal}`}
+                      disabled={busy}
+                      onClick={() => {
+                        void onUndo(
+                          entry.splitId,
+                          entry.captureDeviceSequence as number,
+                        );
+                      }}
+                    />
+                  ) : null}
                   {canCancel ? (
                     <Button
                       size="small"

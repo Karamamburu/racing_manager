@@ -79,6 +79,7 @@ export interface UseTimingCaptureResult {
   ) => Promise<void>;
   /** Retires one queued split with a reason; a referee or an administrator. */
   cancelAnonymousSplit: (splitId: string, reason: string) => Promise<void>;
+  undoAnonymousSplit: (splitId: string, deviceSequence: number) => Promise<void>;
   bindPending: (pendingId: string, startNumber: number) => Promise<void>;
   quickUndo: (attemptId: string) => Promise<void>;
   /** Starts a category block or a heat block on its own route. */
@@ -628,6 +629,20 @@ export function useTimingCapture(
     [invalidate, report],
   );
 
+  /** Withdraws the workstation's newest block-free capture. */
+  const undoAnonymousSplit = useCallback(
+    async (splitId: string, deviceSequence: number): Promise<void> => {
+      const id = requireEvent();
+      await runMutation(() =>
+        timingService.undoAnonymousSplit(id, splitId, {
+          workstationInstanceId,
+          deviceSequence,
+        }),
+      );
+    },
+    [requireEvent, runMutation, workstationInstanceId],
+  );
+
   /**
    * Retires one queued split with a reason. Cancellation is a record correction,
    * so it takes no capture sequence and writes no receipt of its own (E-08).
@@ -881,6 +896,7 @@ export function useTimingCapture(
     captureAnonymous,
     assignAnonymousSplit,
     cancelAnonymousSplit,
+    undoAnonymousSplit,
     bindPending,
     quickUndo,
     startAttempt,

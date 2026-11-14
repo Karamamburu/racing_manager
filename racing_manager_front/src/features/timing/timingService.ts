@@ -1,6 +1,7 @@
 import { apiClient } from '../../shared/api/ApiClient';
 import type {
   AssignAnonymousSplitRequest,
+  QuickUndoTimingSplitRequest,
   BindPendingFinishRequest,
   CancelAnonymousSplitRequest,
   CancelPendingFinishRequest,
@@ -128,6 +129,18 @@ export class TimingService {
       `${this.base(eventId)}/splits/${splitId}/assign`,
       payload,
       idempotencyKey,
+    );
+  }
+
+  /** Withdraws the workstation's newest block-free capture; no reason. */
+  public async undoAnonymousSplit(
+    eventId: string,
+    splitId: string,
+    payload: QuickUndoTimingSplitRequest,
+  ): Promise<TimingAnonymousSplitView> {
+    return this.post<TimingAnonymousSplitView>(
+      `${this.base(eventId)}/splits/${splitId}/undo`,
+      payload,
     );
   }
 

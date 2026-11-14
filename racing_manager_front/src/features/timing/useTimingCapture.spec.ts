@@ -29,6 +29,7 @@ vi.mock('./timingService', () => ({
     captureAnonymousSplit: vi.fn(),
     assignAnonymousSplit: vi.fn(),
     cancelAnonymousSplit: vi.fn(),
+    undoAnonymousSplit: vi.fn(),
     bindPendingFinish: vi.fn(),
     quickUndo: vi.fn(),
     completeAttempt: vi.fn(),

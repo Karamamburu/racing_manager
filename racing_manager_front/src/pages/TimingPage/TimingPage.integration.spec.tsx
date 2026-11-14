@@ -57,6 +57,7 @@ vi.mock('../../features/timing/timingService', () => ({
     captureAnonymousSplit: vi.fn(),
     assignAnonymousSplit: vi.fn(),
     cancelAnonymousSplit: vi.fn(),
+    undoAnonymousSplit: vi.fn(),
     bindPendingFinish: vi.fn(),
     cancelPendingFinish: vi.fn(),
     correctOfficialTime: vi.fn(),

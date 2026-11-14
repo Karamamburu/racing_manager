@@ -725,6 +725,8 @@ export function TimingPage() {
                 onSelect={setSelectedSplitId}
                 onCancel={cancelAnonymousSplit}
                 canCancel={canOperate}
+                onUndo={capture.undoAnonymousSplit}
+                canUndo={canOperate && isCaptureHolder}
                 selectionDisabled={!isCaptureHolder}
               />
             </Col>
