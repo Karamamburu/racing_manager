@@ -38,6 +38,7 @@ describe('ParticipantTile', () => {
     render(<ParticipantTile participant={participant()} />);
 
     expect(screen.getByText('17')).not.toBeNull();
+    expect(screen.getByText('17').style.fontSize).toBe('44px');
     expect(screen.getByText('Иван Петров')).not.toBeNull();
     expect(screen.getByText('2/5')).not.toBeNull();
     expect(screen.getByText('На дистанции')).not.toBeNull();

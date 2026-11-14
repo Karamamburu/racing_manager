@@ -68,7 +68,7 @@ function tileStyle(
     // A fixed 4:3 landscape card is easier to aim at and looks the same in
     // every block, whatever the number of columns (U-04).
     aspectRatio: '4 / 3',
-    padding: '6px 8px',
+    padding: '4px 6px',
     border: '1px solid',
     borderRadius: 6,
     ...STATE_STYLES[state],
@@ -119,7 +119,7 @@ export function ParticipantTile({
           gap: 6,
         }}
       >
-        <span style={{ fontSize: 22, fontWeight: 700, lineHeight: 1.05 }}>
+        <span style={{ fontSize: 44, fontWeight: 700, lineHeight: 1 }}>
           {number}
         </span>
         <span

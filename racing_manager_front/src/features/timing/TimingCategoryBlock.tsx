@@ -238,8 +238,8 @@ export function TimingCategoryBlock({
                 sm={8}
                 md={6}
                 lg={4}
-                xl={4}
-                xxl={3}
+                xl={2}
+                xxl={2}
               >
                 <ParticipantTile
                   participant={participant}
