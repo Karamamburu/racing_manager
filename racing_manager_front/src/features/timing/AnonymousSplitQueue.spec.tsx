@@ -20,21 +20,24 @@ function localIso(hours: number, minutes: number, seconds: number): string {
 function split(
   overrides: Partial<TimingAnonymousSplitView> = {},
 ): TimingAnonymousSplitView {
+  const attemptLabel =
+    overrides.attemptLabel ?? '5 км · Мужчины · Кубковая гонка — 10 км';
+  const officialElapsedMs = overrides.officialElapsedMs ?? 60_000;
   return {
     splitId: 'split-1',
     attemptId: 'attempt-1',
     blockKey: 'start-a:1:M',
-    attemptLabel: '5 км · Мужчины · Кубковая гонка — 10 км',
+    attemptLabel,
     capturedAt: localIso(9, 1, 0),
-    officialElapsedMs: 60_000,
+    officialElapsedMs,
     status: 'QUEUED',
     bound: false,
     candidates: [
       {
         attemptId: 'attempt-1',
         blockKey: 'start-a:1:M',
-        attemptLabel: '5 км · Мужчины · Кубковая гонка — 10 км',
-        officialElapsedMs: 60_000,
+        attemptLabel,
+        officialElapsedMs,
       },
     ],
     captureDeviceSequence: 1,

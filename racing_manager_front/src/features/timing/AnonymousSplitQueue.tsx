@@ -44,13 +44,28 @@ export interface AnonymousSplitQueueProps {
 
 /** One queued entry as the referee reads it: split, attempt, moment, elapsed. */
 function entryLabel(entry: TimingAnonymousSplitView, ordinal: number): string {
-  const label =
-    entry.attemptLabel ?? entry.candidates?.[0]?.attemptLabel ?? '—';
-  const elapsed =
-    entry.officialElapsedMs ?? entry.candidates?.[0]?.officialElapsedMs ?? 0;
-  return `Сплит ${ordinal}: ${label}, отметка ${formatTimingClock(
-    entry.capturedAt,
-  )}, прошло ${formatElapsed(elapsed)}`;
+  const candidates =
+    entry.candidates === undefined || entry.candidates.length === 0
+      ? [
+          {
+            attemptId: 'legacy',
+            attemptLabel: entry.attemptLabel ?? '—',
+            officialElapsedMs: entry.officialElapsedMs ?? 0,
+          },
+        ]
+      : entry.candidates;
+  if (candidates.length === 1) {
+    return `Сплит ${ordinal}: ${candidates[0].attemptLabel}, отметка ${formatTimingClock(
+      entry.capturedAt,
+    )}, прошло ${formatElapsed(candidates[0].officialElapsedMs)}`;
+  }
+  const details = candidates
+    .map(
+      (candidate) =>
+        `${candidate.attemptLabel}, прошло ${formatElapsed(candidate.officialElapsedMs)}`,
+    )
+    .join('; ');
+  return `Сплит ${ordinal}: отметка ${formatTimingClock(entry.capturedAt)}, ${details}`;
 }
 
 function entryStyle(selected: boolean): CSSProperties {
@@ -210,19 +225,28 @@ export function AnonymousSplitQueue({
                     }}
                   >
                     <Typography.Text strong style={{ fontSize: 12 }}>
-                      Сплит {ordinal} ·{' '}
-                      {entry.attemptLabel ??
-                        entry.candidates?.[0]?.attemptLabel ??
-                        '—'}
+                      Сплит {ordinal} · Отметка: {formatTimingClock(entry.capturedAt)}
                     </Typography.Text>
-                    <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                      Отметка: {formatTimingClock(entry.capturedAt)} · прошло{' '}
-                      {formatElapsed(
-                        entry.officialElapsedMs ??
-                          entry.candidates?.[0]?.officialElapsedMs ??
-                          0,
-                      )}
-                    </Typography.Text>
+                    {entry.bound ? (
+                      <Tag color="default">Привязан</Tag>
+                    ) : null}
+                    {(entry.candidates ?? []).map((candidate) => (
+                      <Typography.Text
+                        key={candidate.attemptId}
+                        type="secondary"
+                        style={{ fontSize: 11 }}
+                      >
+                        {candidate.attemptLabel} · прошло{' '}
+                        {formatElapsed(candidate.officialElapsedMs)}
+                      </Typography.Text>
+                    ))}
+                    {entry.candidates === undefined ||
+                    entry.candidates.length === 0 ? (
+                      <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                        {entry.attemptLabel ?? '—'} · прошло{' '}
+                        {formatElapsed(entry.officialElapsedMs ?? 0)}
+                      </Typography.Text>
+                    ) : null}
                   </button>
                   {canCancel ? (
                     <Button
