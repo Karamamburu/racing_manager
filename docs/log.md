@@ -137,3 +137,7 @@ The top control block of the timing page is three symmetric columns: capture con
 ## 2026-11-14 — full-height timing controls
 
 The three columns of the timing top block now share its full height. The number field doubles to 264×264 px with 96 px centred digits, and the anonymous split queue stretches with its column instead of keeping a fixed 104 px area (104 px stays as the minimum). Presentation-only.
+
+## 2026-11-14 — MANUAL-TIMING-3 block-free splits
+
+Anonymous splits are now event-scoped: Enter queues one with no current block, the attempts running at the press are frozen as candidates, and assignment is by participant number only. The number resolves event-wide and then inside the candidates; an accepted assignment creates the pass at the captured instant in the chosen attempt, while an ambiguous number asks for an explicit choice and a non-qualifying one names every reason. The «Текущий блок» selector is removed. Closure gates every still-running candidate; legacy queued splits stay bound to their captured attempt. Added `timing_event_splits`, `timing_anonymous_split_candidates`, `timing_event_capture_receipts`, `timing_event_audit`, receipt origin and split-provenance columns; see `migrate_manual_timing_3_2026_11_14.sql` (+ down). Updated [domains/timing.md](domains/timing.md).
