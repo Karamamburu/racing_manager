@@ -44,6 +44,7 @@ import {
 } from './timing.dto';
 import { TimingExceptionFilter } from './timing.exception.filter';
 import { TimingService } from './timing.service';
+import { timingValidationExceptionFactory } from './timing.validation';
 import type {
   ClockEpochView,
   StartTimingAttemptResult,
@@ -71,6 +72,7 @@ import type {
     whitelist: true,
     forbidNonWhitelisted: true,
     transform: true,
+    exceptionFactory: timingValidationExceptionFactory,
   }),
 )
 export class TimingController {

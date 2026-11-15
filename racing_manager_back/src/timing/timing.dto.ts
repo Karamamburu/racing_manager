@@ -75,7 +75,7 @@ function ConsistentCaptureIdentity(
           return true;
         },
         defaultMessage(): string {
-          return 'startNumber and enrollmentId must match kind: number for NUMBER, enrollment for TILE, neither for PENDING_FINISH or ANONYMOUS_SPLIT.';
+          return 'Проверьте поля: номер нужен для NUMBER, участник — для TILE, для PENDING_FINISH и ANONYMOUS_SPLIT оба поля должны быть пустыми.';
         },
       },
     });
@@ -112,7 +112,7 @@ function SelectsExactlyOneIdentity(
           return hasValue(body.startNumber) !== hasValue(body.enrollmentId);
         },
         defaultMessage(): string {
-          return 'Exactly one of startNumber and enrollmentId is required.';
+          return 'Укажите ровно одно: номер участника или идентификатор участника.';
         },
       },
     });
