@@ -161,3 +161,7 @@ All timing domain refusals and timing request-validation messages are now Russia
 ## 2026-11-15 — automatic DNS and DNF
 
 Ordinary category completion now publishes `DNS` for a non-excluded participant with no captures and `DNF` for one with some captures but fewer than N; participants at N keep `FINISHED` with time and splits. Ordinary heat completion writes the same outcomes as `ClassHeatTime` rows (`OK`/total, `DNS`, `DNF`), so the stage panel and stage commitment no longer need a manual status for every non-finisher. Forced completion and cancellation keep their previous rules: force publishes only at-N participants, cancellation publishes nothing. No synthetic time or split is written for DNS/DNF.
+
+## 2026-11-15 — legacy category-finish uniqueness removed
+
+`category_finishes_event_class` still enforced one finished classification per `(event, gender, format)`, so finishing the same format+gender on a second start failed with a 500 unique violation. The stored model has been start-aware since MULTI-START via `uq_category_finishes_start (event_id, start_id, format_id, gender)`; the legacy index is now dropped in `migrate_multi_start_2026_11_15_drop_legacy_finish_unique.sql` and no longer created in `init.sql`.

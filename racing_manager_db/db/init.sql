@@ -798,6 +798,10 @@ ALTER TABLE category_finishes
   ADD CONSTRAINT category_finishes_start_fk
   FOREIGN KEY (start_id) REFERENCES starts (id) ON DELETE CASCADE;
 
+-- The legacy (event, gender, format) key predates starts and would block the
+-- same classification on a second start. The start-aware key above replaces it.
+DROP INDEX IF EXISTS category_finishes_event_class;
+
 -- ========================================
 -- AGE-SPLIT expand (mirrors migrate_age_split_2026_11_10.sql)
 -- Age section set per protocol category
