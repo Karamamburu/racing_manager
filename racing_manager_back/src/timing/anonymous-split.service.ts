@@ -126,7 +126,7 @@ export class AnonymousSplitService {
     if (row === undefined) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Неразмеченный сплит не найден в очереди.',
+        'Неразмеченная отсечка не найдена в очереди.',
         { splitId },
       );
     }
@@ -177,7 +177,7 @@ export class AnonymousSplitService {
     if (split.attempt.status !== 'RUNNING') {
       throw timingError(
         TimingErrorCode.ATTEMPT_CLOSED,
-        'Неразмеченный сплит можно назначить только в идущей попытке.',
+        'Неразмеченную отсечку можно назначить только в идущей попытке.',
         { attemptId: split.attempt.id, status: split.attempt.status },
       );
     }
@@ -234,7 +234,7 @@ export class AnonymousSplitService {
         if (current.attempt.status !== 'RUNNING') {
           throw timingError(
             TimingErrorCode.ATTEMPT_CLOSED,
-            'Неразмеченный сплит можно назначить только в идущей попытке.',
+            'Неразмеченную отсечку можно назначить только в идущей попытке.',
             { attemptId: current.attempt.id, status: current.attempt.status },
           );
         }
@@ -419,14 +419,14 @@ export class AnonymousSplitService {
     if (split === null || split.eventId !== eventId) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Неразмеченный сплит не найден.',
+        'Неразмеченная отсечка не найдена.',
         { splitId },
       );
     }
     if (split.state !== 'QUEUED') {
       throw timingError(
         TimingErrorCode.SPLIT_ALREADY_RESOLVED,
-        'Сплит уже обработан.',
+        'Отсечка уже обработана.',
         { splitId, state: split.state },
       );
     }
@@ -498,7 +498,7 @@ export class AnonymousSplitService {
       if (updated === null) {
         throw timingError(
           TimingErrorCode.SPLIT_ALREADY_RESOLVED,
-          'Сплит уже обработан.',
+          'Отсечка уже обработана.',
           { splitId },
         );
       }
@@ -543,7 +543,7 @@ export class AnonymousSplitService {
       if (updated === null) {
         throw timingError(
           TimingErrorCode.SPLIT_ALREADY_RESOLVED,
-          'Сплит уже обработан.',
+          'Отсечка уже обработана.',
           { splitId: split.splitId },
         );
       }
@@ -588,14 +588,14 @@ export class AnonymousSplitService {
     if (split.eventId !== eventId) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Неразмеченный сплит не найден.',
+        'Неразмеченная отсечка не найдена.',
         { splitId: split.splitId },
       );
     }
     if (split.state !== 'QUEUED') {
       throw timingError(
         TimingErrorCode.SPLIT_ALREADY_RESOLVED,
-        'Сплит уже обработан.',
+        'Отсечка уже обработана.',
         { splitId: split.splitId, state: split.state },
       );
     }
@@ -797,7 +797,7 @@ export class AnonymousSplitService {
       );
       throw timingError(
         TimingErrorCode.SPLIT_CANDIDATE_UNAVAILABLE,
-        'Ни одна попытка не может принять этот сплит.',
+        'Ни одна попытка не может принять эту отсечку.',
         { splitId: split.splitId, candidates: failures },
       );
     }
@@ -813,7 +813,7 @@ export class AnonymousSplitService {
       if (dto.chosenAttemptId !== undefined) {
         throw timingError(
           TimingErrorCode.SPLIT_CHOICE_INVALID,
-          'Выбранная попытка не подходит для этого сплита.',
+          'Выбранная попытка не подходит для этой отсечки.',
           { splitId: split.splitId, chosenAttemptId: dto.chosenAttemptId },
         );
       }
@@ -847,7 +847,7 @@ export class AnonymousSplitService {
     if (officialElapsedMs <= 0) {
       throw timingError(
         TimingErrorCode.ATTEMPT_STARTED_AFTER_CAPTURE,
-        'Попытка началась позже этой отметки. Сплит нельзя назначить.',
+        'Попытка началась позже этой отметки. Отсечку нельзя назначить.',
         { splitId: split.splitId, attemptId: chosen.attemptId },
       );
     }
@@ -858,7 +858,7 @@ export class AnonymousSplitService {
         if (current === null || current.state !== 'QUEUED') {
           throw timingError(
             TimingErrorCode.SPLIT_ALREADY_RESOLVED,
-            'Сплит уже обработан.',
+            'Отсечка уже обработана.',
             { splitId: split.splitId },
           );
         }
@@ -936,7 +936,7 @@ export class AnonymousSplitService {
         if (assigned === null) {
           throw timingError(
             TimingErrorCode.SPLIT_ALREADY_RESOLVED,
-            'Сплит уже обработан.',
+            'Отсечка уже обработана.',
             { splitId: split.splitId },
           );
         }
@@ -1025,7 +1025,7 @@ export class AnonymousSplitService {
     if (legacy === null || legacy.status !== 'PENDING') {
       throw timingError(
         TimingErrorCode.SPLIT_ALREADY_RESOLVED,
-        'Сплит уже обработан.',
+        'Отсечка уже обработана.',
         { splitId: split.splitId },
       );
     }
@@ -1090,7 +1090,7 @@ export class AnonymousSplitService {
     if (mark === null) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Неразмеченный сплит не найден.',
+        'Неразмеченная отсечка не найдена.',
         { splitId },
       );
     }
@@ -1098,14 +1098,14 @@ export class AnonymousSplitService {
     if (attempt === null || attempt.eventId !== eventId) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Неразмеченный сплит относится к другому мероприятию.',
+        'Неразмеченная отсечка относится к другому мероприятию.',
         { splitId, attemptId: mark.attemptId },
       );
     }
     if (mark.kind !== 'ANONYMOUS_SPLIT') {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Указанная отметка не является неразмеченным сплитом.',
+        'Указанная отметка не является неразмеченной отсечкой.',
         { splitId, kind: mark.kind },
       );
     }
@@ -1415,7 +1415,7 @@ function splitResolvedError(
 ): TimingDomainError {
   return timingError(
     TimingErrorCode.INVALID_STATE,
-    'Неразмеченный сплит уже обработан: назначен, отменён или снят.',
+    'Неразмеченная отсечка уже обработана: назначена, отменена или снята.',
     { status },
   );
 }

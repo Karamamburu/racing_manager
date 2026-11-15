@@ -5562,7 +5562,7 @@ describe('TimingService', () => {
           },
         });
         expect((refusal as { message?: string }).message).toContain(
-          'В попытке есть неразмеченный сплит (00:20.000)',
+          'В попытке есть неразмеченная отсечка (00:20.000)',
         );
       }
       expect(repository.updateAttemptStatus).not.toHaveBeenCalled();

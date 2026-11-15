@@ -1497,7 +1497,7 @@ export class TimingService {
       if (candidateAttemptIds.length === 0) {
         throw timingError(
           TimingErrorCode.NO_RUNNING_ATTEMPT,
-          'В мероприятии нет идущей попытки для этого сплита.',
+          'В мероприятии нет идущей попытки для этой отсечки.',
           { eventId, captureInstant: captureInstant.toISOString() },
         );
       }
@@ -3030,8 +3030,8 @@ export class TimingService {
       ].join(', ');
       const message =
         splitIds.length === 1
-          ? `В попытке есть неразмеченный сплит (${instants}): назначьте его или отмените в очереди неразмеченных сплитов.`
-          : `В попытке есть неразмеченные сплиты (${instants}): назначьте их или отмените в очереди неразмеченных сплитов.`;
+          ? `В попытке есть неразмеченная отсечка (${instants}): назначьте её или отмените в очереди неразмеченных отсечек.`
+          : `В попытке есть неразмеченные отсечки (${instants}): назначьте их или отмените в очереди неразмеченных отсечек.`;
       throw timingError(TimingErrorCode.PENDING_REMAINS, message, {
         attemptId: attempt.id,
         anonymousSplitIds: splitIds,

@@ -445,7 +445,7 @@ function assignDto(
 function cancelDto(
   overrides: Partial<CancelAnonymousSplitDto> = {},
 ): CancelAnonymousSplitDto {
-  return { reason: 'Ошибочный сплит', ...overrides };
+  return { reason: 'Ошибочная отсечка', ...overrides };
 }
 
 describe('AnonymousSplitService', () => {
@@ -909,7 +909,7 @@ describe('AnonymousSplitService', () => {
         USER_ID,
         EVENT_ID,
         SPLIT_ID,
-        cancelDto({ reason: '  Ошибочный сплит  ' }),
+        cancelDto({ reason: '  Ошибочная отсечка  ' }),
       );
 
       expect(entry).toEqual({
@@ -947,7 +947,7 @@ describe('AnonymousSplitService', () => {
           action: 'ANONYMOUS_SPLIT_CANCEL',
           targetType: 'ANONYMOUS_SPLIT',
           targetId: SPLIT_ID,
-          reason: 'Ошибочный сплит',
+          reason: 'Ошибочная отсечка',
         }),
       );
       const [, audit] = callArguments<[TimingTx, InsertAuditInput]>(

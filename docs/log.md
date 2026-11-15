@@ -188,4 +188,4 @@ The timing surface now reports `capturesComplete` for a running block that holds
 
 ## 2026-11-15 — «отсечка» in the timing UI
 
-Every user-facing label of the timing page now calls a block-free capture «отсечка»: the queue title and items, the cancel dialog and its actions, the number-field hints, busy labels and local refusals. The API, stored tables and code identifiers keep the `split` naming.
+Every user-facing label of the timing page now calls a block-free capture «отсечка»: the queue title and items, the cancel dialog and its actions, the number-field hints, busy labels, local refusals and the API refusal messages shown on the page. The API routes, stored tables and code identifiers keep the `split` naming.
