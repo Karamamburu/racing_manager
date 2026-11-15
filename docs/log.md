@@ -153,3 +153,7 @@ A timing heat closure writes one total and no per-lap rows. The stage panel trea
 ## 2026-11-14 — heat lap times from timing
 
 A heat closure now publishes one `ClassHeatLapTime` per event lap from the attempt's official-instant splits, in addition to the `ClassHeatTime` total + `OK`. The stage panel therefore shows Круг 1, Круг 2 and Итог for every participant; a total-only heat remains a complete slot. Existing timing heat times for the current event were backfilled from their bound marks.
+
+## 2026-11-15 — Russian timing errors
+
+All timing domain refusals and timing request-validation messages are now Russian and written for a referee: missing number, wrong attempt, capture holder, closure gates, ambiguous split, sequence conflict, invalid request field. The frontend already displays the API message verbatim; no behavior or error code changed.
