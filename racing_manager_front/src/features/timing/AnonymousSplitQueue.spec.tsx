@@ -92,7 +92,7 @@ describe('AnonymousSplitQueue layout', () => {
     expect(screen.getByText('В очереди: 0')).not.toBeNull();
     expect(
       screen.getByText(
-        'Очередь пуста: Enter на пустом поле номера добавит отсечку',
+        'Очередь пуста: Enter или Space на пустом поле номера добавят отсечку',
       ),
     ).not.toBeNull();
     expect(queueArea().style.minHeight).toBe(

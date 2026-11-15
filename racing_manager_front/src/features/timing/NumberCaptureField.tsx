@@ -13,9 +13,9 @@ import type { KeyboardEvent } from 'react';
  * eligible candidates, the attempt lookup and the API message, and this
  * component only renders what it was told and reports what was typed.
  *
- * AD-17, U-03, U-04: on the empty field Enter is the anonymous-split key and
- * Space records nothing; while a queued split is selected the same keys assign
- * that split instead of capturing a pass, and an empty assignment is refused
+ * AD-17, U-03, U-04: on the empty field Enter and Space are the anonymous-split
+ * keys; while a queued split is selected the same keys assign that split
+ * instead of capturing a pass, and an empty assignment is refused
  * (E-04, S-02, F-04).
  */
 
@@ -61,8 +61,9 @@ export interface NumberCaptureFieldProps {
   /** Sends the assignment of the selected split; used only in assignment mode. */
   onAssign?: (startNumber: number) => Promise<void>;
   /**
-   * Enter on the empty field in normal capture mode records one anonymous split
-   * of the page's current attempt. Absent keeps the old empty-field refusal.
+   * Enter or Space on the empty field in normal capture mode records one
+   * anonymous split of the page's current attempt. Absent keeps the old
+   * empty-field refusal.
    */
   onAnonymousSplit?: () => Promise<void>;
   /** Optional notice hook; the field also shows the message next to itself. */
@@ -79,8 +80,6 @@ interface AmbiguousChoice {
 
 const EMPTY_NUMBER_MESSAGE = 'Введите номер участника цифрами';
 const NON_POSITIVE_NUMBER_MESSAGE = 'Номер участника должен быть больше нуля';
-const EMPTY_SPACE_MESSAGE =
-  'Пробел на пустом поле ничего не записывает: для отсечки нажмите Enter';
 const EMPTY_ASSIGNMENT_MESSAGE = 'Введите номер участника для назначения отсечки';
 const NO_ASSIGNMENT_TARGET_MESSAGE = 'Назначение недоступно: отсечка не выбрана';
 const COMMIT_BUSY_MESSAGE = 'Отправляем отметку…';
@@ -229,7 +228,7 @@ export function NumberCaptureField({
     });
   };
 
-  /** Enter on the empty field in normal capture mode records a split (U-03). */
+  /** Enter or Space on the empty field records a split (U-03). */
   const commitAnonymous = () => {
     if (onAnonymousSplit === undefined) {
       // No anonymous route on this surface: keep the old empty-field refusal.
@@ -255,14 +254,12 @@ export function NumberCaptureField({
     event.preventDefault();
     if (disabled || submitting.current) return;
 
-    const isSpace = event.key !== 'Enter';
     if (assignment !== null) {
       commitAssignment();
       return;
     }
     if (text.trim() === '') {
-      if (isSpace) refuse(EMPTY_SPACE_MESSAGE);
-      else commitAnonymous();
+      commitAnonymous();
       return;
     }
     commitNumber();
@@ -294,7 +291,7 @@ export function NumberCaptureField({
       <Typography.Text strong>Номер участника</Typography.Text>
       {assignment === null ? (
         <Typography.Text type="secondary" style={{ textAlign: 'center' }}>
-          Enter на пустом поле добавит неприсвоенную отсечку
+          Enter или Space на пустом поле добавят неприсвоенную отсечку
         </Typography.Text>
       ) : null}
       <Input

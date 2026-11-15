@@ -189,3 +189,7 @@ The timing surface now reports `capturesComplete` for a running block that holds
 ## 2026-11-15 — «отсечка» in the timing UI
 
 Every user-facing label of the timing page now calls a block-free capture «отсечка»: the queue title and items, the cancel dialog and its actions, the number-field hints, busy labels, local refusals and the API refusal messages shown on the page. The API routes, stored tables and code identifiers keep the `split` naming.
+
+## 2026-11-15 — Space captures an отсечка
+
+The empty number field now treats Space exactly like Enter: both queue a block-free capture, both commit a typed number, and both refuse an empty assignment. The former «Пробел ничего не записывает» refusal and its hint are gone; the queue and field hints name Enter or Space. The timing EARS and both manual-timing PRDs were amended accordingly.

@@ -23,7 +23,8 @@ import { describeTimingError } from './useTimingCapture';
 export const ANONYMOUS_QUEUE_AREA_HEIGHT = 104;
 
 const LIST_LABEL = 'Очередь неприсвоенных отсечек';
-const EMPTY_LABEL = 'Очередь пуста: Enter на пустом поле номера добавит отсечку';
+const EMPTY_LABEL =
+  'Очередь пуста: Enter или Space на пустом поле номера добавят отсечку';
 const REASON_REQUIRED = 'Укажите причину отмены отсечки';
 const CANCEL_TITLE = 'Отмена неприсвоенной отсечки';
 

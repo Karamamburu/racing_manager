@@ -255,8 +255,8 @@ describe('NumberCaptureField', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('records nothing for Space on the empty field and states the rule', () => {
-    const onAnonymousSplit = vi.fn();
+  it('records an anonymous split when Space is pressed on the empty field', async () => {
+    const onAnonymousSplit = vi.fn().mockResolvedValue(undefined);
     const onCommit = vi.fn();
     render(
       <NumberCaptureField
@@ -268,11 +268,29 @@ describe('NumberCaptureField', () => {
 
     fireEvent.keyDown(numberInput(), { key: ' ' });
 
-    expect(onAnonymousSplit).not.toHaveBeenCalled();
+    await waitFor(() => expect(onAnonymousSplit).toHaveBeenCalledTimes(1));
     expect(onCommit).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert').textContent).toBe(
-      'Пробел на пустом поле ничего не записывает: для отсечки нажмите Enter',
+    expect(numberInput().value).toBe('');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('commits a typed number with Space like Enter', async () => {
+    const onCommit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <NumberCaptureField
+        resolve={() => [candidate()]}
+        onCommit={onCommit}
+      />,
     );
+
+    fireEvent.change(numberInput(), { target: { value: '17' } });
+    fireEvent.keyDown(numberInput(), { key: ' ' });
+
+    await waitFor(() => expect(onCommit).toHaveBeenCalledTimes(1));
+    expect(onCommit).toHaveBeenCalledWith(
+      expect.objectContaining({ startNumber: 17 }),
+    );
+    await waitFor(() => expect(numberInput().value).toBe(''));
   });
 
   it('opens assignment mode with the field focused and no extra prompt', () => {
