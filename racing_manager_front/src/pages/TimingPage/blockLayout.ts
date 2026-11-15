@@ -37,27 +37,28 @@ export function timingBlockLayout(
 }
 
 /**
- * Packs ordered groups into rows of the same width mode, so a row is either
- * three thirds, two halves or one full card and never an uneven mix. A lone
- * half or third stays at its own width instead of stretching to the full row.
+ * Packs groups into rows of the same width mode, filling an earlier row of the
+ * same state before opening a new one, so a later half or third can close a gap
+ * left by a full-width group. A row is three thirds, two halves or one full
+ * card and never an uneven mix.
  */
-export function timingBlockRows<T extends { layout: TimingBlockLayout }>(
-  groups: readonly T[],
-): T[][] {
+export function timingBlockRows<
+  T extends { layout: TimingBlockLayout; priority?: number },
+>(groups: readonly T[]): T[][] {
   const rows: T[][] = [];
+  const capacity = (layout: TimingBlockLayout) =>
+    layout === 'full' ? 1 : layout === 'half' ? 2 : 3;
   for (const group of groups) {
-    const capacity =
-      group.layout === 'full' ? 1 : group.layout === 'half' ? 2 : 3;
-    const current = rows[rows.length - 1];
-    if (
-      group.layout !== 'full' &&
-      current !== undefined &&
-      current[0].layout === group.layout &&
-      current.length < capacity
-    ) {
-      current.push(group);
-    } else {
+    const row = rows.find(
+      (candidate) =>
+        candidate[0].layout === group.layout &&
+        (candidate[0].priority ?? 0) === (group.priority ?? 0) &&
+        candidate.length < capacity(group.layout),
+    );
+    if (row === undefined) {
       rows.push([group]);
+    } else {
+      row.push(group);
     }
   }
   return rows;

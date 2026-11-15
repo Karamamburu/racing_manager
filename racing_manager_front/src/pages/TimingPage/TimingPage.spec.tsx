@@ -637,7 +637,24 @@ describe('TimingPage', () => {
         group('h1', 'half'),
         group('t2', 'third'),
       ]).map((row) => row.map((item) => item.key)),
-    ).toEqual([['t1'], ['h1'], ['t2']]);
+    ).toEqual([
+      ['t1', 't2'],
+      ['h1'],
+    ]);
+    // A full-width race between two halves does not leave one half orphaned.
+    expect(
+      timingBlockRows([
+        group('h1', 'half'),
+        group('t1', 'third'),
+        group('t2', 'third'),
+        group('f1', 'full'),
+        group('h2', 'half'),
+      ]).map((row) => row.map((item) => item.key)),
+    ).toEqual([
+      ['h1', 'h2'],
+      ['t1', 't2'],
+      ['f1'],
+    ]);
 
     // Two items always split the row exactly; a lone half is never full width.
     expect(timingRowItemFlex('half', 2)).toBe(
@@ -1195,6 +1212,55 @@ describe('TimingPage', () => {
       text.indexOf('Заезд 1'),
     );
     expect(text.indexOf('Заезд 1')).toBeLessThan(text.indexOf('Заезд 2'));
+  });
+
+  it('packs the heats of one stage by their own roster size', async () => {
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        categories: [
+          block({ participants: roster(30) }),
+          heatBlock({ participants: roster(7) }),
+          heatBlock({
+            blockKey: 'heat:race-1:stage-1:2',
+            heatNumber: 2,
+            heatLabel: 'Заезд 2',
+            participants: roster(7),
+          }),
+        ],
+        stageGroups: [
+          stageGroup({
+            heatBlockKeys: [
+              'heat:race-1:stage-1:1',
+              'heat:race-1:stage-1:2',
+            ],
+          }),
+        ],
+      }),
+    );
+    mockCapture();
+
+    const { container } = renderPage();
+
+    expect(await screen.findByText('Заезд 2')).not.toBeNull();
+    // The race section is full width and its two 7-participant heats share a
+    // row as exact halves instead of stacking as full-width cards.
+    const raceItem = container.querySelector(
+      '.timing-block-row__item[data-layout="full"] .timing-race-section',
+    );
+    expect(raceItem).not.toBeNull();
+    const stage = container.querySelector('.timing-stage-section');
+    const heats = [
+      ...(stage?.querySelectorAll<HTMLElement>('.timing-block-row__item') ??
+        []),
+    ];
+    expect(heats).toHaveLength(2);
+    expect(heats.map((heat) => heat.getAttribute('data-layout'))).toEqual([
+      'half',
+      'half',
+    ]);
+    expect(heats[0].style.flex).toBe('1 1 calc(50% - 8px)');
   });
 
   it('renders the header of a pending stage without heats and offers no heat block', async () => {

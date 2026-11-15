@@ -683,6 +683,15 @@ button.app-header-avatar {
   min-width: 0;
 }
 
+/* A multi-stage race and each of its stages stack their header and cards. */
+.timing-race-section,
+.timing-stage-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
 @media (max-width: 1439px) {
   .timing-block-row__item[data-layout='third'] {
     flex: 0 0 calc((100% - 16px) / 2) !important;

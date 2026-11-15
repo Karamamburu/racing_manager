@@ -177,3 +177,7 @@ The timing page now places category groups in a wrapping row instead of one full
 ## 2026-11-15 — even timing rows
 
 The timing grid now packs same-width categories into explicit rows: three thirds, two halves or one full card. Two cards always split the row exactly in half, and a lone half or third keeps its fraction instead of growing to the full width, which had made a 7-participant category look like a full-width block.
+
+## 2026-11-15 — heats share their stage row
+
+The timing layout now fills a partial row with the next card of the same state and width, so a full-width race between two 7–12-participant categories no longer leaves one of them orphaned on an empty half-row. A multi-stage race stays one full-width section, but each stage packs its heat cards by their own roster size: two 7–8-participant heats now sit side by side instead of stacking as full-width cards, while a 30-participant heat keeps the full width.

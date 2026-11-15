@@ -53,6 +53,7 @@ import {
   timingBlockLayout,
   timingBlockRows,
   timingRowItemFlex,
+  type TimingBlockLayout,
 } from './blockLayout';
 
 /** Session key of the workstation instance that owns this browser tab. */
@@ -80,6 +81,14 @@ const CATEGORY_STATE_ORDER: Record<TimingCategoryState, number> = {
 function blockCategoryKey(block: TimingCategoryBlockView): string {
   return `${block.startId}:${block.formatId}:${block.gender}`;
 }
+
+/** One card placed in a width row, with the fraction the row gives it. */
+type BlockRowItem = {
+  key: string;
+  layout: TimingBlockLayout;
+  node: ReactNode;
+  priority?: number;
+};
 
 /** Stage state as the header names it: formed, not formed, closed (U-12). */
 const STAGE_STATE_LABELS: Record<TimingStageState, string> = {
@@ -441,7 +450,6 @@ export function TimingPage() {
   const stageGroups = surface.stageGroups ?? [];
   const stageGroupsByRace = new Map<string, TimingStageGroupView[]>();
   const heatBlocksByKey = new Map<string, TimingCategoryBlockView>();
-  const heatBlocksByRace = new Map<string, TimingCategoryBlockView[]>();
   for (const group of stageGroups) {
     const groups = stageGroupsByRace.get(group.raceId) ?? [];
     groups.push(group);
@@ -450,10 +458,6 @@ export function TimingPage() {
   for (const block of surface.categories) {
     if (block.kind !== 'HEAT') continue;
     heatBlocksByKey.set(blockIdentity(block), block);
-    const raceId = heatRaceIdentity(block);
-    const blocks = heatBlocksByRace.get(raceId) ?? [];
-    blocks.push(block);
-    heatBlocksByRace.set(raceId, blocks);
   }
   const raceTitleOf = (raceId: string): string | undefined =>
     stageGroups.find((group) => group.raceId === raceId)?.raceTitle;
@@ -642,45 +646,112 @@ export function TimingPage() {
   );
   const renderedRaces = new Set<string>();
   const renderedStageKeys = new Set<string>();
-  const blockGroups = orderedGroups.map((group) => {
-    const nodes: ReactNode[] = [];
-    for (const block of group.blocks) {
-      if (block.kind !== 'HEAT') {
-        nodes.push(renderBlock(block));
-        continue;
-      }
-      const raceId = heatRaceIdentity(block);
+
+  /** One packed row of cards, each at its exact fraction of the width. */
+  const renderPackedRows = (items: readonly BlockRowItem[]) =>
+    timingBlockRows(items).map((row) => (
+      <div key={row[0].key} className="timing-block-row">
+        {row.map((item) => (
+          <div
+            key={item.key}
+            className="timing-block-row__item"
+            data-layout={item.layout}
+            style={{ flex: timingRowItemFlex(item.layout, row.length) }}
+          >
+            {item.node}
+          </div>
+        ))}
+      </div>
+    ));
+
+  const blockGroups: BlockRowItem[] = orderedGroups.map((group) => {
+    const categoryBlocks = group.blocks.filter((block) => block.kind !== 'HEAT');
+    const heatBlocks = group.blocks.filter((block) => block.kind === 'HEAT');
+    if (heatBlocks.length === 0) {
+      const categoryBlock = categoryBlocks[0];
+      return {
+        key: blockCategoryKey(group.blocks[0]),
+        layout: timingBlockLayout(group.blocks),
+        priority: group.priority,
+        node: categoryBlock === undefined ? null : renderBlock(categoryBlock),
+      };
+    }
+
+    // A multi-stage race is its own full-width section. Its heats still share
+    // rows inside their stage, so two 7-8-participant heats sit side by side
+    // instead of stacking as full-width cards.
+    const heatsByRace = new Map<string, TimingCategoryBlockView[]>();
+    for (const heat of heatBlocks) {
+      const raceId = heatRaceIdentity(heat);
+      const heats = heatsByRace.get(raceId) ?? [];
+      heats.push(heat);
+      heatsByRace.set(raceId, heats);
+    }
+    const raceSections: ReactNode[] = [];
+    for (const [raceId, raceHeats] of heatsByRace) {
       if (renderedRaces.has(raceId)) continue;
       renderedRaces.add(raceId);
       const renderedHeatKeys = new Set<string>();
+      const stageSections: ReactNode[] = [];
       for (const stage of stageGroupsByRace.get(raceId) ?? []) {
         renderedStageKeys.add(stage.blockKey);
-        nodes.push(<StageHeader key={stage.blockKey} group={stage} />);
+        const heatItems: BlockRowItem[] = [];
         for (const key of stage.heatBlockKeys) {
           const heat = heatBlocksByKey.get(key);
           if (heat === undefined || renderedHeatKeys.has(key)) continue;
           renderedHeatKeys.add(key);
-          nodes.push(renderBlock(heat));
+          heatItems.push({
+            key,
+            layout: timingBlockLayout([heat]),
+            node: renderBlock(heat),
+          });
         }
+        stageSections.push(
+          <div key={stage.blockKey} className="timing-stage-section">
+            <StageHeader group={stage} />
+            {heatItems.length === 0 ? null : renderPackedRows(heatItems)}
+          </div>,
+        );
       }
       // A heat block its stage header did not group still renders (FR-17).
-      for (const heat of heatBlocksByRace.get(raceId) ?? []) {
+      const ungroupedHeats: BlockRowItem[] = [];
+      for (const heat of raceHeats) {
         const key = blockIdentity(heat);
         if (renderedHeatKeys.has(key)) continue;
         renderedHeatKeys.add(key);
-        nodes.push(renderBlock(heat));
+        ungroupedHeats.push({
+          key,
+          layout: timingBlockLayout([heat]),
+          node: renderBlock(heat),
+        });
       }
+      raceSections.push(
+        <div key={raceId} className="timing-race-section">
+          {stageSections}
+          {ungroupedHeats.length === 0
+            ? null
+            : renderPackedRows(ungroupedHeats)}
+        </div>,
+      );
     }
+
     return {
       key: blockCategoryKey(group.blocks[0]),
-      layout: timingBlockLayout(group.blocks),
-      nodes,
+      layout: 'full',
+      priority: group.priority,
+      node: (
+        <div className="timing-race-section">
+          {categoryBlocks.map((block) => (
+            <div key={blockIdentity(block)}>{renderBlock(block)}</div>
+          ))}
+          {raceSections}
+        </div>
+      ),
     };
   });
   const trailingStageHeaders = stageGroups
     .filter((group) => !renderedStageKeys.has(group.blockKey))
     .map((group) => <StageHeader key={group.blockKey} group={group} />);
-  const blockRows = timingBlockRows(blockGroups);
 
   return (
     <AppShell title="Хронометраж" subtitle={subtitle}>
@@ -800,28 +871,7 @@ export function TimingPage() {
         ) : (
           <>
             <div className="timing-block-rows">
-              {blockRows.map((row) => (
-                <div key={row[0].key} className="timing-block-row">
-                  {row.map((group) => (
-                    <div
-                      key={group.key}
-                      className="timing-block-row__item"
-                      data-layout={group.layout}
-                      style={{
-                        flex: timingRowItemFlex(group.layout, row.length),
-                      }}
-                    >
-                      <Space
-                        direction="vertical"
-                        size={16}
-                        style={{ width: '100%' }}
-                      >
-                        {group.nodes}
-                      </Space>
-                    </div>
-                  ))}
-                </div>
-              ))}
+              {renderPackedRows(blockGroups)}
             </div>
             {trailingStageHeaders}
           </>
