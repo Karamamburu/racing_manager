@@ -912,7 +912,7 @@ describe('TimingPage', () => {
     expect(drawerProps.current).toHaveLength(0);
     expect(getSurface).not.toHaveBeenCalled();
     // No split queue and no current block for a user without timing access.
-    expect(screen.queryByText('Неразмеченные отсечки')).toBeNull();
+    expect(screen.queryByText('Неприсвоенные отсечки')).toBeNull();
     expect(screen.queryByText('Текущий блок')).toBeNull();
   });
 
@@ -1010,7 +1010,7 @@ describe('TimingPage', () => {
 
     const { container } = renderPage();
 
-    expect(await screen.findByText('Неразмеченные отсечки')).not.toBeNull();
+    expect(await screen.findByText('Неприсвоенные отсечки')).not.toBeNull();
     expect(screen.getByText('В очереди: 1')).not.toBeNull();
     expect(
       screen.getByRole('button', { name: /^Отсечка 1:/ }),

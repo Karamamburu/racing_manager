@@ -294,7 +294,7 @@ export function NumberCaptureField({
       <Typography.Text strong>Номер участника</Typography.Text>
       {assignment === null ? (
         <Typography.Text type="secondary" style={{ textAlign: 'center' }}>
-          Enter на пустом поле добавит неразмеченную отсечку
+          Enter на пустом поле добавит неприсвоенную отсечку
         </Typography.Text>
       ) : null}
       <Input

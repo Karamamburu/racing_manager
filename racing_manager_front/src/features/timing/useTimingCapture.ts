@@ -102,9 +102,9 @@ const EPOCH_FALLBACK_MESSAGE = 'Не удалось открыть отсчёт 
 const EVENT_REQUIRED_MESSAGE = 'Хронометраж недоступен: мероприятие не выбрано';
 const CANDIDATE_MISSING_MESSAGE = 'Участник не найден среди идущих заездов';
 const PENDING_MISSING_MESSAGE = 'Непривязанный финиш не найден на поверхности';
-const SPLIT_MISSING_MESSAGE = 'Неразмеченная отсечка не найдена в очереди';
+const SPLIT_MISSING_MESSAGE = 'Неприсвоенная отсечка не найдена в очереди';
 const NO_RUNNING_ATTEMPT_MESSAGE =
-  'Нет идущей попытки: неразмеченную отсечку некуда записать';
+  'Нет идущей попытки: неприсвоенную отсечку некуда записать';
 const HEAT_INCOMPLETE_MESSAGE = 'Блок заезда не готов к старту';
 
 /** The surface query key, shared with the page that owns the read. */

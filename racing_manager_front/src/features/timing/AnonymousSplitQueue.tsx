@@ -22,10 +22,10 @@ import { describeTimingError } from './useTimingCapture';
 /** Minimum height of the entry area when its column has no spare height. */
 export const ANONYMOUS_QUEUE_AREA_HEIGHT = 104;
 
-const LIST_LABEL = 'Очередь неразмеченных отсечек';
+const LIST_LABEL = 'Очередь неприсвоенных отсечек';
 const EMPTY_LABEL = 'Очередь пуста: Enter на пустом поле номера добавит отсечку';
 const REASON_REQUIRED = 'Укажите причину отмены отсечки';
-const CANCEL_TITLE = 'Отмена неразмеченной отсечки';
+const CANCEL_TITLE = 'Отмена неприсвоенной отсечки';
 
 export interface AnonymousSplitQueueProps {
   /** Queued entries in the capture order of the surface, oldest first. */
@@ -146,7 +146,7 @@ export function AnonymousSplitQueue({
   return (
     <Card
       size="small"
-      title="Неразмеченные отсечки"
+      title="Неприсвоенные отсечки"
       style={{
         display: 'flex',
         flexDirection: 'column',

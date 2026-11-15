@@ -56,7 +56,7 @@ function deferred() {
 }
 
 function queueArea(): HTMLElement {
-  return screen.getByRole('list', { name: 'Очередь неразмеченных отсечек' });
+  return screen.getByRole('list', { name: 'Очередь неприсвоенных отсечек' });
 }
 
 beforeAll(() => {
@@ -88,7 +88,7 @@ describe('AnonymousSplitQueue layout', () => {
       />,
     );
 
-    expect(screen.getByText('Неразмеченные отсечки')).not.toBeNull();
+    expect(screen.getByText('Неприсвоенные отсечки')).not.toBeNull();
     expect(screen.getByText('В очереди: 0')).not.toBeNull();
     expect(
       screen.getByText(
