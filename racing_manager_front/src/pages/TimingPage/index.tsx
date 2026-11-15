@@ -1,3 +1,4 @@
+import { CopyOutlined } from '@ant-design/icons';
 import { AxiosError } from 'axios';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -259,6 +260,10 @@ export function TimingPage() {
   // block that supplied the attempt, so a pass names its participant without a
   // second request per row.
   const [recordAttemptId, setRecordAttemptId] = useState<string | null>(null);
+  const [copyNotice, setCopyNotice] = useState<{
+    text: string;
+    error: boolean;
+  } | null>(null);
   const [recordTitle, setRecordTitle] = useState('Запись');
   const [recordParticipantNames, setRecordParticipantNames] = useState<
     Record<string, string>
@@ -466,6 +471,19 @@ export function TimingPage() {
   }
   const raceTitleOf = (raceId: string): string | undefined =>
     stageGroups.find((group) => group.raceId === raceId)?.raceTitle;
+
+  /** Copies this tab's workstation id, so the referee can transfer capture. */
+  const copyWorkstationId = async () => {
+    try {
+      await navigator.clipboard.writeText(workstationInstanceId);
+      setCopyNotice({ text: 'ID скопирован', error: false });
+    } catch {
+      setCopyNotice({
+        text: 'Не удалось скопировать. Выделите ID вручную.',
+        error: true,
+      });
+    }
+  };
 
   /** The Start press of one block; a refusal leaves capture state untouched. */
   const startBlock = (block: TimingCategoryBlockView) => {
@@ -788,9 +806,29 @@ export function TimingPage() {
               >
                 <Space wrap size={16} align="center">
                   <Typography.Text>Захват: {holderLabel}</Typography.Text>
-                  <Typography.Text type="secondary">
-                    Устройство: {workstationInstanceId}
-                  </Typography.Text>
+                  <Space size={2} align="center">
+                    <Typography.Text type="secondary">
+                      Устройство: {workstationInstanceId}
+                    </Typography.Text>
+                    <Button
+                      size="small"
+                      type="link"
+                      icon={<CopyOutlined />}
+                      aria-label="Копировать ID устройства"
+                      title="Копировать ID устройства"
+                      onClick={() => void copyWorkstationId()}
+                    >
+                      Копировать
+                    </Button>
+                    {copyNotice === null ? null : (
+                      <Typography.Text
+                        type={copyNotice.error ? 'danger' : 'success'}
+                        style={{ fontSize: 12 }}
+                      >
+                        {copyNotice.text}
+                      </Typography.Text>
+                    )}
+                  </Space>
                   <Typography.Text
                     type={capture.pendingCount > 0 ? 'warning' : 'secondary'}
                   >

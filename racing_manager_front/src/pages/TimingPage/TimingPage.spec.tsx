@@ -406,6 +406,60 @@ describe('TimingPage', () => {
     });
   });
 
+  it('copies this device id so it can receive a capture transfer', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({ captureWorkstationInstanceId: 'ws-1' }),
+    );
+    mockCapture();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    renderPage();
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Копировать ID устройства',
+      }),
+    );
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('ws-1'));
+    expect(await screen.findByText('ID скопирован')).not.toBeNull();
+  });
+
+  it('reports a refused clipboard write', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({ captureWorkstationInstanceId: 'ws-1' }),
+    );
+    mockCapture();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+    });
+
+    renderPage();
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Копировать ID устройства',
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        'Не удалось скопировать. Выделите ID вручную.',
+      ),
+    ).not.toBeNull();
+  });
+
   it('configures no periodic surface read for a running block clock', async () => {
     sessionStorage.setItem('timing-workstation-instance', 'ws-1');
     mockSession(['REFEREE']);

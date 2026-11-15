@@ -48,7 +48,7 @@ describe('CaptureControls', () => {
 
     expect(screen.getByText('Захват свободен')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Взять захват' })).not.toBeNull();
-    expect(screen.queryByLabelText('Станция назначения')).toBeNull();
+    expect(screen.queryByLabelText('Устройство назначения')).toBeNull();
   });
 
   it('names the other station and still offers to take the capture', () => {
@@ -69,7 +69,7 @@ describe('CaptureControls', () => {
 
     expect(screen.getByText('Захват у станции station-b')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Взять захват' })).not.toBeNull();
-    expect(screen.queryByLabelText('Станция назначения')).toBeNull();
+    expect(screen.queryByLabelText('Устройство назначения')).toBeNull();
   });
 
   it('offers transfer only to the station that holds the capture', () => {
@@ -86,7 +86,7 @@ describe('CaptureControls', () => {
 
     expect(screen.getByText('Захват у этой станции')).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Взять захват' })).toBeNull();
-    expect(screen.getByLabelText('Станция назначения')).not.toBeNull();
+    expect(screen.getByLabelText('Устройство назначения')).not.toBeNull();
     expect(
       screen.getByRole('button', { name: 'Передать захват' }),
     ).not.toBeNull();
@@ -143,7 +143,7 @@ describe('CaptureControls', () => {
     expect(screen.getByText('Захват свободен')).not.toBeNull();
   });
 
-  it('passes the typed target station to the transfer', async () => {
+  it('passes the typed target device to the transfer', async () => {
     const onTransfer = vi.fn().mockResolvedValue(undefined);
     render(
       <CaptureControls
@@ -157,7 +157,7 @@ describe('CaptureControls', () => {
     );
 
     const target = screen.getByLabelText(
-      'Станция назначения',
+      'Устройство назначения',
     ) as HTMLInputElement;
     fireEvent.change(target, { target: { value: ' station-b ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Передать захват' }));
@@ -166,7 +166,32 @@ describe('CaptureControls', () => {
     await waitFor(() => expect(target.value).toBe(''));
   });
 
-  it('refuses a transfer without a target station', () => {
+  it('refuses a transfer to the device that already holds capture', () => {
+    const onTransfer = vi.fn();
+    render(
+      <CaptureControls
+        capture={capture({ workstationInstanceId: WORKSTATION })}
+        workstationInstanceId={WORKSTATION}
+        canAdminister={false}
+        onTake={vi.fn()}
+        onTransfer={onTransfer}
+        onForceRelease={vi.fn()}
+      />,
+    );
+
+    const target = screen.getByLabelText(
+      'Устройство назначения',
+    ) as HTMLInputElement;
+    fireEvent.change(target, { target: { value: WORKSTATION } });
+    fireEvent.click(screen.getByRole('button', { name: 'Передать захват' }));
+
+    expect(onTransfer).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toBe(
+      'Это устройство уже удерживает захват',
+    );
+  });
+
+  it('refuses a transfer without a target device', () => {
     const onTransfer = vi.fn();
     render(
       <CaptureControls
@@ -182,7 +207,7 @@ describe('CaptureControls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Передать захват' }));
     expect(onTransfer).not.toHaveBeenCalled();
     expect(screen.getByRole('alert').textContent).toBe(
-      'Укажите станцию назначения',
+      'Укажите устройство назначения',
     );
   });
 

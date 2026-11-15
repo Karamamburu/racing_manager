@@ -201,3 +201,7 @@ The top block now shows «Ход хронометража»: categories finished
 ## 2026-11-15 — the timing record is a category record
 
 The attempt record drawer is now titled «Запись категории» for a category block and «Запись заезда» for a heat. Inside the drawer the record itself is called «запись» («Запись отменена», «Запись закрыта», «Запись пуста», «ID записи»), and its closure actions read «Завершить хронометраж» / «Отменить хронометраж». The generic correction dialogs use the same «хронометраж» wording.
+
+## 2026-11-15 — copying the device id for capture transfer
+
+The timing top block now has a «Копировать» action beside the workstation id, so a referee can move capture to another device without selecting a long UUID by hand. The transfer field is labelled «Устройство назначения» and refuses the current device locally; an unreadable clipboard reports an inline hint instead of a silent failure.

@@ -85,7 +85,11 @@ export function CaptureControls({
   const transfer = () => {
     const trimmed = target.trim();
     if (!trimmed) {
-      setError('Укажите станцию назначения');
+      setError('Укажите устройство назначения');
+      return;
+    }
+    if (trimmed === workstationInstanceId) {
+      setError('Это устройство уже удерживает захват');
       return;
     }
     void run(
@@ -142,8 +146,8 @@ export function CaptureControls({
       {holdsHere ? (
         <Space wrap size={8} align="center">
           <Input
-            aria-label="Станция назначения"
-            placeholder="Станция назначения"
+            aria-label="Устройство назначения"
+            placeholder="Устройство назначения"
             autoComplete="off"
             value={target}
             disabled={busy !== null}
