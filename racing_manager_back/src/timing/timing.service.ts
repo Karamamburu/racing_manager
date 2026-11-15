@@ -479,7 +479,7 @@ export class TimingService {
     if (attempt === null || attempt.eventId !== eventId) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Timing attempt not found.',
+        'Попытка хронометража не найдена.',
         { attemptId },
       );
     }
@@ -517,7 +517,7 @@ export class TimingService {
     if (start === undefined || !start.formatIds.includes(dto.formatId)) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'The protocol category does not exist on this event.',
+        'Такой категории нет в мероприятии.',
         { startId: dto.startId, formatId: dto.formatId, gender: dto.gender },
       );
     }
@@ -663,19 +663,19 @@ export class TimingService {
     if (plan === null) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'The race has no timing start on this event.',
+        'У гонки нет старта для хронометража.',
         { classCompetitionId: dto.classCompetitionId },
       );
     }
     const stage = race.stages.find((item) => item.stageId === dto.stageId);
     if (stage === undefined) {
-      throw timingError(TimingErrorCode.NOT_FOUND, 'The stage was not found.', {
+      throw timingError(TimingErrorCode.NOT_FOUND, 'Этап не найден.', {
         classCompetitionId: dto.classCompetitionId,
         stageId: dto.stageId,
       });
     }
     if (!stage.heats.some((heat) => heat.heatNumber === dto.heatNumber)) {
-      throw timingError(TimingErrorCode.NOT_FOUND, 'The heat was not found.', {
+      throw timingError(TimingErrorCode.NOT_FOUND, 'Заезд не найден.', {
         classCompetitionId: dto.classCompetitionId,
         stageId: dto.stageId,
         heatNumber: dto.heatNumber,
@@ -684,7 +684,7 @@ export class TimingService {
     if (stage.status !== 'SEEDED') {
       throw timingError(
         TimingErrorCode.INVALID_STATE,
-        'A heat starts only in a seeded stage.',
+        'Заезд можно начать только на этапе со сформированными заездами.',
         {
           classCompetitionId: dto.classCompetitionId,
           stageId: dto.stageId,
@@ -695,7 +695,7 @@ export class TimingService {
     if (race.status === 'DONE') {
       throw timingError(
         TimingErrorCode.CATEGORY_FINISHED,
-        'The race is done and accepts no heat start.',
+        'Гонка завершена, новый заезд начать нельзя.',
         { classCompetitionId: dto.classCompetitionId, status: race.status },
       );
     }
@@ -710,7 +710,7 @@ export class TimingService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'This workstation does not hold capture.',
+        'Захват хронометража удерживает другая станция.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -734,7 +734,7 @@ export class TimingService {
     if (timeable.length === 0) {
       throw timingError(
         TimingErrorCode.NO_TIMEABLE_PARTICIPANT,
-        'The heat has no timeable participant.',
+        'В заезде нет участников для хронометража.',
         {
           classCompetitionId: dto.classCompetitionId,
           stageId: dto.stageId,
@@ -746,7 +746,7 @@ export class TimingService {
     if (missingNumbers.length > 0) {
       throw timingError(
         TimingErrorCode.MISSING_START_NUMBER,
-        'A timeable heat participant has no start number.',
+        'У участника заезда нет стартового номера.',
         {
           participants: missingNumbers.map((slot) => ({
             enrollmentId: slot.enrollmentId,
@@ -857,7 +857,7 @@ export class TimingService {
     );
     const event = await this.repository.findEvent(eventId);
     if (event === null) {
-      throw timingError(TimingErrorCode.NOT_FOUND, 'Event not found.', {
+      throw timingError(TimingErrorCode.NOT_FOUND, 'Мероприятие не найдено.', {
         eventId,
       });
     }
@@ -865,14 +865,14 @@ export class TimingService {
     if (attempt === null || attempt.eventId !== eventId) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Timing attempt not found.',
+        'Попытка хронометража не найдена.',
         { attemptId },
       );
     }
     if (attempt.status !== 'RUNNING') {
       throw timingError(
         TimingErrorCode.ATTEMPT_CLOSED,
-        'Clock epochs open only on a running attempt.',
+        'Отсчёт можно открыть только в идущей попытке.',
         { attemptId, status: attempt.status },
       );
     }
@@ -880,7 +880,7 @@ export class TimingService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'This workstation does not hold capture.',
+        'Захват хронометража удерживает другая станция.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -1032,14 +1032,14 @@ export class TimingService {
       if (current === null) {
         throw timingError(
           TimingErrorCode.CAPTURE_NOT_HELD,
-          'No workstation holds capture for this event.',
+          'Захват хронометража сейчас свободен.',
           { eventId, workstationInstanceId: targetWorkstationInstanceId },
         );
       }
       if (current.heldByUserId !== actorUserId) {
         throw timingError(
           TimingErrorCode.CAPTURE_NOT_HELD,
-          'Only the capture holder may hand capture over.',
+          'Передать захват может только станция, которая его удерживает.',
           {
             workstationInstanceId: targetWorkstationInstanceId,
             holderWorkstationInstanceId: current.workstationInstanceId,
@@ -1218,14 +1218,14 @@ export class TimingService {
     if (attempt === null || attempt.eventId !== eventId) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Timing attempt not found.',
+        'Попытка хронометража не найдена.',
         { attemptId: dto.attemptId },
       );
     }
     if (attempt.status !== 'RUNNING') {
       throw timingError(
         TimingErrorCode.ATTEMPT_CLOSED,
-        'Capture accepts only a running attempt.',
+        'Отметки принимаются только в идущей попытке.',
         { attemptId: attempt.id, status: attempt.status },
       );
     }
@@ -1265,7 +1265,7 @@ export class TimingService {
         if (receipt !== null) {
           throw timingError(
             TimingErrorCode.CONFLICT,
-            'This device sequence already has a receipt on the attempt.',
+            'Эта последовательность уже использована в попытке.',
             {
               attemptId: dto.attemptId,
               workstationInstanceId: dto.workstationInstanceId,
@@ -1435,7 +1435,7 @@ export class TimingService {
     try {
       const event = await this.repository.findEvent(eventId);
       if (event === null) {
-        throw timingError(TimingErrorCode.NOT_FOUND, 'Event not found.', {
+        throw timingError(TimingErrorCode.NOT_FOUND, 'Мероприятие не найдено.', {
           eventId,
         });
       }
@@ -1450,7 +1450,7 @@ export class TimingService {
       if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
         throw timingError(
           TimingErrorCode.CAPTURE_NOT_HELD,
-          'This workstation does not hold capture.',
+          'Захват хронометража удерживает другая станция.',
           {
             workstationInstanceId: dto.workstationInstanceId,
             holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -1465,7 +1465,7 @@ export class TimingService {
       ) {
         throw timingError(
           TimingErrorCode.CAPTURE_NOT_HELD,
-          'This workstation has no open clock epoch for the capture.',
+          'На этой станции нет открытого отсчёта. Обновите страницу.',
           {
             clockEpochId: dto.clockEpochId,
             workstationInstanceId: dto.workstationInstanceId,
@@ -1480,7 +1480,7 @@ export class TimingService {
       ) {
         throw timingError(
           TimingErrorCode.CAPTURE_NOT_HELD,
-          'The clock epoch is not anchored on a running attempt of this event.',
+          'Отсчёт не привязан к идущей попытке мероприятия.',
           { clockEpochId: dto.clockEpochId, attemptId: epoch.attemptId },
         );
       }
@@ -1495,7 +1495,7 @@ export class TimingService {
       if (candidateAttemptIds.length === 0) {
         throw timingError(
           TimingErrorCode.NO_RUNNING_ATTEMPT,
-          'No attempt of the event is running for this split.',
+          'В мероприятии нет идущей попытки для этого сплита.',
           { eventId, captureInstant: captureInstant.toISOString() },
         );
       }
@@ -1511,7 +1511,7 @@ export class TimingService {
         if (existing !== null) {
           throw timingError(
             TimingErrorCode.CONFLICT,
-            'This event sequence already has a receipt.',
+            'Эта последовательность уже использована в мероприятии.',
             {
               eventId,
               workstationInstanceId: dto.workstationInstanceId,
@@ -1640,7 +1640,7 @@ export class TimingService {
     if (dto.pendingFinishId !== pendingFinishId) {
       throw timingError(
         TimingErrorCode.INVALID_STATE,
-        'The body addresses another pending finish than the route.',
+        'В запросе указан другой финиш.',
         { pendingFinishId, bodyPendingFinishId: dto.pendingFinishId },
       );
     }
@@ -1649,7 +1649,7 @@ export class TimingService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'This workstation does not hold capture.',
+        'Захват хронометража удерживает другая станция.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -1671,7 +1671,7 @@ export class TimingService {
         if (receipt !== null) {
           throw timingError(
             TimingErrorCode.CONFLICT,
-            'This device sequence already has a receipt on the attempt.',
+            'Эта последовательность уже использована в попытке.',
             {
               attemptId: pending.attempt.id,
               workstationInstanceId: dto.workstationInstanceId,
@@ -1847,14 +1847,14 @@ export class TimingService {
     if (attempt === null || attempt.eventId !== eventId) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Timing attempt not found.',
+        'Попытка хронометража не найдена.',
         { attemptId },
       );
     }
     if (attempt.status !== 'RUNNING') {
       throw timingError(
         TimingErrorCode.ATTEMPT_CLOSED,
-        'Undo accepts only a running attempt.',
+        'Отменить отметку можно только в идущей попытке.',
         { attemptId, status: attempt.status },
       );
     }
@@ -1862,7 +1862,7 @@ export class TimingService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'This workstation does not hold capture.',
+        'Захват хронометража удерживает другая станция.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -1883,7 +1883,7 @@ export class TimingService {
         if (receipt !== null) {
           throw timingError(
             TimingErrorCode.CONFLICT,
-            'This device sequence already has a receipt on the attempt.',
+            'Эта последовательность уже использована в попытке.',
             {
               attemptId,
               workstationInstanceId: dto.workstationInstanceId,
@@ -1903,7 +1903,7 @@ export class TimingService {
         if (target === null) {
           throw timingError(
             TimingErrorCode.INVALID_STATE,
-            'This workstation has no pass or split creation to undo in the attempt.',
+            'На этой станции нет отметки для отмены.',
             {
               attemptId,
               workstationInstanceId: dto.workstationInstanceId,
@@ -1996,7 +1996,7 @@ export class TimingService {
     if (dto.targetId !== pathId) {
       throw timingError(
         TimingErrorCode.INVALID_STATE,
-        'The body addresses another target than the route.',
+        'В запросе указана другая цель.',
         { pathId, targetId: dto.targetId },
       );
     }
@@ -2103,7 +2103,7 @@ export class TimingService {
       if (dto.targetEnrollmentId === current.enrollmentId) {
         throw timingError(
           TimingErrorCode.INVALID_STATE,
-          'The pass already belongs to that participant.',
+          'Отметка уже принадлежит этому участнику.',
           { passId, enrollmentId: current.enrollmentId },
         );
       }
@@ -2115,7 +2115,7 @@ export class TimingService {
       if (target === null) {
         throw timingError(
           TimingErrorCode.NOT_FOUND,
-          'The enrollment is not a frozen participant of this attempt.',
+          'Участник не входит в состав этой попытки.',
           {
             attemptId: current.attempt.id,
             enrollmentId: dto.targetEnrollmentId,
@@ -2193,7 +2193,7 @@ export class TimingService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'This workstation does not hold capture.',
+        'Захват хронометража удерживает другая станция.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -2293,14 +2293,14 @@ export class TimingService {
   ): Promise<BoundPassContext> {
     const mark = await this.repository.findMark(passId, tx);
     if (mark === null) {
-      throw timingError(TimingErrorCode.NOT_FOUND, 'Pass not found.', {
+      throw timingError(TimingErrorCode.NOT_FOUND, 'Отметка не найдена.', {
         passId,
       });
     }
     if (mark.kind !== 'PASS') {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'The addressed mark is not a pass.',
+        'Указанная отметка не является проходом.',
         { passId, kind: mark.kind },
       );
     }
@@ -2308,7 +2308,7 @@ export class TimingService {
     if (mark.status !== 'BOUND' || mark.enrollmentId === null) {
       throw timingError(
         TimingErrorCode.INVALID_STATE,
-        'The pass is no longer a bound pass.',
+        'Отметка больше не привязана к участнику.',
         { passId, status: mark.status, enrollmentId: mark.enrollmentId },
       );
     }
@@ -2325,14 +2325,14 @@ export class TimingService {
     if (attempt === null) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Timing attempt not found.',
+        'Попытка хронометража не найдена.',
         { attemptId },
       );
     }
     if (attempt.eventId !== eventId) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'The timing attempt belongs to another event.',
+        'Попытка хронометража относится к другому мероприятию.',
         { attemptId, eventId },
       );
     }
@@ -2352,7 +2352,7 @@ export class TimingService {
     if (attempt.status !== 'RUNNING') {
       throw timingError(
         TimingErrorCode.ATTEMPT_CLOSED,
-        'A closure requires a running attempt.',
+        'Завершить можно только идущую попытку.',
         { attemptId, status: attempt.status },
       );
     }
@@ -2366,7 +2366,7 @@ export class TimingService {
   ): Promise<TimingEventRow> {
     const event = await this.repository.findEvent(eventId, tx);
     if (event === null) {
-      throw timingError(TimingErrorCode.NOT_FOUND, 'Event not found.', {
+      throw timingError(TimingErrorCode.NOT_FOUND, 'Мероприятие не найдено.', {
         eventId,
       });
     }
@@ -2439,7 +2439,7 @@ export class TimingService {
     }
     throw timingError(
       TimingErrorCode.UNCONFIRMED_MUTATIONS,
-      'The outgoing workstation still has captures without a final receipt.',
+      'На станции есть отметки без подтверждения. Дождитесь синхронизации.',
       {
         workstationInstanceId,
         attemptIds: gaps.map((gap) => gap.attemptId),
@@ -2502,7 +2502,7 @@ export class TimingService {
     if (closedHeat) {
       throw timingError(
         TimingErrorCode.ATTEMPT_CLOSED,
-        'A closed heat attempt accepts no timing correction.',
+        'Завершённая попытка заезда не принимает коррекцию времени.',
         { attemptId: attempt.id, status: attempt.status },
       );
     }
@@ -2532,13 +2532,13 @@ export class TimingService {
     if (refusal === TimingErrorCode.ATTEMPT_CLOSED) {
       throw timingError(
         refusal,
-        'A pass rebind or a pass cancellation requires a running attempt.',
+        'Перепривязать или отменить отметку можно только в идущей попытке.',
         { attemptId: attempt.id, status: attempt.status },
       );
     }
     throw timingError(
       refusal,
-      'A cancelled attempt accepts no timing change.',
+      'Отменённая попытка не принимает изменения времени.',
       {
         attemptId: attempt.id,
         status: attempt.status,
@@ -2559,7 +2559,7 @@ export class TimingService {
     if (mark.enrollmentId === null) {
       throw timingError(
         TimingErrorCode.INVALID_STATE,
-        'The pass names no participant.',
+        'У отметки не указан участник.',
         { passId },
       );
     }
@@ -2570,7 +2570,7 @@ export class TimingService {
     if (participant === null) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'The pass names no frozen participant of its attempt.',
+        'Отметка указывает на участника, которого нет в попытке.',
         { passId, enrollmentId: mark.enrollmentId },
       );
     }
@@ -3311,7 +3311,7 @@ export class TimingService {
     if (mark === null) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Pending finish not found.',
+        'Непривязанный финиш не найден.',
         { pendingFinishId },
       );
     }
@@ -3319,28 +3319,28 @@ export class TimingService {
     if (attempt === null || attempt.eventId !== eventId) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'The pending finish belongs to another event.',
+        'Непривязанный финиш относится к другому мероприятию.',
         { pendingFinishId, attemptId: mark.attemptId },
       );
     }
     if (mark.kind !== 'PENDING_FINISH') {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'The addressed mark is not a pending finish.',
+        'Указанная отметка не является непривязанным финишем.',
         { pendingFinishId, kind: mark.kind },
       );
     }
     if (mark.status !== 'PENDING') {
       throw timingError(
         TimingErrorCode.INVALID_STATE,
-        'The pending finish is no longer unbound.',
+        'Финиш уже привязан или отменён.',
         { pendingFinishId, status: mark.status },
       );
     }
     if (attempt.status !== 'RUNNING') {
       throw timingError(
         TimingErrorCode.ATTEMPT_CLOSED,
-        'A pending finish changes only while its attempt runs.',
+        'Непривязанный финиш можно изменить только в идущей попытке.',
         { attemptId: attempt.id, status: attempt.status },
       );
     }
@@ -3366,7 +3366,7 @@ export class TimingService {
       if (participant === null) {
         throw timingError(
           TimingErrorCode.NOT_FOUND,
-          'The enrollment is not a frozen participant of this attempt.',
+          'Участник не входит в состав этой попытки.',
           { attemptId, enrollmentId: dto.enrollmentId },
         );
       }
@@ -3375,7 +3375,7 @@ export class TimingService {
     if (dto.startNumber === undefined) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'The bind names no participant.',
+        'Не указан участник для привязки.',
         { attemptId },
       );
     }
@@ -3387,7 +3387,7 @@ export class TimingService {
     if (participant === null) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'No frozen participant of this attempt carries the number.',
+        'В этой попытке нет участника с таким номером.',
         { attemptId, startNumber: dto.startNumber },
       );
     }
@@ -3421,7 +3421,7 @@ export class TimingService {
     if (participant === null) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'The enrollment is not a frozen participant of this attempt.',
+        'Участник не входит в состав этой попытки.',
         { attemptId: dto.attemptId, enrollmentId },
       );
     }
@@ -3438,7 +3438,7 @@ export class TimingService {
     if (dto.enrollmentId === undefined) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'A tile capture names no enrollment.',
+        'Не выбрана плитка участника.',
         { attemptId: dto.attemptId },
       );
     }
@@ -3457,7 +3457,7 @@ export class TimingService {
     if (dto.startNumber === undefined) {
       throw timingError(
         TimingErrorCode.NUMBER_REQUIRED,
-        'A number capture requires a start number.',
+        'Для отметки по номеру укажите номер участника.',
         { attemptId: dto.attemptId },
       );
     }
@@ -3470,7 +3470,7 @@ export class TimingService {
     if (routing.kind === 'AMBIGUOUS') {
       throw timingError(
         TimingErrorCode.NUMBER_AMBIGUOUS,
-        'The number resolves to more than one eligible enrollment.',
+        'Номер подходит нескольким участникам. Выберите участника.',
         {
           startNumber: dto.startNumber,
           enrollmentIds: routing.enrollmentIds,
@@ -3491,7 +3491,7 @@ export class TimingService {
     if (chosen === undefined) {
       throw timingError(
         TimingErrorCode.INVALID_STATE,
-        'The routing decision named a candidate the query did not return.',
+        'Ошибка выбора участника. Обновите страницу.',
         { startNumber: dto.startNumber, enrollmentId: routing.enrollmentId },
       );
     }
@@ -3501,7 +3501,7 @@ export class TimingService {
     if (chosen.attemptId !== dto.attemptId) {
       throw timingError(
         TimingErrorCode.INVALID_STATE,
-        'The number routes to another attempt than the addressed one.',
+        'Номер относится к другой попытке. Обновите страницу.',
         {
           attemptId: dto.attemptId,
           routedAttemptId: chosen.attemptId,
@@ -3533,33 +3533,33 @@ export class TimingService {
       if (!known) {
         return timingError(
           TimingErrorCode.NUMBER_UNKNOWN,
-          'No enrollment of this event carries the committed number.',
+          'В мероприятии нет участника с таким номером.',
           { startNumber },
         );
       }
       return timingError(
         TimingErrorCode.ATTEMPT_CLOSED,
-        'The participant has no running attempt: it has not started or is closed.',
+        'У участника нет идущей попытки: она не начата или завершена.',
         { startNumber, reason: 'NOT_RUNNING' },
       );
     }
     if (reason === 'EXCLUDED') {
       return timingError(
         TimingErrorCode.EXCLUDED_PARTICIPANT,
-        'The participant is excluded from the running attempt.',
+        'Участник исключён из идущей попытки.',
         { startNumber, reason },
       );
     }
     if (reason === 'ALREADY_N') {
       return timingError(
         TimingErrorCode.ALREADY_N_PASSES,
-        'The participant already holds N passes.',
+        'У участника уже есть все отметки.',
         { startNumber, reason },
       );
     }
     return timingError(
       TimingErrorCode.ATTEMPT_CLOSED,
-      'The participant has no running attempt: it has not started or is closed.',
+      'У участника нет идущей попытки: она не начата или завершена.',
       { startNumber, reason },
     );
   }
@@ -3864,7 +3864,7 @@ export class TimingService {
     if (race === undefined) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'The race was not found on this event.',
+        'Гонка не найдена в мероприятии.',
         { eventId, classCompetitionId },
       );
     }
@@ -3884,7 +3884,7 @@ export class TimingService {
     if (attempts.some((attempt) => attempt.status === 'RUNNING')) {
       throw timingError(
         TimingErrorCode.ATTEMPT_RUNNING,
-        'The heat is already running.',
+        'Заезд уже идёт.',
         {
           classCompetitionId: dto.classCompetitionId,
           stageId: dto.stageId,
@@ -3899,7 +3899,7 @@ export class TimingService {
     ) {
       throw timingError(
         TimingErrorCode.ATTEMPT_CLOSED,
-        'The heat attempt is already closed.',
+        'Попытка заезда уже завершена.',
         {
           classCompetitionId: dto.classCompetitionId,
           stageId: dto.stageId,
@@ -3917,7 +3917,7 @@ export class TimingService {
   ): Promise<EventContext> {
     const event = await this.repository.findEvent(eventId);
     if (event === null) {
-      throw timingError(TimingErrorCode.NOT_FOUND, 'Event not found.', {
+      throw timingError(TimingErrorCode.NOT_FOUND, 'Мероприятие не найдено.', {
         eventId,
       });
     }
@@ -3989,7 +3989,7 @@ export class TimingService {
     if (start === undefined) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'The protocol start is not part of this event.',
+        'Такого старта нет в мероприятии.',
         { startId: group.startId },
       );
     }
@@ -4138,7 +4138,7 @@ export class TimingService {
     if (userId === null) {
       throw timingError(
         TimingErrorCode.ROLE_REQUIRED,
-        'The timing actor has no user record.',
+        'Пользователь хронометража не найден.',
       );
     }
     return userId;
@@ -4187,7 +4187,7 @@ export class TimingService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'This workstation does not hold capture.',
+        'Захват хронометража удерживает другая станция.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -4203,7 +4203,7 @@ export class TimingService {
     if (epoch === null) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'This workstation has no open clock epoch on the attempt.',
+        'На этой станции нет открытого отсчёта. Обновите страницу.',
         {
           attemptId: dto.attemptId,
           workstationInstanceId: dto.workstationInstanceId,
@@ -4213,7 +4213,7 @@ export class TimingService {
     if (epoch.id !== dto.clockEpochId) {
       throw timingError(
         TimingErrorCode.INVALID_STATE,
-        'The clock epoch is not the open epoch of this workstation.',
+        'Отсчёт устарел. Обновите страницу.',
         { clockEpochId: dto.clockEpochId, openEpochId: epoch.id },
       );
     }
@@ -4746,7 +4746,7 @@ function assertCaptureEligible(
   if (participant.excludedReason !== null) {
     throw timingError(
       TimingErrorCode.EXCLUDED_PARTICIPANT,
-      'The participant is excluded from this attempt.',
+      'Участник исключён из этой попытки.',
       {
         enrollmentId: participant.enrollmentId,
         excludedReason: participant.excludedReason,
@@ -4803,7 +4803,7 @@ function participantPublication(
   if (splits.length !== participant.requiredLaps) {
     throw timingError(
       TimingErrorCode.INVALID_STATE,
-      'A published participant must hold exactly N passes.',
+      'У публикуемого участника должно быть ровно N отметок.',
       {
         enrollmentId: participant.enrollmentId,
         passCount: splits.length,
@@ -4831,7 +4831,7 @@ function heatAttemptTarget(attempt: TimingAttemptRow): {
   ) {
     throw timingError(
       TimingErrorCode.INVALID_STATE,
-      'A heat attempt must name its race, stage and heat.',
+      'У попытки заезда должны быть указаны гонка, этап и заезд.',
       { attemptId: attempt.id, attemptKind: attempt.attemptKind },
     );
   }
@@ -5072,7 +5072,7 @@ function normalizeWorkstationInstanceId(value: string): string {
   if (normalized.length === 0) {
     throw timingError(
       TimingErrorCode.INVALID_STATE,
-      'The workstation instance id is blank.',
+      'Не указан идентификатор рабочей станции.',
     );
   }
   return normalized;
@@ -5084,7 +5084,7 @@ function captureHeldError(
 ): TimingDomainError {
   return timingError(
     TimingErrorCode.CAPTURE_HELD,
-    'Another workstation holds capture for this event.',
+    'Захват хронометража удерживает другая станция.',
     {
       holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
       holderUserId: lock?.heldByUserId ?? null,
@@ -5185,7 +5185,7 @@ function toPublishedResultView(
 ): TimingPublishedResultView {
   if (row.enrollmentId === null || row.outcome === null) {
     throw new Error(
-      'A timing attempt published a result without an enrollment or an outcome.',
+      'Попытка хронометража опубликовала результат без участника или исхода.',
     );
   }
   return {

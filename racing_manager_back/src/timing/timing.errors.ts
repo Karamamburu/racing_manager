@@ -48,7 +48,7 @@ export const TimingErrorCode = {
   ATTEMPT_STARTED_AFTER_CAPTURE: 'ATTEMPT_STARTED_AFTER_CAPTURE',
   /** The split is not the workstation's newest capture-side action. */
   SPLIT_UNDO_NOT_LAST: 'SPLIT_UNDO_NOT_LAST',
-  /** The participant is excluded from this attempt. */
+  /** Участник исключён из этой попытки. */
   EXCLUDED_PARTICIPANT: 'EXCLUDED_PARTICIPANT',
   /** The participant already holds N passes, so no further pass may exist. */
   ALREADY_N_PASSES: 'ALREADY_N_PASSES',

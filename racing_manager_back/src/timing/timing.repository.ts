@@ -2954,7 +2954,7 @@ export class TimingRepository {
       select: RESULT_SELECT,
     });
     if (saved === null) {
-      throw new Error('Timing result publication did not persist.');
+      throw new Error('Не удалось сохранить результат. Повторите завершение.');
     }
     return toResultRow(saved);
   }

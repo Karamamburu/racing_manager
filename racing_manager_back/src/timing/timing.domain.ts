@@ -88,7 +88,7 @@ function toInstantMs(value: string | Date): number {
   if (!Number.isFinite(instantMs)) {
     throw timingError(
       TimingErrorCode.INVALID_STATE,
-      'Official instant is not a valid date.',
+      'Некорректное официальное время.',
       { value: value instanceof Date ? value.toISOString() : value },
     );
   }
@@ -123,7 +123,7 @@ export function assertWithinBounds(
   if (elapsedMs <= 0 || elapsedMs > maxTotalMs) {
     throw timingError(
       TimingErrorCode.OUT_OF_BOUNDS,
-      'Official pass instant must be later than the attempt start and within 24 hours.',
+      'Официальное время отметки должно быть позже старта и не больше 24 часов.',
       { elapsedMs, maxTotalMs },
     );
   }
@@ -180,7 +180,7 @@ export function computeSplits(
     if (lapTimeMs <= 0 || cumulativeMs > TIMING_MAX_TOTAL_MS) {
       throw timingError(
         TimingErrorCode.OUT_OF_BOUNDS,
-        'Lap split must be positive and the total must stay within 24 hours.',
+        'Время круга должно быть положительным, а итог — не больше 24 часов.',
         { passId: pass.passId, lapNumber, lapTimeMs, cumulativeMs },
       );
     }
@@ -361,7 +361,7 @@ export function normalizeReason(reason: string | null | undefined): string {
   if (normalized.length === 0) {
     throw timingError(
       TimingErrorCode.REASON_REQUIRED,
-      'A reason is required for this timing change.',
+      'Укажите причину изменения.',
     );
   }
   return normalized;
@@ -375,7 +375,7 @@ export function assertCanAddPass(
   if (passCount >= requiredLaps) {
     throw timingError(
       TimingErrorCode.ALREADY_N_PASSES,
-      'The participant already holds N passes.',
+      'У участника уже есть все отметки.',
       { passCount, requiredLaps },
     );
   }

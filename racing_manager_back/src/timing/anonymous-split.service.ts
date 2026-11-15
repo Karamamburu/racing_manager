@@ -126,7 +126,7 @@ export class AnonymousSplitService {
     if (row === undefined) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Anonymous split not found in the queue.',
+        'Неразмеченный сплит не найден в очереди.',
         { splitId },
       );
     }
@@ -177,7 +177,7 @@ export class AnonymousSplitService {
     if (split.attempt.status !== 'RUNNING') {
       throw timingError(
         TimingErrorCode.ATTEMPT_CLOSED,
-        'An anonymous split is assigned only while its attempt runs.',
+        'Неразмеченный сплит можно назначить только в идущей попытке.',
         { attemptId: split.attempt.id, status: split.attempt.status },
       );
     }
@@ -185,7 +185,7 @@ export class AnonymousSplitService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'This workstation does not hold capture.',
+        'Захват хронометража удерживает другая станция.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -218,7 +218,7 @@ export class AnonymousSplitService {
         if (receipt !== null) {
           throw timingError(
             TimingErrorCode.CONFLICT,
-            'This device sequence already has a receipt on the attempt.',
+            'Эта последовательность уже использована в попытке.',
             {
               attemptId: split.attempt.id,
               workstationInstanceId: dto.workstationInstanceId,
@@ -234,7 +234,7 @@ export class AnonymousSplitService {
         if (current.attempt.status !== 'RUNNING') {
           throw timingError(
             TimingErrorCode.ATTEMPT_CLOSED,
-            'An anonymous split is assigned only while its attempt runs.',
+            'Неразмеченный сплит можно назначить только в идущей попытке.',
             { attemptId: current.attempt.id, status: current.attempt.status },
           );
         }
@@ -250,7 +250,7 @@ export class AnonymousSplitService {
         if (participant.excludedReason !== null) {
           throw timingError(
             TimingErrorCode.EXCLUDED_PARTICIPANT,
-            'The participant is excluded from this attempt.',
+            'Участник исключён из этой попытки.',
             {
               attemptId: current.attempt.id,
               enrollmentId: participant.enrollmentId,
@@ -419,14 +419,14 @@ export class AnonymousSplitService {
     if (split === null || split.eventId !== eventId) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Anonymous split not found.',
+        'Неразмеченный сплит не найден.',
         { splitId },
       );
     }
     if (split.state !== 'QUEUED') {
       throw timingError(
         TimingErrorCode.SPLIT_ALREADY_RESOLVED,
-        'This split is already resolved.',
+        'Сплит уже обработан.',
         { splitId, state: split.state },
       );
     }
@@ -437,7 +437,7 @@ export class AnonymousSplitService {
     ) {
       throw timingError(
         TimingErrorCode.SPLIT_UNDO_NOT_LAST,
-        'This split is not the workstation last capture action.',
+        'Можно отменить только последнюю отметку этой станции.',
         { splitId },
       );
     }
@@ -445,7 +445,7 @@ export class AnonymousSplitService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'This workstation does not hold capture.',
+        'Захват хронометража удерживает другая станция.',
         { workstationInstanceId: dto.workstationInstanceId },
       );
     }
@@ -461,7 +461,7 @@ export class AnonymousSplitService {
       if (receipt === null || receipt.status !== 'APPLIED') {
         throw timingError(
           TimingErrorCode.SPLIT_UNDO_NOT_LAST,
-          'This split is not the workstation last capture action.',
+          'Можно отменить только последнюю отметку этой станции.',
           { splitId },
         );
       }
@@ -484,7 +484,7 @@ export class AnonymousSplitService {
       ) {
         throw timingError(
           TimingErrorCode.SPLIT_UNDO_NOT_LAST,
-          'This split is not the workstation last capture action.',
+          'Можно отменить только последнюю отметку этой станции.',
           { splitId },
         );
       }
@@ -498,7 +498,7 @@ export class AnonymousSplitService {
       if (updated === null) {
         throw timingError(
           TimingErrorCode.SPLIT_ALREADY_RESOLVED,
-          'This split is already resolved.',
+          'Сплит уже обработан.',
           { splitId },
         );
       }
@@ -543,7 +543,7 @@ export class AnonymousSplitService {
       if (updated === null) {
         throw timingError(
           TimingErrorCode.SPLIT_ALREADY_RESOLVED,
-          'This split is already resolved.',
+          'Сплит уже обработан.',
           { splitId: split.splitId },
         );
       }
@@ -588,14 +588,14 @@ export class AnonymousSplitService {
     if (split.eventId !== eventId) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Anonymous split not found.',
+        'Неразмеченный сплит не найден.',
         { splitId: split.splitId },
       );
     }
     if (split.state !== 'QUEUED') {
       throw timingError(
         TimingErrorCode.SPLIT_ALREADY_RESOLVED,
-        'This split is already resolved.',
+        'Сплит уже обработан.',
         { splitId: split.splitId, state: split.state },
       );
     }
@@ -603,7 +603,7 @@ export class AnonymousSplitService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'This workstation does not hold capture.',
+        'Захват хронометража удерживает другая станция.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -638,7 +638,7 @@ export class AnonymousSplitService {
         );
         throw timingError(
           TimingErrorCode.NUMBER_UNKNOWN,
-          'No registration of this event carries the number.',
+          'В мероприятии нет заявки с таким номером.',
           { startNumber: dto.startNumber },
         );
       }
@@ -651,7 +651,7 @@ export class AnonymousSplitService {
         );
         throw timingError(
           TimingErrorCode.NUMBER_DUPLICATE,
-          'Two registrations of this event carry the same number.',
+          'В мероприятии две заявки с одинаковым номером. Исправьте номера.',
           {
             startNumber: dto.startNumber,
             registrations: registrations.map((row) => ({
@@ -681,7 +681,7 @@ export class AnonymousSplitService {
         );
         throw timingError(
           TimingErrorCode.NOT_FOUND,
-          'The enrollment is not a frozen participant of this split.',
+          'Участник не входит в состав ни одной попытки-кандидата.',
           { splitId: split.splitId, enrollmentId: dto.enrollmentId },
         );
       }
@@ -690,7 +690,7 @@ export class AnonymousSplitService {
     } else {
       throw timingError(
         TimingErrorCode.NUMBER_REQUIRED,
-        'An assignment requires a start number or an enrollment.',
+        'Для назначения укажите номер участника.',
         { splitId: split.splitId },
       );
     }
@@ -797,7 +797,7 @@ export class AnonymousSplitService {
       );
       throw timingError(
         TimingErrorCode.SPLIT_CANDIDATE_UNAVAILABLE,
-        'No candidate attempt can receive this split.',
+        'Ни одна попытка не может принять этот сплит.',
         { splitId: split.splitId, candidates: failures },
       );
     }
@@ -813,7 +813,7 @@ export class AnonymousSplitService {
       if (dto.chosenAttemptId !== undefined) {
         throw timingError(
           TimingErrorCode.SPLIT_CHOICE_INVALID,
-          'The chosen attempt does not qualify for this split.',
+          'Выбранная попытка не подходит для этого сплита.',
           { splitId: split.splitId, chosenAttemptId: dto.chosenAttemptId },
         );
       }
@@ -825,7 +825,7 @@ export class AnonymousSplitService {
       );
       throw timingError(
         TimingErrorCode.SPLIT_CHOICE_REQUIRED,
-        'More than one candidate attempt qualifies; choose one.',
+        'Номер подходит нескольким попыткам. Выберите одну.',
         {
           splitId: split.splitId,
           candidates: qualifying.map((candidate) => ({
@@ -847,7 +847,7 @@ export class AnonymousSplitService {
     if (officialElapsedMs <= 0) {
       throw timingError(
         TimingErrorCode.ATTEMPT_STARTED_AFTER_CAPTURE,
-        'The resolved attempt started at or after the split was captured.',
+        'Попытка началась позже этой отметки. Сплит нельзя назначить.',
         { splitId: split.splitId, attemptId: chosen.attemptId },
       );
     }
@@ -858,7 +858,7 @@ export class AnonymousSplitService {
         if (current === null || current.state !== 'QUEUED') {
           throw timingError(
             TimingErrorCode.SPLIT_ALREADY_RESOLVED,
-            'This split is already resolved.',
+            'Сплит уже обработан.',
             { splitId: split.splitId },
           );
         }
@@ -869,7 +869,7 @@ export class AnonymousSplitService {
         if (freshAttempt === null || freshAttempt.status !== 'RUNNING') {
           throw timingError(
             TimingErrorCode.ATTEMPT_CLOSED,
-            'The resolved attempt is not running.',
+            'Попытка уже не идёт.',
             { attemptId: chosen.attemptId },
           );
         }
@@ -936,7 +936,7 @@ export class AnonymousSplitService {
         if (assigned === null) {
           throw timingError(
             TimingErrorCode.SPLIT_ALREADY_RESOLVED,
-            'This split is already resolved.',
+            'Сплит уже обработан.',
             { splitId: split.splitId },
           );
         }
@@ -1025,7 +1025,7 @@ export class AnonymousSplitService {
     if (legacy === null || legacy.status !== 'PENDING') {
       throw timingError(
         TimingErrorCode.SPLIT_ALREADY_RESOLVED,
-        'This split is already resolved.',
+        'Сплит уже обработан.',
         { splitId: split.splitId },
       );
     }
@@ -1090,7 +1090,7 @@ export class AnonymousSplitService {
     if (mark === null) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Anonymous split not found.',
+        'Неразмеченный сплит не найден.',
         { splitId },
       );
     }
@@ -1098,14 +1098,14 @@ export class AnonymousSplitService {
     if (attempt === null || attempt.eventId !== eventId) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'The anonymous split belongs to another event.',
+        'Неразмеченный сплит относится к другому мероприятию.',
         { splitId, attemptId: mark.attemptId },
       );
     }
     if (mark.kind !== 'ANONYMOUS_SPLIT') {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'The addressed mark is not an anonymous split.',
+        'Указанная отметка не является неразмеченным сплитом.',
         { splitId, kind: mark.kind },
       );
     }
@@ -1134,7 +1134,7 @@ export class AnonymousSplitService {
       if (participant === null) {
         throw timingError(
           TimingErrorCode.NOT_FOUND,
-          'The enrollment is not a frozen participant of this attempt.',
+          'Участник не входит в состав этой попытки.',
           { attemptId, enrollmentId: dto.enrollmentId },
         );
       }
@@ -1143,7 +1143,7 @@ export class AnonymousSplitService {
     if (dto.startNumber === undefined) {
       throw timingError(
         TimingErrorCode.NUMBER_REQUIRED,
-        'An assignment requires a start number or an enrollment.',
+        'Для назначения укажите номер участника.',
         { attemptId },
       );
     }
@@ -1163,13 +1163,13 @@ export class AnonymousSplitService {
     if (!known) {
       throw timingError(
         TimingErrorCode.NUMBER_UNKNOWN,
-        'No enrollment of this event carries the committed number.',
+        'В мероприятии нет участника с таким номером.',
         { startNumber: dto.startNumber },
       );
     }
     throw timingError(
       TimingErrorCode.NOT_FOUND,
-      'No frozen participant of this attempt carries the number.',
+      'В этой попытке нет участника с таким номером.',
       { attemptId, startNumber: dto.startNumber },
     );
   }
@@ -1263,7 +1263,7 @@ export class AnonymousSplitService {
     if (userId === null) {
       throw timingError(
         TimingErrorCode.ROLE_REQUIRED,
-        'The timing actor has no user record.',
+        'Пользователь хронометража не найден.',
       );
     }
     return userId;
@@ -1415,7 +1415,7 @@ function splitResolvedError(
 ): TimingDomainError {
   return timingError(
     TimingErrorCode.INVALID_STATE,
-    'The anonymous split is no longer queued: it was assigned, undone or cancelled.',
+    'Неразмеченный сплит уже обработан: назначен, отменён или снят.',
     { status },
   );
 }
