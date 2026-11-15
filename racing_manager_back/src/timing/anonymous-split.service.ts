@@ -185,7 +185,7 @@ export class AnonymousSplitService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'Захват хронометража удерживает другая станция.',
+        'Захват хронометража удерживает другое устройство.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -437,7 +437,7 @@ export class AnonymousSplitService {
     ) {
       throw timingError(
         TimingErrorCode.SPLIT_UNDO_NOT_LAST,
-        'Можно отменить только последнюю отметку этой станции.',
+        'Можно отменить только последнюю отметку этого устройства.',
         { splitId },
       );
     }
@@ -445,7 +445,7 @@ export class AnonymousSplitService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'Захват хронометража удерживает другая станция.',
+        'Захват хронометража удерживает другое устройство.',
         { workstationInstanceId: dto.workstationInstanceId },
       );
     }
@@ -461,7 +461,7 @@ export class AnonymousSplitService {
       if (receipt === null || receipt.status !== 'APPLIED') {
         throw timingError(
           TimingErrorCode.SPLIT_UNDO_NOT_LAST,
-          'Можно отменить только последнюю отметку этой станции.',
+          'Можно отменить только последнюю отметку этого устройства.',
           { splitId },
         );
       }
@@ -484,7 +484,7 @@ export class AnonymousSplitService {
       ) {
         throw timingError(
           TimingErrorCode.SPLIT_UNDO_NOT_LAST,
-          'Можно отменить только последнюю отметку этой станции.',
+          'Можно отменить только последнюю отметку этого устройства.',
           { splitId },
         );
       }
@@ -603,7 +603,7 @@ export class AnonymousSplitService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'Захват хронометража удерживает другая станция.',
+        'Захват хронометража удерживает другое устройство.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -797,7 +797,7 @@ export class AnonymousSplitService {
       );
       throw timingError(
         TimingErrorCode.SPLIT_CANDIDATE_UNAVAILABLE,
-        'Ни одна попытка не может принять эту отсечку.',
+        'Ни одна категория не может принять эту отсечку.',
         { splitId: split.splitId, candidates: failures },
       );
     }

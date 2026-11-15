@@ -188,7 +188,7 @@ const HEAT_START_REFUSAL_MESSAGES: Partial<Record<TimingErrorCode, string>> = {
   [TimingErrorCode.ATTEMPT_CLOSED]:
     'Заезд уже закрыт. Новый старт возможен только после отмены.',
   [TimingErrorCode.CAPTURE_NOT_HELD]:
-    'Это рабочее место не удерживает захват хронометража.',
+    'Это устройство не удерживает захват хронометража.',
 };
 
 /** The user-facing reason of a refused Start press, keyed by domain code. */
@@ -203,7 +203,7 @@ const START_REFUSAL_MESSAGES: Partial<Record<TimingErrorCode, string>> = {
   [TimingErrorCode.ATTEMPT_CLOSED]:
     'Забег этой категории уже закрыт. Новый старт возможен только после отмены.',
   [TimingErrorCode.CAPTURE_NOT_HELD]:
-    'Это рабочее место не удерживает захват хронометража.',
+    'Это устройство не удерживает захват хронометража.',
 };
 
 /** A block's reason when a refusal has no product message; unreachable today. */
@@ -712,7 +712,7 @@ export class TimingService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'Захват хронометража удерживает другая станция.',
+        'Захват хронометража удерживает другое устройство.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -882,7 +882,7 @@ export class TimingService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'Захват хронометража удерживает другая станция.',
+        'Захват хронометража удерживает другое устройство.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -1041,7 +1041,7 @@ export class TimingService {
       if (current.heldByUserId !== actorUserId) {
         throw timingError(
           TimingErrorCode.CAPTURE_NOT_HELD,
-          'Передать захват может только станция, которая его удерживает.',
+          'Передать захват может только устройство, которое его удерживает.',
           {
             workstationInstanceId: targetWorkstationInstanceId,
             holderWorkstationInstanceId: current.workstationInstanceId,
@@ -1452,7 +1452,7 @@ export class TimingService {
       if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
         throw timingError(
           TimingErrorCode.CAPTURE_NOT_HELD,
-          'Захват хронометража удерживает другая станция.',
+          'Захват хронометража удерживает другое устройство.',
           {
             workstationInstanceId: dto.workstationInstanceId,
             holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -1467,7 +1467,7 @@ export class TimingService {
       ) {
         throw timingError(
           TimingErrorCode.CAPTURE_NOT_HELD,
-          'На этой станции нет открытого отсчёта. Обновите страницу.',
+          'На этом устройстве нет открытого отсчёта. Обновите страницу.',
           {
             clockEpochId: dto.clockEpochId,
             workstationInstanceId: dto.workstationInstanceId,
@@ -1651,7 +1651,7 @@ export class TimingService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'Захват хронометража удерживает другая станция.',
+        'Захват хронометража удерживает другое устройство.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -1864,7 +1864,7 @@ export class TimingService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'Захват хронометража удерживает другая станция.',
+        'Захват хронометража удерживает другое устройство.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -1905,7 +1905,7 @@ export class TimingService {
         if (target === null) {
           throw timingError(
             TimingErrorCode.INVALID_STATE,
-            'На этой станции нет отметки для отмены.',
+            'На этом устройстве нет отметки для отмены.',
             {
               attemptId,
               workstationInstanceId: dto.workstationInstanceId,
@@ -2195,7 +2195,7 @@ export class TimingService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'Захват хронометража удерживает другая станция.',
+        'Захват хронометража удерживает другое устройство.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -2441,7 +2441,7 @@ export class TimingService {
     }
     throw timingError(
       TimingErrorCode.UNCONFIRMED_MUTATIONS,
-      'На станции есть отметки без подтверждения. Дождитесь синхронизации.',
+      'На устройстве есть отметки без подтверждения. Дождитесь синхронизации.',
       {
         workstationInstanceId,
         attemptIds: gaps.map((gap) => gap.attemptId),
@@ -3069,7 +3069,7 @@ export class TimingService {
     if (refusal === TimingErrorCode.UNCONFIRMED_MUTATIONS) {
       throw timingError(
         TimingErrorCode.UNCONFIRMED_MUTATIONS,
-        'Есть отметки рабочей станции без подтверждения: обновите страницу и повторите завершение.',
+        'Есть отметки устройства без подтверждения: обновите страницу и повторите завершение.',
         {
           attemptId: attempt.id,
           missingSequences: coverage.missingSequences,
@@ -3290,7 +3290,7 @@ export class TimingService {
     ) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'Захват хронометража удерживает другая рабочая станция.',
+        'Захват хронометража удерживает другое устройство.',
         {
           workstationInstanceId: input.workstationInstanceId,
           holderWorkstationInstanceId: lock.workstationInstanceId,
@@ -4219,7 +4219,7 @@ export class TimingService {
     if (lock?.workstationInstanceId !== dto.workstationInstanceId) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'Захват хронометража удерживает другая станция.',
+        'Захват хронометража удерживает другое устройство.',
         {
           workstationInstanceId: dto.workstationInstanceId,
           holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
@@ -4235,7 +4235,7 @@ export class TimingService {
     if (epoch === null) {
       throw timingError(
         TimingErrorCode.CAPTURE_NOT_HELD,
-        'На этой станции нет открытого отсчёта. Обновите страницу.',
+        'На этом устройстве нет открытого отсчёта. Обновите страницу.',
         {
           attemptId: dto.attemptId,
           workstationInstanceId: dto.workstationInstanceId,
@@ -5125,7 +5125,7 @@ function normalizeWorkstationInstanceId(value: string): string {
   if (normalized.length === 0) {
     throw timingError(
       TimingErrorCode.INVALID_STATE,
-      'Не указан идентификатор рабочей станции.',
+      'Не указан идентификатор устройства.',
     );
   }
   return normalized;
@@ -5137,7 +5137,7 @@ function captureHeldError(
 ): TimingDomainError {
   return timingError(
     TimingErrorCode.CAPTURE_HELD,
-    'Захват хронометража удерживает другая станция.',
+    'Захват хронометража удерживает другое устройство.',
     {
       holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
       holderUserId: lock?.heldByUserId ?? null,

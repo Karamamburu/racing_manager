@@ -9,7 +9,7 @@ const FIELD_LABELS: Record<string, string> = {
   clientCapturedAt: 'Время нажатия',
   clientElapsedMs: 'Прошедшее время',
   clockEpochId: 'Отсчёт',
-  workstationInstanceId: 'Рабочая станция',
+  workstationInstanceId: 'Устройство',
   deviceSequence: 'Последовательность',
   lastIssuedSequence: 'Последняя последовательность',
   reason: 'Причина',
@@ -24,7 +24,7 @@ const FIELD_LABELS: Record<string, string> = {
   stageId: 'Этап',
   heatNumber: 'Заезд',
   pendingFinishId: 'Непривязанный финиш',
-  toWorkstationInstanceId: 'Станция назначения',
+  toWorkstationInstanceId: 'Устройство назначения',
   lockToken: 'Захват',
 };
 

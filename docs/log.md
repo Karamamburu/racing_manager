@@ -213,3 +213,7 @@ The timing page header now carries a «К мероприятию» action back t
 ## 2026-11-15 — gender tint on timing cards
 
 Category and heat cards are now tinted by gender: light blue for men and light pink for women. The tint is a display-only class on the existing card, so it changes no state, no capture rule and no API.
+
+## 2026-11-15 — capture holder is a device
+
+Every user-facing mention of the capture holder now says «устройство» rather than «станция»: the holder tag, the read-only notice, transfer refusals, validation labels and the API messages shown on the page. The workstation id, routes and stored columns keep their `workstation` naming.
