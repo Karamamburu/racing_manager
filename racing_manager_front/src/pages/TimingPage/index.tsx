@@ -259,6 +259,7 @@ export function TimingPage() {
   // block that supplied the attempt, so a pass names its participant without a
   // second request per row.
   const [recordAttemptId, setRecordAttemptId] = useState<string | null>(null);
+  const [recordTitle, setRecordTitle] = useState('Запись');
   const [recordParticipantNames, setRecordParticipantNames] = useState<
     Record<string, string>
   >({});
@@ -327,6 +328,9 @@ export function TimingPage() {
   const openRecord = (block: TimingCategoryBlockView) => {
     const attemptId = block.attemptId;
     if (attemptId === null) return;
+    setRecordTitle(
+      block.kind === 'HEAT' ? 'Запись заезда' : 'Запись категории',
+    );
     setRecordParticipantNames(
       Object.fromEntries(
         block.participants.map((participant) => [
@@ -915,6 +919,7 @@ export function TimingPage() {
 
         <AttemptRecordDrawer
           open={recordAttemptId !== null}
+          title={recordTitle}
           eventId={surface.eventId}
           attemptId={recordAttemptId}
           participantNames={recordParticipantNames}

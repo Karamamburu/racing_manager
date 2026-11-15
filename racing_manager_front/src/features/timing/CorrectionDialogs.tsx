@@ -50,8 +50,8 @@ const MODE_TITLES: Record<CorrectionMode, string> = {
   CANCEL_PASS: 'Отмена отсечки',
   REBIND_PASS: 'Перепривязка отсечки',
   CANCEL_PENDING: 'Отмена непривязанного финиша',
-  FORCE_COMPLETE: 'Принудительное завершение попытки',
-  CANCEL_ATTEMPT: 'Отмена попытки',
+  FORCE_COMPLETE: 'Принудительное завершение хронометража',
+  CANCEL_ATTEMPT: 'Отмена хронометража',
 };
 
 const REASON_REQUIRED = 'Укажите причину';

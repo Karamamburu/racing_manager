@@ -111,6 +111,7 @@ function drawerProps(
 ): AttemptRecordDrawerProps {
   return {
     open: true,
+    title: 'Запись категории',
     eventId: 'event-1',
     attemptId: 'attempt-1',
     participantNames: PARTICIPANT_NAMES,
@@ -190,19 +191,19 @@ describe('AttemptRecordDrawer states', () => {
     renderDrawer({ attemptId: null, open: true });
 
     expect(timingService.getAttemptRecord).not.toHaveBeenCalled();
-    expect(screen.getByText('Запись попытки пуста')).not.toBeNull();
+    expect(screen.getByText('Запись пуста')).not.toBeNull();
   });
 
   it('shows the API message when the record cannot be read', async () => {
     vi.mocked(timingService.getAttemptRecord).mockRejectedValue(
-      new Error('Запись попытки недоступна'),
+      new Error('Запись недоступна'),
     );
 
     renderDrawer();
 
-    expect(await screen.findByText('Запись попытки недоступна')).not.toBeNull();
+    expect(await screen.findByText('Запись недоступна')).not.toBeNull();
     expect(
-      screen.getByText('Не удалось загрузить запись попытки'),
+      screen.getByText('Не удалось загрузить запись'),
     ).not.toBeNull();
   });
 });
@@ -299,10 +300,10 @@ describe('AttemptRecordDrawer record content', () => {
 
     renderDrawer({ canAdminister: true, canOperate: true });
 
-    expect(await screen.findByText('Попытка отменена')).not.toBeNull();
-    expect(screen.getByText('Попытка закрыта')).not.toBeNull();
+    expect(await screen.findByText('Запись отменена')).not.toBeNull();
+    expect(screen.getByText('Запись закрыта')).not.toBeNull();
     expect(screen.getByText(/не являются официальными/)).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'Отменить попытку' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Отменить хронометраж' })).toBeNull();
     expect(
       screen.queryByRole('button', { name: 'Скорректировать старт' }),
     ).toBeNull();
@@ -314,7 +315,7 @@ describe('AttemptRecordDrawer gating', () => {
     renderDrawer({ canAdminister: false, canOperate: true });
 
     expect(
-      await screen.findByRole('button', { name: 'Завершить попытку' }),
+      await screen.findByRole('button', { name: 'Завершить хронометраж' }),
     ).not.toBeNull();
     expect(
       screen.getByRole('button', { name: 'Отменить последнюю отметку' }),
@@ -325,7 +326,7 @@ describe('AttemptRecordDrawer gating', () => {
     expect(
       screen.queryByRole('button', { name: 'Завершить принудительно' }),
     ).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Отменить попытку' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Отменить хронометраж' })).toBeNull();
     expect(
       screen.queryByRole('button', { name: /Скорректировать отсечку/ }),
     ).toBeNull();
@@ -347,7 +348,7 @@ describe('AttemptRecordDrawer gating', () => {
     expect(
       screen.getByRole('button', { name: 'Завершить принудительно' }),
     ).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Отменить попытку' })).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Отменить хронометраж' })).not.toBeNull();
     expect(
       screen.getByRole('button', { name: `Скорректировать отсечку ${clock}` }),
     ).not.toBeNull();
@@ -379,7 +380,7 @@ describe('AttemptRecordDrawer completion and undo', () => {
     const { props } = renderDrawer({ canOperate: true });
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Завершить попытку' }),
+      await screen.findByRole('button', { name: 'Завершить хронометраж' }),
     );
 
     await waitFor(() => {
@@ -421,7 +422,7 @@ describe('AttemptRecordDrawer completion and undo', () => {
     const { props } = renderDrawer({ canOperate: true });
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Завершить попытку' }),
+      await screen.findByRole('button', { name: 'Завершить хронометраж' }),
     );
 
     await waitFor(() => {

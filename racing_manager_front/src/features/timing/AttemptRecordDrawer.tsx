@@ -73,6 +73,8 @@ interface CorrectionState {
 
 export interface AttemptRecordDrawerProps {
   open: boolean;
+  /** The record title for the block that opened it, for example «Запись категории». */
+  title: string;
   eventId: string;
   attemptId: string | null;
   /** Enrollment id to a human label; a missing entry shows the id instead. */
@@ -118,6 +120,7 @@ function formatValues(values: Record<string, unknown> | null): string {
 
 export function AttemptRecordDrawer({
   open,
+  title,
   eventId,
   attemptId,
   participantNames,
@@ -406,7 +409,7 @@ export function AttemptRecordDrawer({
 
   return (
     <Drawer
-      title="Запись попытки"
+      title={title}
       width={880}
       open={open}
       onClose={onClose}
@@ -417,7 +420,7 @@ export function AttemptRecordDrawer({
         <Alert
           type="error"
           showIcon
-          message="Не удалось загрузить запись попытки"
+          message="Не удалось загрузить запись"
           description={describeTimingError(recordQuery.error)}
           action={
             <Button size="small" onClick={() => void recordQuery.refetch()}>
@@ -428,7 +431,7 @@ export function AttemptRecordDrawer({
       ) : null}
 
       {!recordQuery.isLoading && !recordQuery.isError && record === undefined ? (
-        <Empty description="Запись попытки пуста" />
+        <Empty description="Запись пуста" />
       ) : null}
 
       {record === undefined ? null : (
@@ -441,7 +444,7 @@ export function AttemptRecordDrawer({
               Официальный старт: {formatTimingClock(record.officialStartedAt)}
             </Typography.Text>
             <Typography.Text type="secondary">
-              Попытка: {record.attemptId}
+              ID записи: {record.attemptId}
             </Typography.Text>
           </Space>
 
@@ -449,8 +452,8 @@ export function AttemptRecordDrawer({
             <Alert
               type="warning"
               showIcon
-              message="Попытка отменена"
-              description="Отметки этой попытки не являются официальными: результаты не опубликованы и не влияют на протокол."
+              message="Запись отменена"
+              description="Отметки этой записи не являются официальными: результаты не опубликованы и не влияют на протокол."
             />
           ) : null}
 
@@ -458,7 +461,7 @@ export function AttemptRecordDrawer({
             <Alert
               type="info"
               showIcon
-              message="Попытка закрыта"
+              message="Запись закрыта"
               description="Только для чтения: захват, привязка и отмена отсечек закрыты. Время можно скорректировать, указав причину."
             />
           ) : null}
@@ -474,7 +477,7 @@ export function AttemptRecordDrawer({
                     void runAttemptAction('COMPLETE');
                   }}
                 >
-                  Завершить попытку
+                  Завершить хронометраж
                 </Button>
                 <Button
                   loading={busyAction === 'UNDO'}
@@ -511,7 +514,7 @@ export function AttemptRecordDrawer({
                   disabled={busyAction !== null}
                   onClick={() => setCorrection({ mode: 'CANCEL_ATTEMPT' })}
                 >
-                  Отменить попытку
+                  Отменить хронометраж
                 </Button>
               </>
             ) : null}
@@ -559,7 +562,7 @@ export function AttemptRecordDrawer({
             <Typography.Text strong>Отчёт о закрытии</Typography.Text>
             {record.closureReport === null ? (
               <Typography.Text type="secondary">
-                Попытка ещё не закрыта
+                Запись ещё не закрыта
               </Typography.Text>
             ) : (
               <Space direction="vertical" size={4}>

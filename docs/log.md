@@ -197,3 +197,7 @@ The empty number field now treats Space exactly like Enter: both queue a block-f
 ## 2026-11-15 — judge summary on the timing page
 
 The top block now shows «Ход хронометража»: categories finished/total, participants finished/total, participants on course, blocks ready to complete, outstanding unassigned captures and unbound finishes, and remaining passes. The summary is computed from the loaded surface, adds no request, and excludes race-section duplicates and participants outside timing.
+
+## 2026-11-15 — the timing record is a category record
+
+The attempt record drawer is now titled «Запись категории» for a category block and «Запись заезда» for a heat. Inside the drawer the record itself is called «запись» («Запись отменена», «Запись закрыта», «Запись пуста», «ID записи»), and its closure actions read «Завершить хронометраж» / «Отменить хронометраж». The generic correction dialogs use the same «хронометраж» wording.

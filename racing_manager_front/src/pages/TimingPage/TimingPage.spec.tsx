@@ -52,7 +52,7 @@ vi.mock('../../features/timing/AttemptRecordDrawer', () => ({
     if (!props.open) return null;
     return (
       <div>
-        <p>Запись попытки {props.attemptId}</p>
+        <p>{props.title} {props.attemptId}</p>
         <button type="button" onClick={props.onClose}>
           Закрыть запись
         </button>
@@ -469,7 +469,7 @@ describe('TimingPage', () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /Запись/ }));
-    expect(await screen.findByText('Запись попытки attempt-1')).not.toBeNull();
+    expect(await screen.findByText('Запись категории attempt-1')).not.toBeNull();
     expect(getSurface).toHaveBeenCalledTimes(1);
 
     // A correction in the record still invalidates the surface, so the read
@@ -888,9 +888,10 @@ describe('TimingPage', () => {
     expect(drawerProps.current.at(-1)?.open).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: /Запись/ }));
 
-    expect(await screen.findByText('Запись попытки attempt-1')).not.toBeNull();
+    expect(await screen.findByText('Запись категории attempt-1')).not.toBeNull();
     const drawer = drawerProps.current.at(-1);
     expect(drawer?.open).toBe(true);
+    expect(drawer?.title).toBe('Запись категории');
     expect(drawer?.eventId).toBe('event-1');
     expect(drawer?.attemptId).toBe('attempt-1');
     expect(drawer?.workstationInstanceId).toBe('ws-1');
@@ -940,12 +941,12 @@ describe('TimingPage', () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /Запись/ }));
-    expect(await screen.findByText('Запись попытки attempt-1')).not.toBeNull();
+    expect(await screen.findByText('Запись категории attempt-1')).not.toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Закрыть запись' }));
 
     await waitFor(() => {
-      expect(screen.queryByText('Запись попытки attempt-1')).toBeNull();
+      expect(screen.queryByText('Запись категории attempt-1')).toBeNull();
     });
     expect(drawerProps.current.at(-1)?.open).toBe(false);
     expect(drawerProps.current.at(-1)?.attemptId).toBeNull();
@@ -974,7 +975,7 @@ describe('TimingPage', () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /Запись/ }));
-    expect(await screen.findByText('Запись попытки attempt-1')).not.toBeNull();
+    expect(await screen.findByText('Запись категории attempt-1')).not.toBeNull();
 
     // The attempt is gone from the surface: no newest attempt and no earlier
     // one of the category. The drawer must not keep reading a dropped record.
@@ -982,7 +983,7 @@ describe('TimingPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Обновить' }));
 
     await waitFor(() => {
-      expect(screen.queryByText('Запись попытки attempt-1')).toBeNull();
+      expect(screen.queryByText('Запись категории attempt-1')).toBeNull();
     });
     expect(drawerProps.current.at(-1)?.open).toBe(false);
     expect(drawerProps.current.at(-1)?.attemptId).toBeNull();
