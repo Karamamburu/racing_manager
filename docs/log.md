@@ -157,3 +157,7 @@ A heat closure now publishes one `ClassHeatLapTime` per event lap from the attem
 ## 2026-11-15 — Russian timing errors
 
 All timing domain refusals and timing request-validation messages are now Russian and written for a referee: missing number, wrong attempt, capture holder, closure gates, ambiguous split, sequence conflict, invalid request field. The frontend already displays the API message verbatim; no behavior or error code changed.
+
+## 2026-11-15 — automatic DNS and DNF
+
+Ordinary category completion now publishes `DNS` for a non-excluded participant with no captures and `DNF` for one with some captures but fewer than N; participants at N keep `FINISHED` with time and splits. Ordinary heat completion writes the same outcomes as `ClassHeatTime` rows (`OK`/total, `DNS`, `DNF`), so the stage panel and stage commitment no longer need a manual status for every non-finisher. Forced completion and cancellation keep their previous rules: force publishes only at-N participants, cancellation publishes nothing. No synthetic time or split is written for DNS/DNF.

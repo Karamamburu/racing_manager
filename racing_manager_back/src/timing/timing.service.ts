@@ -364,7 +364,8 @@ type ClosureInput = {
 type ClosurePublication = {
   enrollmentId: string;
   registrationId: string;
-  totalMs: number;
+  outcome: ResultOutcome;
+  totalMs: number | null;
   splits: TimingLapSplit[];
 };
 
@@ -389,7 +390,8 @@ type ClosurePlan = {
 /** One heat time a heat closure publishes: registration and total only. */
 type HeatPublication = {
   registrationId: string;
-  totalMs: number;
+  status: 'OK' | 'DNS' | 'DNF';
+  totalMs: number | null;
   splits: TimingLapSplit[];
 };
 
@@ -2867,6 +2869,7 @@ export class TimingService {
           marks,
           statuses,
           input.status !== 'CANCELLED',
+          input.status === 'COMPLETED',
         );
         const heat = heatAttemptTarget(current);
         const eventLaps = await this.repository.listEventLaps(
@@ -2882,6 +2885,7 @@ export class TimingService {
             stageId: heat.stageId,
             heatNumber: heat.heatNumber,
             registrationId: publication.registrationId,
+            status: publication.status,
             timeMilliseconds: publication.totalMs,
           });
           for (const split of publication.splits) {
@@ -2903,12 +2907,13 @@ export class TimingService {
           marks,
           statuses,
           input.status !== 'CANCELLED',
+          input.status === 'COMPLETED',
         );
         for (const publication of plan.publications) {
           const published = await this.repository.publishResult(tx, {
             enrollmentId: publication.enrollmentId,
             registrationId: publication.registrationId,
-            outcome: 'FINISHED',
+            outcome: publication.outcome,
             timeMilliseconds: publication.totalMs,
             timingSessionId: current.id,
           });
@@ -3041,18 +3046,12 @@ export class TimingService {
     }
     const receipts = await this.repository.listAttemptReceipts(attempt.id, tx);
     const coverage = closureReceiptCoverage(marks, receipts, input);
-    const below = input.requireEveryParticipantAtN
-      ? participants.filter(
-          (participant) =>
-            isGateParticipant(participant, statuses) &&
-            boundPassCount(marks, participant.enrollmentId) !==
-              participant.requiredLaps,
-        )
-      : [];
+    // DNS and DNF are part of the closure itself now: no participant below N
+    // can block it. The remaining gates are pending finishes and receipts.
     const refusal = canComplete({
       pendingFinishCount: pendingFinishes.length,
       unconfirmedMutationCount: coverage.missingSequences.length,
-      participantsBelowRequiredLaps: below.length,
+      participantsBelowRequiredLaps: 0,
     });
     if (refusal === null) {
       return;
@@ -3080,17 +3079,8 @@ export class TimingService {
     }
     throw timingError(
       TimingErrorCode.PARTICIPANTS_BELOW_LAPS,
-      'Не у всех участников есть нужное число отметок: завершение невозможно.',
-      {
-        attemptId: attempt.id,
-        participants: below.map((participant) => ({
-          enrollmentId: participant.enrollmentId,
-          registrationId: participant.registrationId,
-          startNumber: participant.startNumber,
-          passCount: boundPassCount(marks, participant.enrollmentId),
-          requiredLaps: participant.requiredLaps,
-        })),
-      },
+      'Не удалось завершить попытку: проверьте участников.',
+      { attemptId: attempt.id },
     );
   }
 
@@ -3108,6 +3098,7 @@ export class TimingService {
     marks: readonly TimingMarkRow[],
     statuses: ReadonlyMap<string, EnrollmentStatus>,
     publish: boolean,
+    automateMissing: boolean,
   ): Promise<ClosurePlan> {
     const publishedEnrollmentIds: string[] = [];
     const unpublishedEnrollmentIds: string[] = [];
@@ -3126,18 +3117,22 @@ export class TimingService {
       };
     }
 
-    const eligible = new Set(
-      participants
-        .filter(
-          (participant) =>
-            isGateParticipant(participant, statuses) &&
-            boundPassCount(marks, participant.enrollmentId) ===
-              participant.requiredLaps,
-        )
-        .map((participant) => participant.enrollmentId),
-    );
     for (const participant of participants) {
-      if (!eligible.has(participant.enrollmentId)) {
+      if (!isGateParticipant(participant, statuses)) {
+        unpublishedEnrollmentIds.push(participant.enrollmentId);
+        continue;
+      }
+      const passCount = boundPassCount(marks, participant.enrollmentId);
+      // A participant with no capture at all did not start (DNS); one with some
+      // captures but fewer than N did not finish (DNF). Both are published as
+      // result outcomes, not as synthetic times or splits.
+      const outcome: ResultOutcome =
+        passCount === 0
+          ? 'DNS'
+          : passCount < participant.requiredLaps
+            ? 'DNF'
+            : 'FINISHED';
+      if (outcome !== 'FINISHED' && !automateMissing) {
         unpublishedEnrollmentIds.push(participant.enrollmentId);
         continue;
       }
@@ -3153,10 +3148,15 @@ export class TimingService {
         conflictEnrollmentIds.push(participant.enrollmentId);
         continue;
       }
+      const publication =
+        outcome === 'FINISHED'
+          ? participantPublication(attempt, participant, marks)
+          : { totalMs: null, splits: [] };
       publications.push({
         enrollmentId: participant.enrollmentId,
         registrationId: participant.registrationId,
-        ...participantPublication(attempt, participant, marks),
+        outcome,
+        ...publication,
       });
       publishedEnrollmentIds.push(participant.enrollmentId);
     }
@@ -3193,6 +3193,7 @@ export class TimingService {
     marks: readonly TimingMarkRow[],
     statuses: ReadonlyMap<string, EnrollmentStatus>,
     publish: boolean,
+    automateMissing: boolean,
   ): Promise<HeatClosurePlan> {
     const publications: HeatPublication[] = [];
     const publishedRegistrationIds: string[] = [];
@@ -3222,20 +3223,41 @@ export class TimingService {
       ).map((row) => row.registrationId),
     );
     for (const participant of participants) {
-      if (
-        !isGateParticipant(participant, statuses) ||
-        boundPassCount(marks, participant.enrollmentId) !==
-          participant.requiredLaps
-      ) {
+      if (!isGateParticipant(participant, statuses)) {
         continue;
       }
       if (existing.has(participant.registrationId)) {
         conflictRegistrationIds.push(participant.registrationId);
         continue;
       }
+      const passCount = boundPassCount(marks, participant.enrollmentId);
+      if (passCount !== participant.requiredLaps && !automateMissing) {
+        continue;
+      }
+      if (passCount === 0) {
+        publications.push({
+          registrationId: participant.registrationId,
+          status: 'DNS',
+          totalMs: null,
+          splits: [],
+        });
+        publishedRegistrationIds.push(participant.registrationId);
+        continue;
+      }
+      if (passCount < participant.requiredLaps) {
+        publications.push({
+          registrationId: participant.registrationId,
+          status: 'DNF',
+          totalMs: null,
+          splits: [],
+        });
+        publishedRegistrationIds.push(participant.registrationId);
+        continue;
+      }
       const publication = participantPublication(attempt, participant, marks);
       publications.push({
         registrationId: participant.registrationId,
+        status: 'OK',
         totalMs: publication.totalMs,
         splits: publication.splits,
       });

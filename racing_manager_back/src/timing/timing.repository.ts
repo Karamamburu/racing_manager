@@ -375,13 +375,14 @@ export type CreateAttemptInput = {
   participants: TimingParticipantInput[];
 };
 
-/** The one heat-time publication write: total and `OK`, no per-lap row. */
+/** One heat-time publication: an OK total or an automatic DNS/DNF outcome. */
 export type CreateHeatTimeInput = {
   classCompetitionId: string;
   stageId: string;
   heatNumber: number;
   registrationId: string;
-  timeMilliseconds: number;
+  status?: ClassHeatResultStatus;
+  timeMilliseconds: number | null;
   laps?: Array<{ lapNumber: number; timeMilliseconds: number }>;
 };
 
@@ -1159,7 +1160,7 @@ export function buildHeatTimeCreateData(
     heatNumber: input.heatNumber,
     registrationId: input.registrationId,
     timeMilliseconds: input.timeMilliseconds,
-    status: 'OK',
+    status: input.status ?? 'OK',
   };
 }
 

@@ -5663,13 +5663,18 @@ describe('TimingService', () => {
       expect(repository.publishResult).toHaveBeenCalledTimes(1);
     });
 
-    it('refuses ordinary completion while a non-excluded participant is below N', async () => {
+    it('publishes DNS and DNF automatically when a participant is below N', async () => {
       arrangeClosure({
         participants: [
           participantRow({ enrollmentId: 'enrollment-a', requiredLaps: 3 }),
           participantRow({
             enrollmentId: 'enrollment-b',
             startNumber: 11,
+            requiredLaps: 3,
+          }),
+          participantRow({
+            enrollmentId: 'enrollment-c',
+            startNumber: 12,
             requiredLaps: 3,
           }),
         ],
@@ -5682,32 +5687,36 @@ describe('TimingService', () => {
         receipts: receiptRows([1, 2, 3, 4, 5]),
       });
 
-      const refusal = await service
-        .completeAttempt(
-          USER_ID,
-          EVENT_ID,
-          ATTEMPT_ID,
-          completeAttemptDto({ lastIssuedSequence: 5 }),
-        )
-        .catch((error: unknown) => error);
+      const record = await service.completeAttempt(
+        USER_ID,
+        EVENT_ID,
+        ATTEMPT_ID,
+        completeAttemptDto({ lastIssuedSequence: 5 }),
+      );
 
-      expect(refusal).toMatchObject({
-        code: TimingErrorCode.PARTICIPANTS_BELOW_LAPS,
-        details: {
-          attemptId: ATTEMPT_ID,
-          participants: [
-            {
-              enrollmentId: 'enrollment-b',
-              registrationId: 'registration-enrollment-b',
-              startNumber: 11,
-              passCount: 2,
-              requiredLaps: 3,
-            },
-          ],
-        },
-      });
-      expect(repository.publishResult).not.toHaveBeenCalled();
-      expect(repository.updateAttemptStatus).not.toHaveBeenCalled();
+      expect(record.state).toBe('COMPLETED');
+      const published = repository.publishResult.mock.calls.map(
+        (call) => call[1] as PublishResultInput,
+      );
+      expect(published).toEqual([
+        expect.objectContaining({
+          enrollmentId: 'enrollment-a',
+          outcome: 'FINISHED',
+          timeMilliseconds: 90_000,
+        }),
+        expect.objectContaining({
+          enrollmentId: 'enrollment-b',
+          outcome: 'DNF',
+          timeMilliseconds: null,
+        }),
+        expect.objectContaining({
+          enrollmentId: 'enrollment-c',
+          outcome: 'DNS',
+          timeMilliseconds: null,
+        }),
+      ]);
+      expect(repository.replaceResultSplits).toHaveBeenCalledTimes(3);
+      expect(repository.updateAttemptStatus).toHaveBeenCalledTimes(1);
     });
 
     it('force-completes as INCOMPLETE, publishing only the participants at N', async () => {
@@ -6254,6 +6263,7 @@ describe('TimingService', () => {
             stageId: 'stage-1',
             heatNumber: 1,
             registrationId: 'registration-enrollment-a',
+            status: 'OK',
             timeMilliseconds: 90_000,
           },
           {
@@ -6261,6 +6271,7 @@ describe('TimingService', () => {
             stageId: 'stage-1',
             heatNumber: 1,
             registrationId: 'registration-enrollment-b',
+            status: 'OK',
             timeMilliseconds: 120_000,
           },
         ]);
@@ -6312,6 +6323,58 @@ describe('TimingService', () => {
           ],
           conflictRegistrationIds: [],
         });
+      });
+
+      it('publishes DNS and DNF automatically for a completed heat', async () => {
+        const { written } = arrangeHeatClosure({
+          participants: [
+            participantRow({ enrollmentId: 'enrollment-a', requiredLaps: 3 }),
+            participantRow({
+              enrollmentId: 'enrollment-b',
+              startNumber: 11,
+              requiredLaps: 3,
+            }),
+            participantRow({
+              enrollmentId: 'enrollment-c',
+              startNumber: 12,
+              requiredLaps: 3,
+            }),
+          ],
+          marks: [
+            ...passesOf('enrollment-a', [30_000, 60_000, 90_000]),
+            ...passesOf('enrollment-b', [40_000, 80_000], {
+              firstSequence: 4,
+              idPrefix: 'mark-b',
+            }),
+          ],
+          receipts: receiptRows([1, 2, 3, 4, 5]),
+        });
+
+        const record = await service.completeAttempt(
+          USER_ID,
+          EVENT_ID,
+          ATTEMPT_ID,
+          completeAttemptDto({ lastIssuedSequence: 5 }),
+        );
+
+        expect(record.state).toBe('COMPLETED');
+        expect(written).toEqual([
+          expect.objectContaining({
+            registrationId: 'registration-enrollment-a',
+            status: 'OK',
+            timeMilliseconds: 90_000,
+          }),
+          expect.objectContaining({
+            registrationId: 'registration-enrollment-b',
+            status: 'DNF',
+            timeMilliseconds: null,
+          }),
+          expect.objectContaining({
+            registrationId: 'registration-enrollment-c',
+            status: 'DNS',
+            timeMilliseconds: null,
+          }),
+        ]);
       });
 
       it('publishes nothing for a heat with only below-N, withdrawn or excluded participants', async () => {
