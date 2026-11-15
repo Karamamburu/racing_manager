@@ -36,6 +36,7 @@ import type {
   TimingAnonymousSplitView,
   TimingCaptureView,
   TimingCategoryBlockView,
+  TimingCategoryState,
   TimingParticipantTileView,
   TimingStageGroupView,
   TimingStageState,
@@ -56,6 +57,24 @@ const GENDER_LABELS: Record<string, string> = {
   M: 'Мужчины',
   F: 'Женщины',
 };
+
+/** Active categories first, untouched ones next, every closed state last. */
+const CATEGORY_STATE_ORDER: Record<TimingCategoryState, number> = {
+  RUNNING: 0,
+  NOT_STARTED: 1,
+  COMPLETED: 2,
+  INCOMPLETE: 2,
+  CANCELLED: 2,
+};
+
+/**
+ * The protocol category a block belongs to: a category block and every heat
+ * block of its race share the same start, format and gender, so they move as
+ * one unit and keep their stage-header grouping.
+ */
+function blockCategoryKey(block: TimingCategoryBlockView): string {
+  return `${block.startId}:${block.formatId}:${block.gender}`;
+}
 
 /** Stage state as the header names it: formed, not formed, closed (U-12). */
 const STAGE_STATE_LABELS: Record<TimingStageState, string> = {
@@ -587,10 +606,41 @@ export function TimingPage() {
   // stage headers and heat blocks of its own start, format and gender (U-13,
   // U-14, FR-51). A stage header is emitted once, before the first heat block
   // of its race; a race whose stages carry no heat block keeps its headers.
+  // Keep the backend order inside one state, but bring the category the
+  // referee is working on to the top and fold every finished category down.
+  // A category block and its heat blocks move together, so a sorted group
+  // still renders its stage headers before its heats.
+  const groupOrder = new Map<
+    string,
+    { blocks: TimingCategoryBlockView[]; index: number; priority: number }
+  >();
+  surface.categories.forEach((block, index) => {
+    const key = blockCategoryKey(block);
+    const existing = groupOrder.get(key);
+    if (existing === undefined) {
+      groupOrder.set(key, {
+        blocks: [block],
+        index,
+        priority: CATEGORY_STATE_ORDER[block.state],
+      });
+      return;
+    }
+    existing.blocks.push(block);
+    existing.priority = Math.min(
+      existing.priority,
+      CATEGORY_STATE_ORDER[block.state],
+    );
+  });
+  const orderedBlocks = [...groupOrder.values()]
+    .sort(
+      (left, right) =>
+        left.priority - right.priority || left.index - right.index,
+    )
+    .flatMap((group) => group.blocks);
   const renderedRaces = new Set<string>();
   const renderedStageKeys = new Set<string>();
   const surfaceNodes: ReactNode[] = [];
-  for (const block of surface.categories) {
+  for (const block of orderedBlocks) {
     if (block.kind !== 'HEAT') {
       surfaceNodes.push(renderBlock(block));
       continue;

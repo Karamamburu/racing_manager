@@ -1,6 +1,6 @@
 ---
 type: domain
-updated: 2026-11-14
+updated: 2026-11-15
 sources:
   - racing_manager_db/db/migrate_manual_timing_2026_11_13.sql
   - racing_manager_back/prisma/schema.prisma
@@ -36,6 +36,7 @@ Live manual timing of protocol categories: attempt lifecycle, number and tile ca
 - **Closure gate:** gates read only the closing attempt's marks, receipts, splits and participants. A capture refused by the capture-lock or clock-epoch check, and a capture, tile, split assignment, pending bind or quick undo definitively refused after those checks, writes a `REJECTED` receipt so it cannot block closure; a foreign/stale `lastIssuedSequence` is not expanded into missing sequences. A capture-less attempt closes, and an all-excluded attempt closes publishing nothing. An unassigned split, an unbound pending finish and an unconfirmed sequence refuse closure with a Russian message naming the blocker.
 - **Live elapsed:** a running attempt's displayed elapsed value updates at least every 100 ms from the existing epoch anchor, with no network request and no official write; a hidden tab may update less often.
 - **Timing-page blocks:** every category and heat block collapses independently, keeping its header, state tag and actions visible while its body folds away. Participant tiles keep a fixed 4:3 shape, show only the number, name and lap count, and are filled with their state colour, so more tiles fit on screen and the whole card is an easy click target.
+- **Block order:** the page presents category groups as `RUNNING` first, then `NOT_STARTED`, then every closed state (`COMPLETED`, `INCOMPLETE`, `CANCELLED`) last. A category block and its heat blocks move together, the backend order is kept inside one state, and a group's priority is its most active block, so a running heat lifts its multi-stage race to the top and the stage header stays next to its heats.
 - **Per-block collapse:** each displayed protocol block has its own collapse state keyed by gender + category + section/race, expanded by default, page-session only. A block hidden by a filter loses its state and returns expanded; a rendered sibling keeps its state.
 - **Routes:** `POST /events/:eventId/timing/heat-attempts` (`StartHeatAttemptDto`), `POST .../timing/splits/:splitId/assign` (`AssignAnonymousSplitDto.chosenAttemptId` for an ambiguous number), `POST .../timing/splits/:splitId/cancel`, `POST .../timing/splits/:splitId/undo` (`QuickUndoTimingSplitDto`), and `POST .../timing/passes` with `kind: 'ANONYMOUS_SPLIT'` and no `attemptId`. The existing closure/correction routes accept a heat attempt id; the category and heat closure reports add `publishedRegistrationIds`/`conflictRegistrationIds`.
 

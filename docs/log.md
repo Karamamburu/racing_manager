@@ -165,3 +165,7 @@ Ordinary category completion now publishes `DNS` for a non-excluded participant 
 ## 2026-11-15 — legacy category-finish uniqueness removed
 
 `category_finishes_event_class` still enforced one finished classification per `(event, gender, format)`, so finishing the same format+gender on a second start failed with a 500 unique violation. The stored model has been start-aware since MULTI-START via `uq_category_finishes_start (event_id, start_id, format_id, gender)`; the legacy index is now dropped in `migrate_multi_start_2026_11_15_drop_legacy_finish_unique.sql` and no longer created in `init.sql`.
+
+## 2026-11-15 — timing page block order
+
+The timing page now sorts category slots by state: `RUNNING` first, then `NOT_STARTED`, then every closed state last. Backend order is preserved inside one state, and heat blocks stay in place so stage-header grouping does not change. This keeps the referee's active category at the top and folds finished ones to the bottom of a long event.

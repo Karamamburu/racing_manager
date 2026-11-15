@@ -459,7 +459,7 @@ describe('TimingPage', () => {
     });
   });
 
-  it('renders one block per category in the backend order for a referee', async () => {
+  it('puts the active category above an untouched one', async () => {
     mockCapture();
     mockSession(['REFEREE']);
     mockEvent();
@@ -485,7 +485,73 @@ describe('TimingPage', () => {
     expect(screen.getAllByText('Кубковая гонка — 10 км')).toHaveLength(2);
     expect(getSurface).toHaveBeenCalledWith('event-1');
     const text = container.textContent ?? '';
-    expect(text.indexOf('5 км · Мужчины')).toBeLessThan(
+    // RUNNING is the referee's current work, so it leads the list even though
+    // the backend returned the untouched men's block first.
+    expect(text.indexOf('5 км · Женщины')).toBeLessThan(
+      text.indexOf('5 км · Мужчины'),
+    );
+  });
+
+  it('sorts a finished category below an untouched one', async () => {
+    mockCapture();
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        categories: [
+          block({
+            state: 'COMPLETED',
+            attemptId: 'attempt-done',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+          block({ gender: 'F' }),
+        ],
+      }),
+    );
+
+    const { container } = renderPage();
+
+    expect(await screen.findByText('5 км · Женщины')).not.toBeNull();
+    expect(screen.getByText('5 км · Мужчины')).not.toBeNull();
+    const text = container.textContent ?? '';
+    expect(text.indexOf('5 км · Женщины')).toBeLessThan(
+      text.indexOf('5 км · Мужчины'),
+    );
+  });
+
+  it('moves a running heat group above an untouched category', async () => {
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        categories: [
+          block({ gender: 'F' }),
+          block(),
+          heatBlock({
+            state: 'RUNNING',
+            attemptId: 'attempt-heat',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+        ],
+        stageGroups: [stageGroup()],
+      }),
+    );
+    mockCapture();
+
+    const { container } = renderPage();
+
+    expect(await screen.findByText('Заезд 1')).not.toBeNull();
+    expect(screen.getByText('5 км · Женщины')).not.toBeNull();
+    const text = container.textContent ?? '';
+    // The heat block carries its category group up, stage header included.
+    expect(text.indexOf('Заезды сформированы')).toBeLessThan(
+      text.indexOf('5 км · Женщины'),
+    );
+    expect(text.indexOf('Заезд 1')).toBeLessThan(
       text.indexOf('5 км · Женщины'),
     );
   });
