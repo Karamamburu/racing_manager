@@ -189,7 +189,7 @@ export function TimingCategoryBlock({
           ) : null}
           {!isCaptureHolder && !showsTakeCapture ? (
             <Typography.Text type="secondary">
-              Захват у другой станции
+              Захват у другого устройства
             </Typography.Text>
           ) : null}
         </Space>

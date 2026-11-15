@@ -376,7 +376,7 @@ describe('useTimingCapture clock epochs', () => {
   it('calls no mutation when the epoch cannot be opened', async () => {
     const onError = vi.fn();
     vi.mocked(timingService.openClockEpoch).mockRejectedValue(
-      new Error('Захват удерживает другая станция'),
+      new Error('Захват удерживает другое устройство'),
     );
 
     const { result } = renderCapture({
@@ -385,7 +385,7 @@ describe('useTimingCapture clock epochs', () => {
     });
 
     await waitFor(() => {
-      expect(onError).toHaveBeenCalledWith('Захват удерживает другая станция');
+      expect(onError).toHaveBeenCalledWith('Захват удерживает другое устройство');
     });
 
     await act(async () => {
@@ -395,7 +395,7 @@ describe('useTimingCapture clock epochs', () => {
           capturedAt: '2026-11-13T09:00:01.000Z',
           monotonicMs: 1500,
         }),
-      ).rejects.toThrow('Захват удерживает другая станция');
+      ).rejects.toThrow('Захват удерживает другое устройство');
     });
 
     expect(timingService.capturePass).not.toHaveBeenCalled();

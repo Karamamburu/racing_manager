@@ -388,8 +388,8 @@ describe('TimingPage', () => {
       'Номер участника',
     )) as HTMLInputElement;
     expect(numberField.disabled).toBe(false);
-    expect(screen.getByText('Захват у этой станции')).not.toBeNull();
-    expect(screen.getByText(/Захват: эта станция/)).not.toBeNull();
+    expect(screen.getByText('Захват у этого устройства')).not.toBeNull();
+    expect(screen.getByText(/Захват: это устройство/)).not.toBeNull();
     expect(screen.getByText(/Устройство: ws-1/)).not.toBeNull();
     expect(screen.getByText(/Не синхронизировано: 2/)).not.toBeNull();
     expect(screen.getByText('Ход хронометража')).not.toBeNull();
@@ -898,7 +898,7 @@ describe('TimingPage', () => {
     renderPage();
 
     expect(await screen.findByText(/Только для чтения/)).not.toBeNull();
-    expect(screen.getByText('Захват у станции ws-other')).not.toBeNull();
+    expect(screen.getByText('Захват у устройства ws-other')).not.toBeNull();
     expect(
       (screen.getByRole('button', { name: /Старт/ }) as HTMLButtonElement)
         .disabled,

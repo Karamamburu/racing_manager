@@ -67,7 +67,7 @@ describe('CaptureControls', () => {
       />,
     );
 
-    expect(screen.getByText('Захват у станции station-b')).not.toBeNull();
+    expect(screen.getByText('Захват у устройства station-b')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Взять захват' })).not.toBeNull();
     expect(screen.queryByLabelText('Устройство назначения')).toBeNull();
   });
@@ -84,7 +84,7 @@ describe('CaptureControls', () => {
       />,
     );
 
-    expect(screen.getByText('Захват у этой станции')).not.toBeNull();
+    expect(screen.getByText('Захват у этого устройства')).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Взять захват' })).toBeNull();
     expect(screen.getByLabelText('Устройство назначения')).not.toBeNull();
     expect(
@@ -121,7 +121,7 @@ describe('CaptureControls', () => {
   it('shows the refusal of a take instead of claiming the capture', async () => {
     const onTake = vi
       .fn()
-      .mockRejectedValue(new Error('Захват удерживает другая станция'));
+      .mockRejectedValue(new Error('Захват удерживает другое устройство'));
     render(
       <CaptureControls
         capture={capture()}
@@ -137,7 +137,7 @@ describe('CaptureControls', () => {
 
     await waitFor(() =>
       expect(screen.getByRole('alert').textContent).toBe(
-        'Захват удерживает другая станция',
+        'Захват удерживает другое устройство',
       ),
     );
     expect(screen.getByText('Захват свободен')).not.toBeNull();

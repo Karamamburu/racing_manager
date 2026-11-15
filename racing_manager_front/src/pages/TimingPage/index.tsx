@@ -452,10 +452,10 @@ export function TimingPage() {
     surface.captureWorkstationInstanceId !== null &&
     surface.captureWorkstationInstanceId === workstationInstanceId;
   const holderLabel = isCaptureHolder
-    ? 'эта станция'
+    ? 'это устройство'
     : surface.captureWorkstationInstanceId === null
       ? 'свободен'
-      : `станция ${surface.captureWorkstationInstanceId}`;
+      : `устройство ${surface.captureWorkstationInstanceId}`;
   const hasRunningBlock = surface.categories.some(
     (block) => block.state === 'RUNNING',
   );

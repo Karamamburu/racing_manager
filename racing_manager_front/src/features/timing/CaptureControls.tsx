@@ -57,10 +57,10 @@ export function CaptureControls({
   const holderId = capture?.workstationInstanceId ?? null;
   const holdsHere = holderId !== null && holderId === workstationInstanceId;
   const holderLabel = holdsHere
-    ? 'Захват у этой станции'
+    ? 'Захват у этого устройства'
     : holderId === null
       ? 'Захват свободен'
-      : `Захват у станции ${holderId}`;
+      : `Захват у устройства ${holderId}`;
 
   const run = async (
     action: CaptureAction,
