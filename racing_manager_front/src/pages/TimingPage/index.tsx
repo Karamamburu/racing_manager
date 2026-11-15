@@ -783,7 +783,7 @@ export function TimingPage() {
                 <Space wrap size={16} align="center">
                   <Typography.Text>Захват: {holderLabel}</Typography.Text>
                   <Typography.Text type="secondary">
-                    Станция: {workstationInstanceId}
+                    Устройство: {workstationInstanceId}
                   </Typography.Text>
                   <Typography.Text
                     type={capture.pendingCount > 0 ? 'warning' : 'secondary'}

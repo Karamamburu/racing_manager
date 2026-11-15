@@ -80,12 +80,12 @@ interface AmbiguousChoice {
 const EMPTY_NUMBER_MESSAGE = 'Введите номер участника цифрами';
 const NON_POSITIVE_NUMBER_MESSAGE = 'Номер участника должен быть больше нуля';
 const EMPTY_SPACE_MESSAGE =
-  'Пробел на пустом поле ничего не записывает: для сплита нажмите Enter';
-const EMPTY_ASSIGNMENT_MESSAGE = 'Введите номер участника для назначения сплита';
-const NO_ASSIGNMENT_TARGET_MESSAGE = 'Назначение недоступно: сплит не выбран';
+  'Пробел на пустом поле ничего не записывает: для отсечки нажмите Enter';
+const EMPTY_ASSIGNMENT_MESSAGE = 'Введите номер участника для назначения отсечки';
+const NO_ASSIGNMENT_TARGET_MESSAGE = 'Назначение недоступно: отсечка не выбрана';
 const COMMIT_BUSY_MESSAGE = 'Отправляем отметку…';
-const SPLIT_BUSY_MESSAGE = 'Отправляем сплит…';
-const ASSIGN_BUSY_MESSAGE = 'Назначаем сплит…';
+const SPLIT_BUSY_MESSAGE = 'Отправляем отсечку…';
+const ASSIGN_BUSY_MESSAGE = 'Назначаем отсечку…';
 
 /** Digits only: a pasted `12 3` reads as `123`, never as a space or a sign. */
 function digitsOnly(value: string): string {
@@ -294,7 +294,7 @@ export function NumberCaptureField({
       <Typography.Text strong>Номер участника</Typography.Text>
       {assignment === null ? (
         <Typography.Text type="secondary" style={{ textAlign: 'center' }}>
-          Enter на пустом поле добавит неразмеченный сплит
+          Enter на пустом поле добавит неразмеченную отсечку
         </Typography.Text>
       ) : null}
       <Input

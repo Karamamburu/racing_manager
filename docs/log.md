@@ -185,3 +185,7 @@ The timing layout now fills a partial row with the next card of the same state a
 ## 2026-11-15 — timing block completion cues
 
 The timing surface now reports `capturesComplete` for a running block that holds exactly N bound passes for every non-excluded participant with no unbound finish, and `finished` for a finished protocol category or multi-stage race. The page shows the blue «Все отсечки в гонке данной категории получены, её можно завершить» cue once every capture is in, and paints the locked-results plate of a finished category green instead of the warning tone.
+
+## 2026-11-15 — «отсечка» in the timing UI
+
+Every user-facing label of the timing page now calls a block-free capture «отсечка»: the queue title and items, the cancel dialog and its actions, the number-field hints, busy labels and local refusals. The API, stored tables and code identifiers keep the `split` naming.

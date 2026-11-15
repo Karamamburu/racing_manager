@@ -22,10 +22,10 @@ import { describeTimingError } from './useTimingCapture';
 /** Minimum height of the entry area when its column has no spare height. */
 export const ANONYMOUS_QUEUE_AREA_HEIGHT = 104;
 
-const LIST_LABEL = 'Очередь неразмеченных сплитов';
-const EMPTY_LABEL = 'Очередь пуста: Enter на пустом поле номера добавит сплит';
-const REASON_REQUIRED = 'Укажите причину отмены сплита';
-const CANCEL_TITLE = 'Отмена неразмеченного сплита';
+const LIST_LABEL = 'Очередь неразмеченных отсечек';
+const EMPTY_LABEL = 'Очередь пуста: Enter на пустом поле номера добавит отсечку';
+const REASON_REQUIRED = 'Укажите причину отмены отсечки';
+const CANCEL_TITLE = 'Отмена неразмеченной отсечки';
 
 export interface AnonymousSplitQueueProps {
   /** Queued entries in the capture order of the surface, oldest first. */
@@ -59,7 +59,7 @@ function entryLabel(entry: TimingAnonymousSplitView, ordinal: number): string {
         ]
       : entry.candidates;
   if (candidates.length === 1) {
-    return `Сплит ${ordinal}: ${candidates[0].attemptLabel}, отметка ${formatTimingClock(
+    return `Отсечка ${ordinal}: ${candidates[0].attemptLabel}, отметка ${formatTimingClock(
       entry.capturedAt,
     )}, прошло ${formatElapsed(candidates[0].officialElapsedMs)}`;
   }
@@ -69,7 +69,7 @@ function entryLabel(entry: TimingAnonymousSplitView, ordinal: number): string {
         `${candidate.attemptLabel}, прошло ${formatElapsed(candidate.officialElapsedMs)}`,
     )
     .join('; ');
-  return `Сплит ${ordinal}: отметка ${formatTimingClock(entry.capturedAt)}, ${details}`;
+  return `Отсечка ${ordinal}: отметка ${formatTimingClock(entry.capturedAt)}, ${details}`;
 }
 
 function entryStyle(selected: boolean): CSSProperties {
@@ -146,7 +146,7 @@ export function AnonymousSplitQueue({
   return (
     <Card
       size="small"
-      title="Неразмеченные сплиты"
+      title="Неразмеченные отсечки"
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -231,7 +231,7 @@ export function AnonymousSplitQueue({
                     }}
                   >
                     <Typography.Text strong style={{ fontSize: 12 }}>
-                      Сплит {ordinal} · Отметка: {formatTimingClock(entry.capturedAt)}
+                      Отсечка {ordinal} · Отметка: {formatTimingClock(entry.capturedAt)}
                     </Typography.Text>
                     {entry.bound ? (
                       <Tag color="default">Привязан</Tag>
@@ -279,7 +279,7 @@ export function AnonymousSplitQueue({
                       type="text"
                       danger
                       icon={<CloseOutlined />}
-                      aria-label={`Отменить сплит ${ordinal}`}
+                      aria-label={`Отменить отсечку ${ordinal}`}
                       disabled={busy}
                       onClick={() => openCancel(entry.splitId)}
                     />
@@ -294,7 +294,7 @@ export function AnonymousSplitQueue({
       <Modal
         open={cancelTargetId !== null}
         title={CANCEL_TITLE}
-        okText="Отменить сплит"
+        okText="Отменить отсечку"
         cancelText="Отмена"
         confirmLoading={busy}
         maskClosable={!busy}
@@ -306,10 +306,10 @@ export function AnonymousSplitQueue({
       >
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           <Typography.Text type="secondary">
-            Сплит будет снят с очереди, причина сохранится в записи попытки.
+            Отсечка будет снята с очереди, причина сохранится в записи попытки.
           </Typography.Text>
           <Input.TextArea
-            aria-label="Причина отмены сплита"
+            aria-label="Причина отмены отсечки"
             placeholder="Причина отмены"
             autoComplete="off"
             rows={2}
