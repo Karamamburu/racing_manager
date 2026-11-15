@@ -49,6 +49,7 @@ import {
 import { formatDateTime } from '../../shared/formatDateTime';
 import { AppShell } from '../../shared/layout';
 import type { EventDetails } from '../../shared/types/event';
+import { timingBlockLayout } from './blockLayout';
 
 /** Session key of the workstation instance that owns this browser tab. */
 const WORKSTATION_STORAGE_KEY = 'timing-workstation-instance';
@@ -631,46 +632,50 @@ export function TimingPage() {
       CATEGORY_STATE_ORDER[block.state],
     );
   });
-  const orderedBlocks = [...groupOrder.values()]
-    .sort(
-      (left, right) =>
-        left.priority - right.priority || left.index - right.index,
-    )
-    .flatMap((group) => group.blocks);
+  const orderedGroups = [...groupOrder.values()].sort(
+    (left, right) =>
+      left.priority - right.priority || left.index - right.index,
+  );
   const renderedRaces = new Set<string>();
   const renderedStageKeys = new Set<string>();
-  const surfaceNodes: ReactNode[] = [];
-  for (const block of orderedBlocks) {
-    if (block.kind !== 'HEAT') {
-      surfaceNodes.push(renderBlock(block));
-      continue;
-    }
-    const raceId = heatRaceIdentity(block);
-    if (renderedRaces.has(raceId)) continue;
-    renderedRaces.add(raceId);
-    const renderedHeatKeys = new Set<string>();
-    for (const group of stageGroupsByRace.get(raceId) ?? []) {
-      renderedStageKeys.add(group.blockKey);
-      surfaceNodes.push(<StageHeader key={group.blockKey} group={group} />);
-      for (const key of group.heatBlockKeys) {
-        const heat = heatBlocksByKey.get(key);
-        if (heat === undefined || renderedHeatKeys.has(key)) continue;
+  const blockGroups = orderedGroups.map((group) => {
+    const nodes: ReactNode[] = [];
+    for (const block of group.blocks) {
+      if (block.kind !== 'HEAT') {
+        nodes.push(renderBlock(block));
+        continue;
+      }
+      const raceId = heatRaceIdentity(block);
+      if (renderedRaces.has(raceId)) continue;
+      renderedRaces.add(raceId);
+      const renderedHeatKeys = new Set<string>();
+      for (const stage of stageGroupsByRace.get(raceId) ?? []) {
+        renderedStageKeys.add(stage.blockKey);
+        nodes.push(<StageHeader key={stage.blockKey} group={stage} />);
+        for (const key of stage.heatBlockKeys) {
+          const heat = heatBlocksByKey.get(key);
+          if (heat === undefined || renderedHeatKeys.has(key)) continue;
+          renderedHeatKeys.add(key);
+          nodes.push(renderBlock(heat));
+        }
+      }
+      // A heat block its stage header did not group still renders (FR-17).
+      for (const heat of heatBlocksByRace.get(raceId) ?? []) {
+        const key = blockIdentity(heat);
+        if (renderedHeatKeys.has(key)) continue;
         renderedHeatKeys.add(key);
-        surfaceNodes.push(renderBlock(heat));
+        nodes.push(renderBlock(heat));
       }
     }
-    // A heat block its stage header did not group still renders (FR-17).
-    for (const heat of heatBlocksByRace.get(raceId) ?? []) {
-      const key = blockIdentity(heat);
-      if (renderedHeatKeys.has(key)) continue;
-      renderedHeatKeys.add(key);
-      surfaceNodes.push(renderBlock(heat));
-    }
-  }
-  for (const group of stageGroups) {
-    if (renderedStageKeys.has(group.blockKey)) continue;
-    surfaceNodes.push(<StageHeader key={group.blockKey} group={group} />);
-  }
+    return {
+      key: blockCategoryKey(group.blocks[0]),
+      layout: timingBlockLayout(group.blocks),
+      nodes,
+    };
+  });
+  const trailingStageHeaders = stageGroups
+    .filter((group) => !renderedStageKeys.has(group.blockKey))
+    .map((group) => <StageHeader key={group.blockKey} group={group} />);
 
   return (
     <AppShell title="Хронометраж" subtitle={subtitle}>
@@ -788,7 +793,22 @@ export function TimingPage() {
             <Empty description="У мероприятия нет стартов и категорий для хронометража" />
           </Card>
         ) : (
-          surfaceNodes
+          <>
+            <div className="timing-block-grid">
+              {blockGroups.map((group) => (
+                <div
+                  key={group.key}
+                  className="timing-block-grid__item"
+                  data-layout={group.layout}
+                >
+                  <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                    {group.nodes}
+                  </Space>
+                </div>
+              ))}
+            </div>
+            {trailingStageHeaders}
+          </>
         )}
 
         <Modal

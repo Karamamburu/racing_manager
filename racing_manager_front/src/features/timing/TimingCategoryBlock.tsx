@@ -5,7 +5,7 @@ import {
   RightOutlined,
   UnlockOutlined,
 } from '@ant-design/icons';
-import { Alert, Button, Card, Col, Row, Space, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Space, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { ParticipantTile, formatTimingClock } from './ParticipantTile';
 import type {
@@ -230,28 +230,19 @@ export function TimingCategoryBlock({
               : 'В категории нет участников для хронометража'}
           </Typography.Text>
         ) : (
-          <Row gutter={[6, 6]}>
+          <div className="timing-participant-grid">
             {visibleParticipants.map((participant) => (
-              <Col
+              <ParticipantTile
                 key={participant.enrollmentId}
-                xs={12}
-                sm={8}
-                md={6}
-                lg={4}
-                xl={2}
-                xxl={2}
-              >
-                <ParticipantTile
-                  participant={participant}
-                  onClick={
-                    onParticipantClick === undefined
-                      ? undefined
-                      : () => onParticipantClick(participant)
-                  }
-                />
-              </Col>
+                participant={participant}
+                onClick={
+                  onParticipantClick === undefined
+                    ? undefined
+                    : () => onParticipantClick(participant)
+                }
+              />
             ))}
-          </Row>
+          </div>
         )}
         </Space>
       )}

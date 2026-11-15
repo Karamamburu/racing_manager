@@ -169,3 +169,7 @@ Ordinary category completion now publishes `DNS` for a non-excluded participant 
 ## 2026-11-15 — timing page block order
 
 The timing page now sorts category slots by state: `RUNNING` first, then `NOT_STARTED`, then every closed state last. Backend order is preserved inside one state, and heat blocks stay in place so stage-header grouping does not change. This keeps the referee's active category at the top and folds finished ones to the bottom of a long event.
+
+## 2026-11-15 — timing page width by roster size
+
+The timing page now places category groups in a wrapping row instead of one full-width stack. A group with up to 6 visible participant tiles takes a third of the row (three per line), 7–12 takes a half (two per line), and 13 or more takes the full width; the group is sized by its widest category or heat block, and race-section rows do not count. Participant tiles switched from viewport breakpoints to a card-width grid (`auto-fill`, 120 px minimum), so a narrow card keeps readable tiles. Below 1440 px a third falls back to a half and below 992 px every group is full width.

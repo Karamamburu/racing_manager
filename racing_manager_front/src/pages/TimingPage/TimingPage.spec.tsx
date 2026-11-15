@@ -20,6 +20,7 @@ import {
 } from '../../features/timing/useTimingCapture';
 import { formatDateTime } from '../../shared/formatDateTime';
 import type { EventDetails, StartResponse } from '../../shared/types/event';
+import { timingBlockLayout } from './blockLayout';
 import { TimingPage } from './index';
 
 /**
@@ -110,6 +111,22 @@ function eventDetails(): EventDetails {
     registeredCount: 1,
     finishedCategories: [],
   };
+}
+
+/** A roster of `count` plain participants, for the width-layout scenarios. */
+function roster(count: number): TimingCategoryBlockView['participants'] {
+  return Array.from({ length: count }, (_, index) => ({
+    enrollmentId: `enrollment-${index + 1}`,
+    registrationId: `registration-${index + 1}`,
+    startNumber: index + 1,
+    fullName: `Участник ${index + 1}`,
+    sectionId: '3 - Мужчины (24–40)',
+    passCount: 0,
+    requiredLaps: 5,
+    lastPassAt: null,
+    state: 'WAITING',
+    excludedReason: null,
+  }));
 }
 
 function block(
@@ -554,6 +571,55 @@ describe('TimingPage', () => {
     expect(text.indexOf('Заезд 1')).toBeLessThan(
       text.indexOf('5 км · Женщины'),
     );
+  });
+
+  it('shares the row by roster size: three small, two medium, one large', async () => {
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        categories: [
+          block({ participants: roster(6) }),
+          block({ gender: 'F', participants: roster(10) }),
+          block({ startId: 'start-b', participants: roster(13) }),
+        ],
+      }),
+    );
+    mockCapture();
+
+    const { container } = renderPage();
+
+    await waitFor(() =>
+      expect(container.querySelectorAll('.timing-block-grid__item')).toHaveLength(
+        3,
+      ),
+    );
+    const layouts = [
+      ...container.querySelectorAll('.timing-block-grid__item'),
+    ].map((item) => item.getAttribute('data-layout'));
+    expect(layouts).toEqual(['third', 'half', 'full']);
+  });
+
+  it('sizes a group at 6 and 12 participants and ignores race-section rows', () => {
+    expect(timingBlockLayout([block({ participants: roster(6) })])).toBe(
+      'third',
+    );
+    expect(timingBlockLayout([block({ participants: roster(7) })])).toBe('half');
+    expect(
+      timingBlockLayout([block({ participants: roster(12) })]),
+    ).toBe('half');
+    expect(
+      timingBlockLayout([block({ participants: roster(13) })]),
+    ).toBe('full');
+    const raceSection = roster(20).map((participant) => ({
+      ...participant,
+      excludedReason: 'RACE_SECTION',
+    }));
+    expect(
+      timingBlockLayout([
+        block({ participants: [...roster(2), ...raceSection] }),
+      ]),
+    ).toBe('third');
   });
 
   it('shows the event name and date around the surface', async () => {
