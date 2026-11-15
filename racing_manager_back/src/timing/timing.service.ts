@@ -3030,8 +3030,8 @@ export class TimingService {
       ].join(', ');
       const message =
         splitIds.length === 1
-          ? `В попытке есть неразмеченная отсечка (${instants}): назначьте её или отмените в очереди неразмеченных отсечек.`
-          : `В попытке есть неразмеченные отсечки (${instants}): назначьте их или отмените в очереди неразмеченных отсечек.`;
+          ? `В попытке есть неприсвоенная отсечка (${instants}): назначьте её или отмените в очереди неприсвоенных отсечек.`
+          : `В попытке есть неприсвоенные отсечки (${instants}): назначьте их или отмените в очереди неприсвоенных отсечек.`;
       throw timingError(TimingErrorCode.PENDING_REMAINS, message, {
         attemptId: attempt.id,
         anonymousSplitIds: splitIds,

@@ -126,7 +126,7 @@ export class AnonymousSplitService {
     if (row === undefined) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Неразмеченная отсечка не найдена в очереди.',
+        'Неприсвоенная отсечка не найдена в очереди.',
         { splitId },
       );
     }
@@ -177,7 +177,7 @@ export class AnonymousSplitService {
     if (split.attempt.status !== 'RUNNING') {
       throw timingError(
         TimingErrorCode.ATTEMPT_CLOSED,
-        'Неразмеченную отсечку можно назначить только в идущей попытке.',
+        'Неприсвоенную отсечку можно назначить только в идущей попытке.',
         { attemptId: split.attempt.id, status: split.attempt.status },
       );
     }
@@ -234,7 +234,7 @@ export class AnonymousSplitService {
         if (current.attempt.status !== 'RUNNING') {
           throw timingError(
             TimingErrorCode.ATTEMPT_CLOSED,
-            'Неразмеченную отсечку можно назначить только в идущей попытке.',
+            'Неприсвоенную отсечку можно назначить только в идущей попытке.',
             { attemptId: current.attempt.id, status: current.attempt.status },
           );
         }
@@ -419,7 +419,7 @@ export class AnonymousSplitService {
     if (split === null || split.eventId !== eventId) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Неразмеченная отсечка не найдена.',
+        'Неприсвоенная отсечка не найдена.',
         { splitId },
       );
     }
@@ -588,7 +588,7 @@ export class AnonymousSplitService {
     if (split.eventId !== eventId) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Неразмеченная отсечка не найдена.',
+        'Неприсвоенная отсечка не найдена.',
         { splitId: split.splitId },
       );
     }
@@ -1090,7 +1090,7 @@ export class AnonymousSplitService {
     if (mark === null) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Неразмеченная отсечка не найдена.',
+        'Неприсвоенная отсечка не найдена.',
         { splitId },
       );
     }
@@ -1098,14 +1098,14 @@ export class AnonymousSplitService {
     if (attempt === null || attempt.eventId !== eventId) {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Неразмеченная отсечка относится к другому мероприятию.',
+        'Неприсвоенная отсечка относится к другому мероприятию.',
         { splitId, attemptId: mark.attemptId },
       );
     }
     if (mark.kind !== 'ANONYMOUS_SPLIT') {
       throw timingError(
         TimingErrorCode.NOT_FOUND,
-        'Указанная отметка не является неразмеченной отсечкой.',
+        'Указанная отметка не является неприсвоенной отсечкой.',
         { splitId, kind: mark.kind },
       );
     }
@@ -1415,7 +1415,7 @@ function splitResolvedError(
 ): TimingDomainError {
   return timingError(
     TimingErrorCode.INVALID_STATE,
-    'Неразмеченная отсечка уже обработана: назначена, отменена или снята.',
+    'Неприсвоенная отсечка уже обработана: назначена, отменена или снята.',
     { status },
   );
 }
