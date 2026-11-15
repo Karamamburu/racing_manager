@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -63,6 +64,12 @@ import type {
  * `TimingDomainError` the service throws becomes the filtered status and body;
  * these handlers add no catch of their own.
  */
+const uuidPipe = new ParseUUIDPipe({
+  version: '4',
+  exceptionFactory: () =>
+    new BadRequestException('Некорректный идентификатор в адресе запроса.'),
+});
+
 @Controller('events/:eventId/timing')
 @UseGuards(SessionAuthGuard, RolesGuard)
 @Roles(...TIMING_OPERATE_ROLE_CODES)
@@ -84,7 +91,7 @@ export class TimingController {
   @Get()
   getSurface(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('eventId', uuidPipe) eventId: string,
   ): Promise<TimingSurfaceView> {
     return this.timingService.getSurface(req.session?.userSub, eventId);
   }
@@ -92,8 +99,8 @@ export class TimingController {
   @Get('attempts/:attemptId')
   getAttemptRecord(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
-    @Param('attemptId', new ParseUUIDPipe({ version: '4' }))
+    @Param('eventId', uuidPipe) eventId: string,
+    @Param('attemptId', uuidPipe)
     attemptId: string,
   ): Promise<TimingAttemptRecordView> {
     return this.timingService.getAttemptRecord(
@@ -107,7 +114,7 @@ export class TimingController {
   @HttpCode(HttpStatus.CREATED)
   startAttempt(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('eventId', uuidPipe) eventId: string,
     @Body() dto: StartTimingAttemptDto,
   ): Promise<StartTimingAttemptResult> {
     return this.timingService.startAttempt(req.session?.userSub, eventId, dto);
@@ -122,7 +129,7 @@ export class TimingController {
   @HttpCode(HttpStatus.CREATED)
   startHeatAttempt(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('eventId', uuidPipe) eventId: string,
     @Body() dto: StartHeatAttemptDto,
   ): Promise<StartTimingAttemptResult> {
     return this.timingService.startHeatAttempt(
@@ -136,8 +143,8 @@ export class TimingController {
   @HttpCode(HttpStatus.CREATED)
   openClockEpoch(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
-    @Param('attemptId', new ParseUUIDPipe({ version: '4' }))
+    @Param('eventId', uuidPipe) eventId: string,
+    @Param('attemptId', uuidPipe)
     attemptId: string,
     @Body() dto: OpenClockEpochDto,
   ): Promise<ClockEpochView> {
@@ -159,7 +166,7 @@ export class TimingController {
   @HttpCode(HttpStatus.CREATED)
   capturePass(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('eventId', uuidPipe) eventId: string,
     @Body() dto: CaptureTimingPassDto,
     @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<TimingPassView | TimingAnonymousSplitView> {
@@ -179,8 +186,8 @@ export class TimingController {
   @HttpCode(HttpStatus.OK)
   bindPendingFinish(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
-    @Param('pendingFinishId', new ParseUUIDPipe({ version: '4' }))
+    @Param('eventId', uuidPipe) eventId: string,
+    @Param('pendingFinishId', uuidPipe)
     pendingFinishId: string,
     @Body() dto: BindPendingFinishDto,
     @Headers('idempotency-key') idempotencyKey?: string,
@@ -204,8 +211,8 @@ export class TimingController {
   @Roles(RoleCode.ADMINISTRATOR)
   cancelPendingFinish(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
-    @Param('pendingFinishId', new ParseUUIDPipe({ version: '4' }))
+    @Param('eventId', uuidPipe) eventId: string,
+    @Param('pendingFinishId', uuidPipe)
     pendingFinishId: string,
     @Body() dto: CancelPendingFinishDto,
   ): Promise<TimingPassView> {
@@ -227,8 +234,8 @@ export class TimingController {
   @HttpCode(HttpStatus.OK)
   assignSplit(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
-    @Param('splitId', new ParseUUIDPipe({ version: '4' })) splitId: string,
+    @Param('eventId', uuidPipe) eventId: string,
+    @Param('splitId', uuidPipe) splitId: string,
     @Body() dto: AssignAnonymousSplitDto,
     @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<TimingPassView> {
@@ -252,8 +259,8 @@ export class TimingController {
   @HttpCode(HttpStatus.OK)
   cancelSplit(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
-    @Param('splitId', new ParseUUIDPipe({ version: '4' })) splitId: string,
+    @Param('eventId', uuidPipe) eventId: string,
+    @Param('splitId', uuidPipe) splitId: string,
     @Body() dto: CancelAnonymousSplitDto,
   ): Promise<TimingAnonymousSplitView> {
     return this.anonymousSplitService.cancel(
@@ -272,8 +279,8 @@ export class TimingController {
   @HttpCode(HttpStatus.OK)
   undoSplit(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
-    @Param('splitId', new ParseUUIDPipe({ version: '4' })) splitId: string,
+    @Param('eventId', uuidPipe) eventId: string,
+    @Param('splitId', uuidPipe) splitId: string,
     @Body() dto: QuickUndoTimingSplitDto,
   ): Promise<TimingAnonymousSplitView> {
     return this.anonymousSplitService.undoSplit(
@@ -295,8 +302,8 @@ export class TimingController {
   @Roles(RoleCode.ADMINISTRATOR)
   correctOfficialTime(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
-    @Param('passId', new ParseUUIDPipe({ version: '4' })) passId: string,
+    @Param('eventId', uuidPipe) eventId: string,
+    @Param('passId', uuidPipe) passId: string,
     @Body() dto: CorrectOfficialTimeDto,
   ): Promise<TimingPassView | TimingAttemptRef> {
     return this.timingService.correctOfficialTime(
@@ -316,8 +323,8 @@ export class TimingController {
   @Roles(RoleCode.ADMINISTRATOR)
   cancelPass(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
-    @Param('passId', new ParseUUIDPipe({ version: '4' })) passId: string,
+    @Param('eventId', uuidPipe) eventId: string,
+    @Param('passId', uuidPipe) passId: string,
     @Body() dto: CancelTimingPassDto,
   ): Promise<TimingPassView> {
     return this.timingService.cancelPass(
@@ -337,8 +344,8 @@ export class TimingController {
   @Roles(RoleCode.ADMINISTRATOR)
   rebindPass(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
-    @Param('passId', new ParseUUIDPipe({ version: '4' })) passId: string,
+    @Param('eventId', uuidPipe) eventId: string,
+    @Param('passId', uuidPipe) passId: string,
     @Body() dto: RebindTimingPassDto,
   ): Promise<TimingPassView> {
     return this.timingService.rebindPass(
@@ -357,8 +364,8 @@ export class TimingController {
   @HttpCode(HttpStatus.OK)
   quickUndo(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
-    @Param('attemptId', new ParseUUIDPipe({ version: '4' }))
+    @Param('eventId', uuidPipe) eventId: string,
+    @Param('attemptId', uuidPipe)
     attemptId: string,
     @Body() dto: QuickUndoTimingPassDto,
     @Headers('idempotency-key') idempotencyKey?: string,
@@ -381,8 +388,8 @@ export class TimingController {
   @HttpCode(HttpStatus.OK)
   completeAttempt(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
-    @Param('attemptId', new ParseUUIDPipe({ version: '4' }))
+    @Param('eventId', uuidPipe) eventId: string,
+    @Param('attemptId', uuidPipe)
     attemptId: string,
     @Body() dto: CompleteTimingAttemptDto,
   ): Promise<TimingAttemptRecordView> {
@@ -404,8 +411,8 @@ export class TimingController {
   @Roles(RoleCode.ADMINISTRATOR)
   forceCompleteAttempt(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
-    @Param('attemptId', new ParseUUIDPipe({ version: '4' }))
+    @Param('eventId', uuidPipe) eventId: string,
+    @Param('attemptId', uuidPipe)
     attemptId: string,
     @Body() dto: ForceCompleteTimingAttemptDto,
   ): Promise<TimingAttemptRecordView> {
@@ -425,7 +432,7 @@ export class TimingController {
   @HttpCode(HttpStatus.OK)
   takeCapture(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('eventId', uuidPipe) eventId: string,
     @Body() dto: TakeCaptureDto,
   ): Promise<TimingCaptureView> {
     return this.timingService.takeCapture(req.session?.userSub, eventId, dto);
@@ -439,7 +446,7 @@ export class TimingController {
   @HttpCode(HttpStatus.OK)
   transferCapture(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('eventId', uuidPipe) eventId: string,
     @Body() dto: TransferCaptureDto,
   ): Promise<TimingCaptureView> {
     return this.timingService.transferCapture(
@@ -459,7 +466,7 @@ export class TimingController {
   @Roles(RoleCode.ADMINISTRATOR)
   forceReleaseCapture(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
+    @Param('eventId', uuidPipe) eventId: string,
     @Body() dto: ForceReleaseCaptureDto,
   ): Promise<TimingCaptureView> {
     return this.timingService.forceReleaseCapture(
@@ -478,8 +485,8 @@ export class TimingController {
   @Roles(RoleCode.ADMINISTRATOR)
   cancelAttempt(
     @Req() req: Request,
-    @Param('eventId', new ParseUUIDPipe({ version: '4' })) eventId: string,
-    @Param('attemptId', new ParseUUIDPipe({ version: '4' }))
+    @Param('eventId', uuidPipe) eventId: string,
+    @Param('attemptId', uuidPipe)
     attemptId: string,
     @Body() dto: CancelTimingAttemptDto,
   ): Promise<TimingAttemptRecordView> {
