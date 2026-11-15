@@ -189,12 +189,12 @@ describe('timingQueue outbox', () => {
     await expect(queue.pendingCount(attemptId)).resolves.toBe(2);
     await expect(queue.lastSequence(attemptId, 'ws-1')).resolves.toBe(2);
 
-    await queue.mark('key-anonymous-assign', 'REJECTED', 'Сплит уже назначен');
+    await queue.mark('key-anonymous-assign', 'REJECTED', 'Отсечка уже назначена');
     const [, rejected] = await queue.list(attemptId);
     expect(rejected).toMatchObject({
       operation: 'ANONYMOUS_ASSIGN',
       status: 'REJECTED',
-      error: 'Сплит уже назначен',
+      error: 'Отсечка уже назначена',
     });
     await expect(queue.lastSequence(attemptId, 'ws-1')).resolves.toBe(2);
   });

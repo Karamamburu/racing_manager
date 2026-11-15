@@ -56,7 +56,7 @@ function deferred() {
 }
 
 function queueArea(): HTMLElement {
-  return screen.getByRole('list', { name: 'Очередь неразмеченных сплитов' });
+  return screen.getByRole('list', { name: 'Очередь неразмеченных отсечек' });
 }
 
 beforeAll(() => {
@@ -88,11 +88,11 @@ describe('AnonymousSplitQueue layout', () => {
       />,
     );
 
-    expect(screen.getByText('Неразмеченные сплиты')).not.toBeNull();
+    expect(screen.getByText('Неразмеченные отсечки')).not.toBeNull();
     expect(screen.getByText('В очереди: 0')).not.toBeNull();
     expect(
       screen.getByText(
-        'Очередь пуста: Enter на пустом поле номера добавит сплит',
+        'Очередь пуста: Enter на пустом поле номера добавит отсечку',
       ),
     ).not.toBeNull();
     expect(queueArea().style.minHeight).toBe(
@@ -150,14 +150,14 @@ describe('AnonymousSplitQueue entries', () => {
     );
 
     const first = screen.getByRole('button', {
-      name: 'Сплит 1: 5 км · Мужчины · Кубковая гонка — 10 км, отметка 09:01:00.000, прошло 01:00.000',
+      name: 'Отсечка 1: 5 км · Мужчины · Кубковая гонка — 10 км, отметка 09:01:00.000, прошло 01:00.000',
     });
     const second = screen.getByRole('button', {
-      name: 'Сплит 2: 10 км · Женщины, отметка 09:02:30.000, прошло 01:30.500',
+      name: 'Отсечка 2: 10 км · Женщины, отметка 09:02:30.000, прошло 01:30.500',
     });
 
     const text = container.textContent ?? '';
-    expect(text.indexOf('Сплит 1')).toBeLessThan(text.indexOf('Сплит 2'));
+    expect(text.indexOf('Отсечка 1')).toBeLessThan(text.indexOf('Отсечка 2'));
     expect(first.textContent).toContain('Отметка: 09:01:00.000');
     expect(second.textContent).toContain('прошло 01:30.500');
   });
@@ -173,7 +173,7 @@ describe('AnonymousSplitQueue entries', () => {
       />,
     );
 
-    const entries = screen.getAllByRole('button', { name: /^Сплит \d:/ });
+    const entries = screen.getAllByRole('button', { name: /^Отсечка \d:/ });
     expect(entries).toHaveLength(2);
     expect(entries[0].getAttribute('aria-pressed')).toBe('false');
     expect(entries[1].getAttribute('aria-pressed')).toBe('true');
@@ -196,7 +196,7 @@ describe('AnonymousSplitQueue entries', () => {
     expect(
       (
         screen.getByRole('button', {
-          name: /^Сплит 1:/,
+          name: /^Отсечка 1:/,
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
@@ -216,18 +216,18 @@ describe('AnonymousSplitQueue cancel', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Отменить сплит 1' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Отменить сплит' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Отменить отсечку 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Отменить отсечку' }));
 
     expect(onCancel).not.toHaveBeenCalled();
     expect(screen.getByRole('alert').textContent).toBe(
-      'Укажите причину отмены сплита',
+      'Укажите причину отмены отсечки',
     );
 
-    fireEvent.change(screen.getByLabelText('Причина отмены сплита'), {
+    fireEvent.change(screen.getByLabelText('Причина отмены отсечки'), {
       target: { value: 'Дубль нажатия' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Отменить сплит' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Отменить отсечку' }));
 
     await waitFor(() =>
       expect(onCancel).toHaveBeenCalledWith('split-1', 'Дубль нажатия'),
@@ -250,26 +250,26 @@ describe('AnonymousSplitQueue cancel', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Отменить сплит 1' }));
-    fireEvent.change(screen.getByLabelText('Причина отмены сплита'), {
+    fireEvent.click(screen.getByRole('button', { name: 'Отменить отсечку 1' }));
+    fireEvent.change(screen.getByLabelText('Причина отмены отсечки'), {
       target: { value: 'Дубль нажатия' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Отменить сплит' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Отменить отсечку' }));
     await waitFor(() => expect(onCancel).toHaveBeenCalledTimes(1));
 
-    gate.reject(new Error('Сплит уже назначен другому участнику'));
+    gate.reject(new Error('Отсечка уже назначена другому участнику'));
 
     await waitFor(() =>
       expect(screen.getByRole('alert').textContent).toBe(
-        'Сплит уже назначен другому участнику',
+        'Отсечка уже назначена другому участнику',
       ),
     );
     expect(
-      (screen.getByLabelText('Причина отмены сплита') as HTMLTextAreaElement)
+      (screen.getByLabelText('Причина отмены отсечки') as HTMLTextAreaElement)
         .value,
     ).toBe('Дубль нажатия');
     expect(
-      screen.getByRole('button', { name: /^Сплит 1:/ }),
+      screen.getByRole('button', { name: /^Отсечка 1:/ }),
     ).not.toBeNull();
   });
 
@@ -283,6 +283,6 @@ describe('AnonymousSplitQueue cancel', () => {
       />,
     );
 
-    expect(screen.queryByRole('button', { name: /Отменить сплит/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Отменить отсечку/ })).toBeNull();
   });
 });

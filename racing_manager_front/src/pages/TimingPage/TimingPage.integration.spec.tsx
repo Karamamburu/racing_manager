@@ -552,11 +552,11 @@ describe('TimingPage capture integration', () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: /^Сплит 1:/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Отсечка 1:/ }));
     const field = screen.getByLabelText('Номер участника');
     // Assigning needs no caption: selecting the entry focuses the field.
     expect(field).toBe(document.activeElement);
-    expect(screen.queryByText(/^Сплит будет назначен/)).toBeNull();
+    expect(screen.queryByText(/^Отсечка будет назначена/)).toBeNull();
     fireEvent.change(field, { target: { value: '17' } });
     fireEvent.keyDown(field, { key: 'Enter' });
 
@@ -580,10 +580,10 @@ describe('TimingPage capture integration', () => {
     // The entry leaves the queue with the surface refetch (FR-09) and the field
     // returns to normal capture (FR-52).
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /^Сплит 1:/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^Отсечка 1:/ })).toBeNull();
     });
     expect(screen.getByText('В очереди: 0')).not.toBeNull();
-    expect(screen.queryByText('Назначение сплита')).toBeNull();
+    expect(screen.queryByText('Назначение отсечки')).toBeNull();
     expect(screen.getByLabelText('Номер участника')).not.toBeNull();
     expect(getSurface).toHaveBeenCalledTimes(2);
   });

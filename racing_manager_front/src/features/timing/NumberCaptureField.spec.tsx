@@ -271,7 +271,7 @@ describe('NumberCaptureField', () => {
     expect(onAnonymousSplit).not.toHaveBeenCalled();
     expect(onCommit).not.toHaveBeenCalled();
     expect(screen.getByRole('alert').textContent).toBe(
-      'Пробел на пустом поле ничего не записывает: для сплита нажмите Enter',
+      'Пробел на пустом поле ничего не записывает: для отсечки нажмите Enter',
     );
   });
 
@@ -290,7 +290,7 @@ describe('NumberCaptureField', () => {
 
     expect(screen.getByText('Номер участника')).not.toBeNull();
     expect(
-      screen.queryByText(/Сплит будет назначен попытке/),
+      screen.queryByText(/Отсечка будет назначена попытке/),
     ).toBeNull();
     expect(numberInput().placeholder).toBe('№');
     expect(numberInput().style.width).toBe('264px');
@@ -335,13 +335,13 @@ describe('NumberCaptureField', () => {
     fireEvent.keyDown(numberInput(), { key: 'Enter' });
     expect(onAssign).not.toHaveBeenCalled();
     expect(screen.getByRole('alert').textContent).toBe(
-      'Введите номер участника для назначения сплита',
+      'Введите номер участника для назначения отсечки',
     );
 
     fireEvent.keyDown(numberInput(), { key: ' ' });
     await waitFor(() => expect(onAssign).not.toHaveBeenCalled());
     expect(screen.getByRole('alert').textContent).toBe(
-      'Введите номер участника для назначения сплита',
+      'Введите номер участника для назначения отсечки',
     );
   });
 

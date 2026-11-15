@@ -389,7 +389,7 @@ describe('TimingPage', () => {
     expect(numberField.disabled).toBe(false);
     expect(screen.getByText('Захват у этой станции')).not.toBeNull();
     expect(screen.getByText(/Захват: эта станция/)).not.toBeNull();
-    expect(screen.getByText(/Станция: ws-1/)).not.toBeNull();
+    expect(screen.getByText(/Устройство: ws-1/)).not.toBeNull();
     expect(screen.getByText(/Не синхронизировано: 2/)).not.toBeNull();
     expect(screen.getByText('5 км · Мужчины')).not.toBeNull();
     expect(useTimingCapture).toHaveBeenCalledWith(
@@ -912,7 +912,7 @@ describe('TimingPage', () => {
     expect(drawerProps.current).toHaveLength(0);
     expect(getSurface).not.toHaveBeenCalled();
     // No split queue and no current block for a user without timing access.
-    expect(screen.queryByText('Неразмеченные сплиты')).toBeNull();
+    expect(screen.queryByText('Неразмеченные отсечки')).toBeNull();
     expect(screen.queryByText('Текущий блок')).toBeNull();
   });
 
@@ -1010,10 +1010,10 @@ describe('TimingPage', () => {
 
     const { container } = renderPage();
 
-    expect(await screen.findByText('Неразмеченные сплиты')).not.toBeNull();
+    expect(await screen.findByText('Неразмеченные отсечки')).not.toBeNull();
     expect(screen.getByText('В очереди: 1')).not.toBeNull();
     expect(
-      screen.getByRole('button', { name: /^Сплит 1:/ }),
+      screen.getByRole('button', { name: /^Отсечка 1:/ }),
     ).not.toBeNull();
 
     // The queue shares the top block with the controls and sits in its right
@@ -1087,11 +1087,11 @@ describe('TimingPage', () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: /^Сплит 1:/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Отсечка 1:/ }));
 
     const field = screen.getByLabelText('Номер участника');
     expect(field).toBe(document.activeElement);
-    expect(screen.queryByText(/^Сплит будет назначен/)).toBeNull();
+    expect(screen.queryByText(/^Отсечка будет назначена/)).toBeNull();
     fireEvent.change(field, { target: { value: '17' } });
     fireEvent.keyDown(field, { key: 'Enter' });
 
@@ -1102,7 +1102,7 @@ describe('TimingPage', () => {
     await waitFor(() =>
       expect(
         screen
-          .getByRole('button', { name: /^Сплит 1:/ })
+          .getByRole('button', { name: /^Отсечка 1:/ })
           .getAttribute('aria-pressed'),
       ).toBe('false'),
     );
@@ -1132,12 +1132,12 @@ describe('TimingPage', () => {
     renderPage();
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Отменить сплит 1' }),
+      await screen.findByRole('button', { name: 'Отменить отсечку 1' }),
     );
-    fireEvent.change(screen.getByLabelText('Причина отмены сплита'), {
+    fireEvent.change(screen.getByLabelText('Причина отмены отсечки'), {
       target: { value: 'Дубль нажатия' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Отменить сплит' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Отменить отсечку' }));
 
     await waitFor(() =>
       expect(capture.cancelAnonymousSplit).toHaveBeenCalledWith(
@@ -1158,10 +1158,10 @@ describe('TimingPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Обновить' }));
 
     await waitFor(() =>
-      expect(screen.queryByRole('button', { name: /^Сплит 1:/ })).toBeNull(),
+      expect(screen.queryByRole('button', { name: /^Отсечка 1:/ })).toBeNull(),
     );
     expect(screen.getByText('В очереди: 0')).not.toBeNull();
-    expect(screen.queryByText('Назначение сплита')).toBeNull();
+    expect(screen.queryByText('Назначение отсечки')).toBeNull();
   });
 
   it('renders stage headers and their heat blocks after the category block', async () => {
@@ -1385,11 +1385,11 @@ describe('TimingPage', () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: /^Сплит 1:/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Отсечка 1:/ }));
 
     const field = screen.getByLabelText('Номер участника');
     expect(field).toBe(document.activeElement);
-    expect(screen.queryByText(/^Сплит будет назначен/)).toBeNull();
+    expect(screen.queryByText(/^Отсечка будет назначена/)).toBeNull();
 
     fireEvent.change(field, { target: { value: '42' } });
     fireEvent.keyDown(field, { key: 'Enter' });

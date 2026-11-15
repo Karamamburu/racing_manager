@@ -757,7 +757,7 @@ describe('useTimingCapture anonymous splits', () => {
   it('keeps a refused assignment in the queue with the API message', async () => {
     const onError = vi.fn();
     vi.mocked(timingService.assignAnonymousSplit).mockRejectedValue(
-      apiRefusal('Сплит уже назначен'),
+      apiRefusal('Отсечка уже назначена'),
     );
     const { result } = renderCapture({
       surface: surfaceWithQueue('attempt-anon-refused', [
@@ -776,7 +776,7 @@ describe('useTimingCapture anonymous splits', () => {
     await act(async () => {
       await expect(
         result.current.assignAnonymousSplit('split-refused', 17),
-      ).rejects.toThrow('Сплит уже назначен');
+      ).rejects.toThrow('Отсечка уже назначена');
     });
 
     const queue = await openTimingQueue();
@@ -784,9 +784,9 @@ describe('useTimingCapture anonymous splits', () => {
     expect(item).toMatchObject({
       operation: 'ANONYMOUS_ASSIGN',
       status: 'REJECTED',
-      error: 'Сплит уже назначен',
+      error: 'Отсечка уже назначена',
     });
-    expect(onError).toHaveBeenCalledWith('Сплит уже назначен');
+    expect(onError).toHaveBeenCalledWith('Отсечка уже назначена');
   });
 
   it('cancels a queued split with a reason and takes no sequence', async () => {
@@ -797,14 +797,14 @@ describe('useTimingCapture anonymous splits', () => {
     await act(async () => {
       await result.current.cancelAnonymousSplit(
         'split-cancel',
-        'Сплит не относится к заезду',
+        'Отсечка не относится к заезду',
       );
     });
 
     expect(timingService.cancelAnonymousSplit).toHaveBeenCalledWith(
       'event-1',
       'split-cancel',
-      { reason: 'Сплит не относится к заезду' },
+      { reason: 'Отсечка не относится к заезду' },
     );
     const queue = await openTimingQueue();
     await expect(

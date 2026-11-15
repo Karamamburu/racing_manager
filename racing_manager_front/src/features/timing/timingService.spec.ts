@@ -126,7 +126,7 @@ const ASSIGN_REQUEST: AssignAnonymousSplitRequest = {
 };
 
 const CANCEL_REQUEST: CancelAnonymousSplitRequest = {
-  reason: 'Сплит не относится к заезду',
+  reason: 'Отсечка не относится к заезду',
 };
 
 function splitView(): TimingAnonymousSplitView {
