@@ -391,6 +391,7 @@ describe('TimingPage', () => {
     expect(screen.getByText(/Захват: эта станция/)).not.toBeNull();
     expect(screen.getByText(/Устройство: ws-1/)).not.toBeNull();
     expect(screen.getByText(/Не синхронизировано: 2/)).not.toBeNull();
+    expect(screen.getByText('Ход хронометража')).not.toBeNull();
     expect(screen.getByText('5 км · Мужчины')).not.toBeNull();
     expect(useTimingCapture).toHaveBeenCalledWith(
       'event-1',

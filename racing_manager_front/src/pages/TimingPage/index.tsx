@@ -31,6 +31,7 @@ import { NumberCaptureField } from '../../features/timing/NumberCaptureField';
 import { PendingFinishBar } from '../../features/timing/PendingFinishBar';
 import { TimingCategoryBlock } from '../../features/timing/TimingCategoryBlock';
 import { TimingHeatBlock } from '../../features/timing/TimingHeatBlock';
+import { TimingMetricsPanel } from '../../features/timing/TimingMetrics';
 import { timingService } from '../../features/timing/timingService';
 import type {
   TimingAnonymousSplitView,
@@ -773,6 +774,7 @@ export function TimingPage() {
             <Col
               xs={24}
               xl={8}
+              xxl={6}
               style={{ display: 'flex', flexDirection: 'column' }}
             >
               <Space
@@ -820,6 +822,7 @@ export function TimingPage() {
             <Col
               xs={24}
               xl={8}
+              xxl={6}
               style={{
                 display: 'flex',
                 flexDirection: 'column',
@@ -848,6 +851,7 @@ export function TimingPage() {
             <Col
               xs={24}
               xl={8}
+              xxl={6}
               style={{ display: 'flex', flexDirection: 'column' }}
             >
               <AnonymousSplitQueue
@@ -860,6 +864,14 @@ export function TimingPage() {
                 canUndo={canOperate && isCaptureHolder}
                 selectionDisabled={!isCaptureHolder}
               />
+            </Col>
+            <Col
+              xs={24}
+              xl={24}
+              xxl={6}
+              style={{ display: 'flex', flexDirection: 'column' }}
+            >
+              <TimingMetricsPanel surface={surface} />
             </Col>
           </Row>
         </Card>

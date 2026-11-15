@@ -193,3 +193,7 @@ Every user-facing label of the timing page now calls a block-free capture «от
 ## 2026-11-15 — Space captures an отсечка
 
 The empty number field now treats Space exactly like Enter: both queue a block-free capture, both commit a typed number, and both refuse an empty assignment. The former «Пробел ничего не записывает» refusal and its hint are gone; the queue and field hints name Enter or Space. The timing EARS and both manual-timing PRDs were amended accordingly.
+
+## 2026-11-15 — judge summary on the timing page
+
+The top block now shows «Ход хронометража»: categories finished/total, participants finished/total, participants on course, blocks ready to complete, outstanding unassigned captures and unbound finishes, and remaining passes. The summary is computed from the loaded surface, adds no request, and excludes race-section duplicates and participants outside timing.
