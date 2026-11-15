@@ -20,7 +20,11 @@ import {
 } from '../../features/timing/useTimingCapture';
 import { formatDateTime } from '../../shared/formatDateTime';
 import type { EventDetails, StartResponse } from '../../shared/types/event';
-import { timingBlockLayout } from './blockLayout';
+import {
+  timingBlockLayout,
+  timingBlockRows,
+  timingRowItemFlex,
+} from './blockLayout';
 import { TimingPage } from './index';
 
 /**
@@ -590,14 +594,65 @@ describe('TimingPage', () => {
     const { container } = renderPage();
 
     await waitFor(() =>
-      expect(container.querySelectorAll('.timing-block-grid__item')).toHaveLength(
+      expect(container.querySelectorAll('.timing-block-row__item')).toHaveLength(
         3,
       ),
     );
-    const layouts = [
-      ...container.querySelectorAll('.timing-block-grid__item'),
-    ].map((item) => item.getAttribute('data-layout'));
-    expect(layouts).toEqual(['third', 'half', 'full']);
+    const items = [
+      ...container.querySelectorAll<HTMLElement>('.timing-block-row__item'),
+    ];
+    expect(items.map((item) => item.getAttribute('data-layout'))).toEqual([
+      'third',
+      'half',
+      'full',
+    ]);
+    // A lone 7-participant category keeps half the row instead of growing.
+    expect(items[1].style.flex).toBe('0 0 calc(50% - 8px)');
+    expect(items[2].style.flex).toBe('0 0 100%');
+  });
+
+  it('packs same-size groups into even rows and never mixes widths', () => {
+    const group = (key: string, layout: 'third' | 'half' | 'full') => ({
+      key,
+      layout,
+    });
+    const rows = timingBlockRows([
+      group('t1', 'third'),
+      group('t2', 'third'),
+      group('t3', 'third'),
+      group('t4', 'third'),
+      group('h1', 'half'),
+      group('h2', 'half'),
+      group('f1', 'full'),
+    ]);
+    expect(rows.map((row) => row.map((item) => item.key))).toEqual([
+      ['t1', 't2', 't3'],
+      ['t4'],
+      ['h1', 'h2'],
+      ['f1'],
+    ]);
+    expect(
+      timingBlockRows([
+        group('t1', 'third'),
+        group('h1', 'half'),
+        group('t2', 'third'),
+      ]).map((row) => row.map((item) => item.key)),
+    ).toEqual([['t1'], ['h1'], ['t2']]);
+
+    // Two items always split the row exactly; a lone half is never full width.
+    expect(timingRowItemFlex('half', 2)).toBe(
+      '1 1 calc((100% - 16px) / 2)',
+    );
+    expect(timingRowItemFlex('half', 1)).toBe(
+      '0 0 calc((100% - 16px) / 2)',
+    );
+    expect(timingRowItemFlex('third', 2)).toBe(
+      '1 1 calc((100% - 16px) / 2)',
+    );
+    expect(timingRowItemFlex('third', 3)).toBe(
+      '1 1 calc((100% - 32px) / 3)',
+    );
+    expect(timingRowItemFlex('full', 1)).toBe('0 0 100%');
   });
 
   it('sizes a group at 6 and 12 participants and ignores race-section rows', () => {

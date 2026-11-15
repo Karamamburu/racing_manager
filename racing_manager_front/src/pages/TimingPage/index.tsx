@@ -49,7 +49,11 @@ import {
 import { formatDateTime } from '../../shared/formatDateTime';
 import { AppShell } from '../../shared/layout';
 import type { EventDetails } from '../../shared/types/event';
-import { timingBlockLayout } from './blockLayout';
+import {
+  timingBlockLayout,
+  timingBlockRows,
+  timingRowItemFlex,
+} from './blockLayout';
 
 /** Session key of the workstation instance that owns this browser tab. */
 const WORKSTATION_STORAGE_KEY = 'timing-workstation-instance';
@@ -676,6 +680,7 @@ export function TimingPage() {
   const trailingStageHeaders = stageGroups
     .filter((group) => !renderedStageKeys.has(group.blockKey))
     .map((group) => <StageHeader key={group.blockKey} group={group} />);
+  const blockRows = timingBlockRows(blockGroups);
 
   return (
     <AppShell title="Хронометраж" subtitle={subtitle}>
@@ -794,16 +799,27 @@ export function TimingPage() {
           </Card>
         ) : (
           <>
-            <div className="timing-block-grid">
-              {blockGroups.map((group) => (
-                <div
-                  key={group.key}
-                  className="timing-block-grid__item"
-                  data-layout={group.layout}
-                >
-                  <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                    {group.nodes}
-                  </Space>
+            <div className="timing-block-rows">
+              {blockRows.map((row) => (
+                <div key={row[0].key} className="timing-block-row">
+                  {row.map((group) => (
+                    <div
+                      key={group.key}
+                      className="timing-block-row__item"
+                      data-layout={group.layout}
+                      style={{
+                        flex: timingRowItemFlex(group.layout, row.length),
+                      }}
+                    >
+                      <Space
+                        direction="vertical"
+                        size={16}
+                        style={{ width: '100%' }}
+                      >
+                        {group.nodes}
+                      </Space>
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>

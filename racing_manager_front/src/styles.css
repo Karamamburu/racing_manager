@@ -660,10 +660,18 @@ button.app-header-avatar {
 
 /*
  * Timing categories share the width by roster size: up to three small ones per
- * row, two medium ones, one large. The page sets data-layout from the
- * participant count; narrow workstations fall back to fewer columns.
+ * row, two medium ones, one large. The page packs same-size groups into a row
+ * and gives every item its exact fraction, so two cards always split the row in
+ * half; a lone half or third never stretches to the full width.
  */
-.timing-block-grid {
+.timing-block-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.timing-block-row {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
@@ -671,33 +679,19 @@ button.app-header-avatar {
   width: 100%;
 }
 
-.timing-block-grid__item {
-  flex: 1 1 100%;
+.timing-block-row__item {
   min-width: 0;
 }
 
-.timing-block-grid__item[data-layout='third'] {
-  flex-basis: calc(33.333% - 11px);
-  /* Two leftovers share the row as halves; a lone small card does not become
-     a full-width strip. */
-  max-width: 50%;
-}
-
-.timing-block-grid__item[data-layout='half'] {
-  flex-basis: calc(50% - 8px);
-  max-width: 100%;
-}
-
 @media (max-width: 1439px) {
-  .timing-block-grid__item[data-layout='third'] {
-    flex-basis: calc(50% - 8px);
+  .timing-block-row__item[data-layout='third'] {
+    flex: 0 0 calc((100% - 16px) / 2) !important;
   }
 }
 
 @media (max-width: 991px) {
-  .timing-block-grid__item[data-layout] {
-    flex-basis: 100%;
-    max-width: 100%;
+  .timing-block-row__item {
+    flex: 0 0 100% !important;
   }
 }
 
