@@ -365,6 +365,54 @@ describe('TimingCategoryBlock', () => {
     expect(screen.getByText('Непривязанных финишей: 2')).not.toBeNull();
   });
 
+  it('prompts to complete a running category once every capture is collected', () => {
+    render(
+      <TimingCategoryBlock
+        block={block({
+          state: 'RUNNING',
+          attemptId: 'attempt-1',
+          officialStartedAt: RUNNING_START,
+          elapsedMs: 1000,
+          startControlEnabled: false,
+          capturesComplete: true,
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder={false}
+        onStart={vi.fn()}
+      />,
+    );
+
+    const message = screen.getByText(
+      'Все отсечки в гонке данной категории получены, её можно завершить',
+    );
+    const alert = message.closest('.ant-alert');
+    expect(alert).not.toBeNull();
+    expect(alert?.className).toContain('ant-alert-info');
+  });
+
+  it('paints the finished-category plate green', () => {
+    render(
+      <TimingCategoryBlock
+        block={block({
+          finished: true,
+          blockReason:
+            'Гонка в этой категории завершена. Результаты менять нельзя.',
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder={false}
+        onStart={vi.fn()}
+      />,
+    );
+
+    const alert = screen
+      .getByText(
+        'Гонка в этой категории завершена. Результаты менять нельзя.',
+      )
+      .closest('.ant-alert');
+    expect(alert).not.toBeNull();
+    expect(alert?.className).toContain('ant-alert-success');
+  });
+
   it('hides the pending-finish count when no finish is unbound', () => {
     render(
       <TimingCategoryBlock

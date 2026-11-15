@@ -31,6 +31,17 @@ const STATE_COLORS: Record<TimingCategoryState, string> = {
   CANCELLED: 'red',
 };
 
+/** The prompt shown once every participant of a running block holds N passes. */
+const READY_MESSAGES = {
+  CATEGORY:
+    'Все отсечки в гонке данной категории получены, её можно завершить',
+  HEAT: 'Все отсечки в заезде получены, его можно завершить',
+} as const;
+
+/** The finished-category fallback when the API sent no reason of its own. */
+const FINISHED_FALLBACK =
+  'Гонка в этой категории завершена. Результаты менять нельзя.';
+
 /**
  * One elapsed duration as `mm:ss.mmm`, or `h:mm:ss.mmm` from one hour up.
  *
@@ -213,7 +224,19 @@ export function TimingCategoryBlock({
           </Typography.Text>
         ) : null}
 
-        {block.blockReason && !allInRaces ? (
+        {block.finished ? (
+          <Alert
+            type="success"
+            showIcon
+            message={block.blockReason ?? FINISHED_FALLBACK}
+          />
+        ) : block.capturesComplete ? (
+          <Alert
+            type="info"
+            showIcon
+            message={isHeat ? READY_MESSAGES.HEAT : READY_MESSAGES.CATEGORY}
+          />
+        ) : block.blockReason && !allInRaces ? (
           <Alert type="warning" showIcon message={block.blockReason} />
         ) : null}
 

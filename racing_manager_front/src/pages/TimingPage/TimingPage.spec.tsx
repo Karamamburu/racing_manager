@@ -826,7 +826,7 @@ describe('TimingPage', () => {
 
     renderPage();
 
-    expect(await screen.findByText(/только для чтения/)).not.toBeNull();
+    expect(await screen.findByText(/Только для чтения/)).not.toBeNull();
     expect(screen.getByText('Захват у станции ws-other')).not.toBeNull();
     expect(
       (screen.getByRole('button', { name: /Старт/ }) as HTMLButtonElement)

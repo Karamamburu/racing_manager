@@ -91,6 +91,10 @@ export interface TimingCategoryBlockView {
   elapsedMs: number | null;
   startControlEnabled: boolean;
   blockReason: string | null;
+  /** A running attempt holds every capture it needs and can be completed. */
+  capturesComplete?: boolean;
+  /** The protocol category or the multi-stage race is finished and locked. */
+  finished?: boolean;
   participants: TimingParticipantTileView[];
   pendingFinishes: TimingPassView[];
   lastAttempts: TimingAttemptRef[];
