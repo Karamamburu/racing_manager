@@ -86,6 +86,13 @@ export interface TimingCategoryBlockView {
   elapsedMs: number | null;
   startControlEnabled: boolean;
   blockReason: string | null;
+  /**
+   * A running attempt holds exactly N bound passes for every non-excluded
+   * participant and has no unbound finish, so it can be completed.
+   */
+  capturesComplete: boolean;
+  /** The protocol category or the multi-stage race is finished and locked. */
+  finished: boolean;
   participants: TimingParticipantTileView[];
   pendingFinishes: TimingPassView[];
   lastAttempts: TimingAttemptRef[];

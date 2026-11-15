@@ -50,6 +50,8 @@ const HEAT_BLOCK: TimingCategoryBlockView = {
   elapsedMs: 0,
   startControlEnabled: false,
   blockReason: null,
+  capturesComplete: false,
+  finished: false,
   participants: [],
   pendingFinishes: [],
   lastAttempts: [],

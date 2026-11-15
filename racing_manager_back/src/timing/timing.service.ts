@@ -3798,6 +3798,11 @@ export class TimingService {
           : null,
       startControlEnabled,
       blockReason,
+      capturesComplete:
+        latest?.status === 'RUNNING'
+          ? allCapturesComplete(roster, statistics, pendingFinishes.length)
+          : false,
+      finished: plan.race.status === 'DONE',
       participants: roster.map((row) =>
         toTileView(
           row,
@@ -4097,6 +4102,11 @@ export class TimingService {
           : null,
       startControlEnabled: refusal === null,
       blockReason: refusal === null ? null : startRefusalMessage(refusal),
+      capturesComplete:
+        latest?.status === 'RUNNING'
+          ? allCapturesComplete(roster, statistics, pendingFinishes.length)
+          : false,
+      finished: category.categoryFinished,
       participants: roster.map((row) =>
         toTileView(
           row,
@@ -4755,6 +4765,27 @@ function passStatistics(
     });
   }
   return statistics;
+}
+
+/**
+ * Whether a running attempt already holds every capture it needs: each
+ * non-excluded participant has exactly N bound passes and no finish is still
+ * unbound. The surface shows the «можно завершить» cue from this.
+ */
+function allCapturesComplete(
+  roster: readonly TileSource[],
+  statistics: ReadonlyMap<string, PassStatistics>,
+  pendingFinishCount: number,
+): boolean {
+  const active = roster.filter((row) => row.excludedReason === null);
+  return (
+    pendingFinishCount === 0 &&
+    active.length > 0 &&
+    active.every(
+      (row) =>
+        (statistics.get(row.enrollmentId)?.passCount ?? 0) === row.requiredLaps,
+    )
+  );
 }
 
 /**

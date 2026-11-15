@@ -181,3 +181,7 @@ The timing grid now packs same-width categories into explicit rows: three thirds
 ## 2026-11-15 — heats share their stage row
 
 The timing layout now fills a partial row with the next card of the same state and width, so a full-width race between two 7–12-participant categories no longer leaves one of them orphaned on an empty half-row. A multi-stage race stays one full-width section, but each stage packs its heat cards by their own roster size: two 7–8-participant heats now sit side by side instead of stacking as full-width cards, while a 30-participant heat keeps the full width.
+
+## 2026-11-15 — timing block completion cues
+
+The timing surface now reports `capturesComplete` for a running block that holds exactly N bound passes for every non-excluded participant with no unbound finish, and `finished` for a finished protocol category or multi-stage race. The page shows the blue «Все отсечки в гонке данной категории получены, её можно завершить» cue once every capture is in, and paints the locked-results plate of a finished category green instead of the warning tone.

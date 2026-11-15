@@ -1059,6 +1059,24 @@ describe('TimingService', () => {
       expect(block.participants[0].state).toBe('EXCLUDED');
     });
 
+    it('marks a finished category and keeps its locked-results reason', async () => {
+      arrangeStarts([startRow({ id: START_A })], [formatRow(1, 1)]);
+      repository.listEnrollmentRows.mockResolvedValue([
+        enrollmentRow({ enrollmentId: 'enrollment-a', startNumber: 10 }),
+      ]);
+      repository.findAttemptsForCategory.mockResolvedValue([]);
+      repository.isCategoryFinished.mockResolvedValue(true);
+
+      const surface = await service.getSurface(USER_ID, EVENT_ID);
+      const block = surface.categories[0];
+
+      expect(block.finished).toBe(true);
+      expect(block.capturesComplete).toBe(false);
+      expect(block.blockReason).toBe(
+        'Гонка в этой категории завершена. Результаты менять нельзя.',
+      );
+    });
+
     it('shows a running attempt with its elapsed time, tiles and pending finishes', async () => {
       arrangeStarts(
         [startRow({ id: START_A, lapCount: 3 })],
@@ -1113,6 +1131,8 @@ describe('TimingService', () => {
       expect(block.elapsedMs).toBe(90_000);
       expect(block.startControlEnabled).toBe(false);
       expect(block.blockReason).toBe('Забег этой категории уже запущен.');
+      expect(block.capturesComplete).toBe(false);
+      expect(block.finished).toBe(false);
       expect(block.participants[0]).toMatchObject({
         enrollmentId: 'enrollment-a',
         passCount: 2,
@@ -1130,6 +1150,40 @@ describe('TimingService', () => {
           officialStartedAt: new Date(NOW.getTime() - 90_000).toISOString(),
         },
       ]);
+    });
+
+    it('marks a running attempt ready to complete when every capture is collected', async () => {
+      arrangeStarts(
+        [startRow({ id: START_A, lapCount: 3 })],
+        [formatRow(1, 1)],
+      );
+      repository.listEnrollmentRows.mockResolvedValue([
+        enrollmentRow({ enrollmentId: 'enrollment-a', startNumber: 10 }),
+      ]);
+      repository.findAttemptsForCategory.mockResolvedValue([
+        attemptRow({
+          id: 'attempt-1',
+          attemptNumber: 1,
+          officialStartedAt: new Date(NOW.getTime() - 90_000),
+        }),
+      ]);
+      repository.listParticipantRoster.mockResolvedValue([
+        rosterRow({ enrollmentId: 'enrollment-a', requiredLaps: 3 }),
+      ]);
+      repository.listMarks.mockResolvedValue([
+        markRow({ id: 'mark-1', lapNumber: 1 }),
+        markRow({ id: 'mark-2', lapNumber: 2 }),
+        markRow({ id: 'mark-3', lapNumber: 3 }),
+      ]);
+      repository.listPendingFinishes.mockResolvedValue([]);
+      repository.getCaptureLock.mockResolvedValue(lockRow());
+
+      const surface = await service.getSurface(USER_ID, EVENT_ID);
+      const block = surface.categories[0];
+
+      expect(block.state).toBe('RUNNING');
+      expect(block.capturesComplete).toBe(true);
+      expect(block.finished).toBe(false);
     });
 
     it('shows a closed attempt with no elapsed time and keeps the earlier attempts', async () => {
