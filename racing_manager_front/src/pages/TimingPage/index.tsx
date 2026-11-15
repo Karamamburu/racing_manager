@@ -1,4 +1,4 @@
-import { CopyOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, CopyOutlined } from '@ant-design/icons';
 import { AxiosError } from 'axios';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -18,7 +18,7 @@ import {
 } from 'antd';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { useEventDetailsQuery } from '../../features/events/useEventDetailsQuery';
 import { AnonymousSplitQueue } from '../../features/timing/AnonymousSplitQueue';
@@ -252,10 +252,20 @@ function surfaceHasAttempt(
  */
 export function TimingPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const sessionQuery = useSessionQuery();
   const eventQuery = useEventDetailsQuery(id);
   const [workstationInstanceId] = useState(readWorkstationInstanceId);
+  const backToEvent = id ? (
+    <Button
+      icon={<ArrowLeftOutlined />}
+      aria-label="К мероприятию"
+      onClick={() => navigate(`/events/${id}`)}
+    >
+      К мероприятию
+    </Button>
+  ) : undefined;
   // The record the drawer reads, and the `enrollmentId → fullName` map of the
   // block that supplied the attempt, so a pass names its participant without a
   // second request per row.
@@ -366,7 +376,7 @@ export function TimingPage() {
 
   if (sessionQuery.isLoading) {
     return (
-      <AppShell title="Хронометраж" subtitle={subtitle}>
+      <AppShell title="Хронометраж" subtitle={subtitle} extra={backToEvent}>
         <Card>
           <Skeleton active paragraph={{ rows: 4 }} />
         </Card>
@@ -376,7 +386,7 @@ export function TimingPage() {
 
   if (!canOperate) {
     return (
-      <AppShell title="Хронометраж" subtitle={subtitle}>
+      <AppShell title="Хронометраж" subtitle={subtitle} extra={backToEvent}>
         <Result
           status="403"
           title="Хронометраж недоступен"
@@ -388,7 +398,7 @@ export function TimingPage() {
 
   if (surfaceQuery.isLoading) {
     return (
-      <AppShell title="Хронометраж" subtitle={subtitle}>
+      <AppShell title="Хронометраж" subtitle={subtitle} extra={backToEvent}>
         <Card>
           <Skeleton active paragraph={{ rows: 8 }} />
         </Card>
@@ -398,7 +408,7 @@ export function TimingPage() {
 
   if (surfaceQuery.isError) {
     return (
-      <AppShell title="Хронометраж" subtitle={subtitle}>
+      <AppShell title="Хронометраж" subtitle={subtitle} extra={backToEvent}>
         <Alert
           type="error"
           showIcon
@@ -417,7 +427,7 @@ export function TimingPage() {
   const surface = surfaceQuery.data;
   if (!surface) {
     return (
-      <AppShell title="Хронометраж" subtitle={subtitle}>
+      <AppShell title="Хронометраж" subtitle={subtitle} extra={backToEvent}>
         <Card>
           <Empty description="Хронометраж пуст" />
         </Card>
@@ -777,7 +787,7 @@ export function TimingPage() {
     .map((group) => <StageHeader key={group.blockKey} group={group} />);
 
   return (
-    <AppShell title="Хронометраж" subtitle={subtitle}>
+    <AppShell title="Хронометраж" subtitle={subtitle} extra={backToEvent}>
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
         {isCaptureHolder ? null : (
           <Alert

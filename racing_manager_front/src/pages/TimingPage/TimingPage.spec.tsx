@@ -307,6 +307,7 @@ function renderPage() {
       <MemoryRouter initialEntries={['/events/event-1/timing']}>
         <Routes>
           <Route path="/events/:id/timing" element={<TimingPage />} />
+          <Route path="/events/:id" element={<p>Страница мероприятия</p>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -458,6 +459,21 @@ describe('TimingPage', () => {
         'Не удалось скопировать. Выделите ID вручную.',
       ),
     ).not.toBeNull();
+  });
+
+  it('returns to the event page from the header', async () => {
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(surface());
+    mockCapture();
+
+    renderPage();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'К мероприятию' }),
+    );
+
+    expect(await screen.findByText('Страница мероприятия')).not.toBeNull();
   });
 
   it('configures no periodic surface read for a running block clock', async () => {

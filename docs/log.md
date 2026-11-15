@@ -205,3 +205,7 @@ The attempt record drawer is now titled «Запись категории» for 
 ## 2026-11-15 — copying the device id for capture transfer
 
 The timing top block now has a «Копировать» action beside the workstation id, so a referee can move capture to another device without selecting a long UUID by hand. The transfer field is labelled «Устройство назначения» and refuses the current device locally; an unreadable clipboard reports an inline hint instead of a silent failure.
+
+## 2026-11-15 — back to the event from timing
+
+The timing page header now carries a «К мероприятию» action back to `/events/:id`, so leaving the timing surface no longer depends on the browser Back button.
