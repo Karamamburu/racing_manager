@@ -135,6 +135,34 @@ describe('TimingCategoryBlock', () => {
     expect(screen.queryByText(/Время: /)).toBeNull();
   });
 
+  it('tints the card by gender for quick identification', () => {
+    const { container, rerender } = render(
+      <TimingCategoryBlock
+        block={block({ gender: 'M' })}
+        title="5 км · Мужчины"
+        isCaptureHolder={false}
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector('.ant-card')?.className).toContain(
+      'timing-gender-m',
+    );
+
+    rerender(
+      <TimingCategoryBlock
+        block={block({ gender: 'F' })}
+        title="5 км · Женщины"
+        isCaptureHolder={false}
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(container.querySelector('.ant-card')?.className).toContain(
+      'timing-gender-f',
+    );
+  });
+
   it('shows the state, its own start moment and elapsed time while running', () => {
     render(
       <TimingCategoryBlock

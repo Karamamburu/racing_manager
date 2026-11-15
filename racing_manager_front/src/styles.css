@@ -715,6 +715,19 @@ button.app-header-avatar {
   gap: 6px;
 }
 
+/* A pastel card fill makes men's and women's categories easy to tell apart. */
+.timing-gender-m.ant-card,
+.timing-gender-m.ant-card > .ant-card-head,
+.timing-gender-m.ant-card > .ant-card-body {
+  background: #e6f4ff;
+}
+
+.timing-gender-f.ant-card,
+.timing-gender-f.ant-card > .ant-card-head,
+.timing-gender-f.ant-card > .ant-card-body {
+  background: #fff0f6;
+}
+
 #cc-main {
   --cc-font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --cc-modal-border-radius: 10px;

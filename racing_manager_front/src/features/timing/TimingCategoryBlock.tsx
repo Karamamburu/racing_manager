@@ -76,6 +76,13 @@ function showsStartControl(block: TimingCategoryBlockView): boolean {
   return block.stageState === undefined || block.stageState === 'SEEDED';
 }
 
+/** A pastel card tint for quick gender identification on a busy surface. */
+function genderClassName(gender: string): string | undefined {
+  if (gender === 'M') return 'timing-gender-m';
+  if (gender === 'F') return 'timing-gender-f';
+  return undefined;
+}
+
 /**
  * One timeable protocol category or one heat of a multi-stage race.
  *
@@ -141,6 +148,7 @@ export function TimingCategoryBlock({
   return (
     <Card
       size="small"
+      className={genderClassName(block.gender)}
       title={
         <Space wrap size={6} align="baseline">
           <Button

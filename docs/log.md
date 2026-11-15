@@ -209,3 +209,7 @@ The timing top block now has a «Копировать» action beside the workst
 ## 2026-11-15 — back to the event from timing
 
 The timing page header now carries a «К мероприятию» action back to `/events/:id`, so leaving the timing surface no longer depends on the browser Back button.
+
+## 2026-11-15 — gender tint on timing cards
+
+Category and heat cards are now tinted by gender: light blue for men and light pink for women. The tint is a display-only class on the existing card, so it changes no state, no capture rule and no API.
