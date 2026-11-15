@@ -31,12 +31,12 @@ Authoritative race outcomes and timing for an enrollment; protocol place on read
 
 ## Timing publication (MANUAL-TIMING)
 
-- A closed timing attempt publishes the enrollment's authoritative `FINISHED` result with `timeMilliseconds` and exactly N lap splits into `result_splits`; `Result.timing_session_id` records the publishing attempt. Timing writes no place and no registration-only result. See [timing](timing.md).
+- A completed timing attempt publishes the enrollment's authoritative result: `FINISHED` with `timeMilliseconds` and exactly N lap splits at N, `DNS` when the participant has no capture, or `DNF` when the participant has some captures but fewer than N. `Result.timing_session_id` records the publishing attempt. Timing writes no place and no registration-only result. See [timing](timing.md).
 - `ResultResponseDto` gains additive `laps?: TimingLapSplitDto[]` (`lapNumber`, `lapTimeMs`, `cumulativeMs`); `EventParticipant` gains additive `lapSplits?: TimingLapSplitDto[]`. The legacy `ResultLap` rows and `EventParticipant.laps` stay for historical and race-stage data.
 - A manual upsert clears `result_splits` for that result; `laps[]` on `PUT .../enrollments/:enrollmentId/result` stays rejected (400). Timing is the only split writer.
 - A timing-published result is republished after an official-time correction while the category is unfinished; a cancelled attempt publishes nothing; after the category finish neither the total nor the splits change.
 - A split never breaks a tie, reorders rows or writes a stored place; the place stays computed on read from the total under the existing category/section rules.
-- A heat attempt of a multi-stage race publishes to CMS `ClassHeatTime` (total + `OK`) and never writes an enrollment `Result` or `result_splits`; the manual heat-time form is its correction path. See [cms](cms.md) and [timing](timing.md).
+- A heat attempt of a multi-stage race publishes `ClassHeatTime` rows (`OK` + total at N, `DNS` with no capture, `DNF` with fewer than N captures) and never writes an enrollment `Result` or `result_splits`; the manual heat-time form is its correction path. See [cms](cms.md) and [timing](timing.md).
 
 ## Code
 
