@@ -99,6 +99,28 @@ describe('NumberCaptureField', () => {
     expect(screen.queryByText('Отправляем отметку…')).toBeNull();
   });
 
+  it('keeps one fixed feedback slot across idle, busy and status states', async () => {
+    const gate = deferredOutcome();
+    const onCommit = vi.fn(() => gate.promise);
+    render(
+      <NumberCaptureField
+        resolve={() => [candidate()]}
+        onCommit={onCommit}
+      />,
+    );
+
+    const slot = screen.getByTestId('timing-field-feedback');
+    expect(slot.style.height).toBe('44px');
+
+    fireEvent.change(numberInput(), { target: { value: '17' } });
+    fireEvent.keyDown(numberInput(), { key: 'Enter' });
+    await waitFor(() => expect(slot.textContent).toContain('Отправляем'));
+
+    gate.resolve({ status: 'UNSENT' });
+    await waitFor(() => expect(slot.textContent).toContain('не отправлено'));
+    expect(slot.style.height).toBe('44px');
+  });
+
   it('commits with Space, which never becomes part of the number', async () => {
     const onCommit = vi.fn().mockResolvedValue({ status: 'CONFIRMED' });
     render(

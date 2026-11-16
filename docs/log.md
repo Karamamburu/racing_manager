@@ -233,3 +233,7 @@ The «Очередь отправки» block is now hidden when there is no uns
 ## 2026-11-16 — no queue flicker during an online capture
 
 The send queue no longer appears for an entry whose request is still in flight. A normal online press therefore does not push the page down for a fraction of a second; the block appears only when an entry actually remains unanswered (or an earlier entry is already waiting).
+
+## 2026-11-16 — fixed feedback slot under the number field
+
+The number field's busy row, validation refusal and last-outcome status now share one fixed-height area. Pressing Enter no longer adds or removes a line that changes the top card height and pushes the category blocks down.

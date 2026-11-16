@@ -400,26 +400,47 @@ export function NumberCaptureField({
           fontVariantNumeric: 'tabular-nums',
         }}
       />
-      {busyLabel === null ? null : (
-        <Space size={6}>
-          <Spin size="small" />
-          <Typography.Text type="secondary">{busyLabel}</Typography.Text>
-        </Space>
-      )}
-      {error ? (
-        <Typography.Text type="danger" role="alert" style={{ textAlign: 'center' }}>
-          {error}
-        </Typography.Text>
-      ) : null}
-      {status === null ? null : (
-        <Typography.Text
-          role="status"
-          type={status.tone === 'rejected' ? 'danger' : 'secondary'}
-          style={{ textAlign: 'center' }}
-        >
-          {describeStatus(status, pendingCount)}
-        </Typography.Text>
-      )}
+      {/*
+       * One fixed-height feedback slot. The busy row, a validation refusal and
+       * the last outcome used to add and remove lines under the input, which
+       * changed the whole card height on every Enter. Reserving the slot keeps
+       * the field and every block below it still while the answer arrives.
+       */}
+      <div
+        data-testid="timing-field-feedback"
+        style={{
+          width: '100%',
+          height: 44,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+          overflowY: 'auto',
+        }}
+      >
+        {busyLabel !== null ? (
+          <Space size={6}>
+            <Spin size="small" />
+            <Typography.Text type="secondary">{busyLabel}</Typography.Text>
+          </Space>
+        ) : error ? (
+          <Typography.Text
+            type="danger"
+            role="alert"
+            style={{ textAlign: 'center' }}
+          >
+            {error}
+          </Typography.Text>
+        ) : status === null ? null : (
+          <Typography.Text
+            role="status"
+            type={status.tone === 'rejected' ? 'danger' : 'secondary'}
+            style={{ textAlign: 'center' }}
+          >
+            {describeStatus(status, pendingCount)}
+          </Typography.Text>
+        )}
+      </div>
 
       <Modal
         open={choice !== null}
