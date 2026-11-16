@@ -10,6 +10,13 @@ import type { TimingCaptureView } from './types';
  * optimistically: the badge follows `capture`, and a refused take leaves it
  * untouched. Transfer is offered to the holder and force-release is an
  * administrator action with a required reason.
+ *
+ * Transfer is the online-only action this surface owns (S-09, F-04, FR-33,
+ * FR-43, FR-48). While this device has an unsent entry, or the page has no
+ * connection, the input and the button are not offered and the reason is
+ * stated in words, so it never depends on colour (U-04). Both facts can hold
+ * at once and each keeps its own sentence. Take-capture, force-release and the
+ * holder tag are unaffected by these gates (U-06, E-21).
  */
 
 export interface CaptureControlsProps {
@@ -19,12 +26,31 @@ export interface CaptureControlsProps {
   workstationInstanceId: string;
   /** Administrator only: force-release an abandoned hold. */
   canAdminister: boolean;
+  /** False while the page has no server answer path; defaults to online. */
+  isOnline?: boolean;
+  /** Unsent entries of this device; transfer waits for them (FR-33). */
+  unsentEntries?: number;
   onTake: () => Promise<void>;
   onTransfer: (toWorkstationInstanceId: string) => Promise<void>;
   onForceRelease: (reason: string) => Promise<void>;
 }
 
 type CaptureAction = 'TAKE' | 'TRANSFER' | 'RELEASE';
+
+/** The transfer is withheld while this device has entries the server has not answered. */
+const TRANSFER_UNSENT_REASON =
+  'Передача захвата недоступна: есть неотправленные записи.';
+
+/** The transfer is withheld while the page has no connection (F-04). */
+const TRANSFER_OFFLINE_REASON = 'Нужна связь с сервером.';
+
+/**
+ * A count the page derived from the outbox. A local negative or fractional
+ * value can only come from a defect; the gate never invents an entry from it.
+ */
+function wholeCount(value: number): number {
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+}
 
 /** The API message when the failure carries one; never a status-code sentence. */
 function describeFailure(error: unknown, fallback: string): string {
@@ -45,6 +71,8 @@ export function CaptureControls({
   capture,
   workstationInstanceId,
   canAdminister,
+  isOnline = true,
+  unsentEntries = 0,
   onTake,
   onTransfer,
   onForceRelease,
@@ -61,6 +89,12 @@ export function CaptureControls({
     : holderId === null
       ? 'Захват свободен'
       : `Захват у устройства ${holderId}`;
+
+  const unsentCount = wholeCount(unsentEntries);
+  const hasUnsent = unsentCount > 0;
+  // Transfer is online-only and waits for every recorded entry to have an
+  // answer; both reasons stay readable while both facts hold (S-09, F-04).
+  const transferWithheld = !isOnline || hasUnsent;
 
   const run = async (
     action: CaptureAction,
@@ -144,28 +178,43 @@ export function CaptureControls({
       ) : null}
 
       {holdsHere ? (
-        <Space wrap size={8} align="center">
-          <Input
-            aria-label="Устройство назначения"
-            placeholder="Устройство назначения"
-            autoComplete="off"
-            value={target}
-            disabled={busy !== null}
-            onChange={(event) => {
-              setTarget(event.target.value);
-              setError(null);
-            }}
-            onPressEnter={transfer}
-            style={{ maxWidth: 260 }}
-          />
-          <Button
-            loading={busy === 'TRANSFER'}
-            disabled={busy !== null}
-            onClick={transfer}
-          >
-            Передать захват
-          </Button>
-        </Space>
+        transferWithheld ? (
+          <Space direction="vertical" size={2}>
+            {hasUnsent ? (
+              <Typography.Text type="warning" style={{ fontSize: 12 }}>
+                {TRANSFER_UNSENT_REASON}
+              </Typography.Text>
+            ) : null}
+            {isOnline ? null : (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {TRANSFER_OFFLINE_REASON}
+              </Typography.Text>
+            )}
+          </Space>
+        ) : (
+          <Space wrap size={8} align="center">
+            <Input
+              aria-label="Устройство назначения"
+              placeholder="Устройство назначения"
+              autoComplete="off"
+              value={target}
+              disabled={busy !== null}
+              onChange={(event) => {
+                setTarget(event.target.value);
+                setError(null);
+              }}
+              onPressEnter={transfer}
+              style={{ maxWidth: 260 }}
+            />
+            <Button
+              loading={busy === 'TRANSFER'}
+              disabled={busy !== null}
+              onClick={transfer}
+            >
+              Передать захват
+            </Button>
+          </Space>
+        )
       ) : null}
 
       {canAdminister ? (

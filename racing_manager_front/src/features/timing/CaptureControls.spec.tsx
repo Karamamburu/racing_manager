@@ -10,6 +10,11 @@ import { CaptureControls } from './CaptureControls';
 import type { TimingCaptureView } from './types';
 
 const WORKSTATION = 'station-a';
+/** The reason a transfer is withheld while this device has unsent entries (S-09). */
+const UNSENT_TRANSFER_REASON =
+  'Передача захвата недоступна: есть неотправленные записи.';
+/** The reason a transfer is withheld while the page has no connection (F-04). */
+const OFFLINE_REASON = 'Нужна связь с сервером.';
 
 function capture(
   overrides: Partial<TimingCaptureView> = {},
@@ -248,6 +253,161 @@ describe('CaptureControls', () => {
       target: { value: ' Планшет потерял связь ' },
     });
     fireEvent.click(releaseButton);
+
+    await waitFor(() =>
+      expect(onForceRelease).toHaveBeenCalledWith('Планшет потерял связь'),
+    );
+  });
+
+  it('offers transfer by default: online and no unsent entry', () => {
+    render(
+      <CaptureControls
+        capture={capture({ workstationInstanceId: WORKSTATION })}
+        workstationInstanceId={WORKSTATION}
+        canAdminister={false}
+        onTake={vi.fn()}
+        onTransfer={vi.fn()}
+        onForceRelease={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Устройство назначения')).not.toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Передать захват' }),
+    ).not.toBeNull();
+    expect(screen.queryByText(UNSENT_TRANSFER_REASON)).toBeNull();
+    expect(screen.queryByText(OFFLINE_REASON)).toBeNull();
+  });
+
+  it('withholds transfer while this device has an unsent entry and names the reason', () => {
+    render(
+      <CaptureControls
+        capture={capture({ workstationInstanceId: WORKSTATION })}
+        workstationInstanceId={WORKSTATION}
+        canAdminister={false}
+        onTake={vi.fn()}
+        onTransfer={vi.fn()}
+        onForceRelease={vi.fn()}
+        unsentEntries={2}
+      />,
+    );
+
+    expect(screen.queryByLabelText('Устройство назначения')).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Передать захват' }),
+    ).toBeNull();
+    expect(screen.getByText(UNSENT_TRANSFER_REASON)).not.toBeNull();
+    // The holder tag and the other controls keep their meaning (U-06).
+    expect(screen.getByText('Захват у этого устройства')).not.toBeNull();
+  });
+
+  it('withholds transfer while the page has no connection and states the reason', () => {
+    render(
+      <CaptureControls
+        capture={capture({ workstationInstanceId: WORKSTATION })}
+        workstationInstanceId={WORKSTATION}
+        canAdminister={false}
+        onTake={vi.fn()}
+        onTransfer={vi.fn()}
+        onForceRelease={vi.fn()}
+        isOnline={false}
+      />,
+    );
+
+    expect(screen.queryByLabelText('Устройство назначения')).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Передать захват' }),
+    ).toBeNull();
+    expect(screen.getByText(OFFLINE_REASON)).not.toBeNull();
+    expect(screen.queryByText(UNSENT_TRANSFER_REASON)).toBeNull();
+  });
+
+  it('offers transfer again when the page is online and every entry has an answer', () => {
+    const { rerender } = render(
+      <CaptureControls
+        capture={capture({ workstationInstanceId: WORKSTATION })}
+        workstationInstanceId={WORKSTATION}
+        canAdminister={false}
+        onTake={vi.fn()}
+        onTransfer={vi.fn()}
+        onForceRelease={vi.fn()}
+        isOnline={false}
+        unsentEntries={1}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'Передать захват' }),
+    ).toBeNull();
+    // Both facts are true at once and both stay readable.
+    expect(screen.getByText(OFFLINE_REASON)).not.toBeNull();
+    expect(screen.getByText(UNSENT_TRANSFER_REASON)).not.toBeNull();
+
+    rerender(
+      <CaptureControls
+        capture={capture({ workstationInstanceId: WORKSTATION })}
+        workstationInstanceId={WORKSTATION}
+        canAdminister={false}
+        onTake={vi.fn()}
+        onTransfer={vi.fn()}
+        onForceRelease={vi.fn()}
+        isOnline={false}
+        unsentEntries={0}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'Передать захват' }),
+    ).toBeNull();
+    expect(screen.getByText(OFFLINE_REASON)).not.toBeNull();
+    expect(screen.queryByText(UNSENT_TRANSFER_REASON)).toBeNull();
+
+    rerender(
+      <CaptureControls
+        capture={capture({ workstationInstanceId: WORKSTATION })}
+        workstationInstanceId={WORKSTATION}
+        canAdminister={false}
+        onTake={vi.fn()}
+        onTransfer={vi.fn()}
+        onForceRelease={vi.fn()}
+        isOnline
+        unsentEntries={0}
+      />,
+    );
+
+    expect(screen.getByLabelText('Устройство назначения')).not.toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Передать захват' }),
+    ).not.toBeNull();
+    expect(screen.queryByText(OFFLINE_REASON)).toBeNull();
+    expect(screen.queryByText(UNSENT_TRANSFER_REASON)).toBeNull();
+  });
+
+  it('keeps take-capture and force-release available while transfer is withheld', async () => {
+    const onTake = vi.fn().mockResolvedValue(undefined);
+    const onForceRelease = vi.fn().mockResolvedValue(undefined);
+    render(
+      <CaptureControls
+        capture={capture()}
+        workstationInstanceId={WORKSTATION}
+        canAdminister
+        onTake={onTake}
+        onTransfer={vi.fn()}
+        onForceRelease={onForceRelease}
+        isOnline={false}
+        unsentEntries={3}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Взять захват' }));
+    await waitFor(() => expect(onTake).toHaveBeenCalledTimes(1));
+    // The refusal of a transfer never leaks into the other actions.
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Причина освобождения'), {
+      target: { value: ' Планшет потерял связь ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Освободить' }));
 
     await waitFor(() =>
       expect(onForceRelease).toHaveBeenCalledWith('Планшет потерял связь'),
