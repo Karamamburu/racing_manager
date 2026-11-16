@@ -51,6 +51,42 @@ export function formatTimingClock(value: string | null): string {
   return `${hours}:${minutes}:${seconds}.${milliseconds}`;
 }
 
+/** The unsent cue shares no colour with exclusion or a participant state (U-04). */
+const UNSENT_OUTLINE_COLOUR = '#722ed1';
+const UNSENT_BADGE_BACKGROUND = '#f9f0ff';
+const UNSENT_BADGE_TEXT = '#391085';
+const UNSENT_BADGE_BORDER = '#d3adf7';
+
+/**
+ * The unsent lap line is bold and dotted: the `+N` token names the unsent part
+ * and the type marks the figure, so no colour carries the meaning (S-01, U-04).
+ */
+const UNSENT_MARK_STYLE: CSSProperties = {
+  fontWeight: 700,
+  textDecorationLine: 'underline',
+  textDecorationStyle: 'dotted',
+};
+
+/** The badge that names the unsent marks in words, never by colour alone. */
+const UNSENT_BADGE_STYLE: CSSProperties = {
+  alignSelf: 'flex-start',
+  maxWidth: '100%',
+  marginTop: 1,
+  padding: '1px 4px',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: UNSENT_BADGE_BORDER,
+  borderRadius: 4,
+  backgroundColor: UNSENT_BADGE_BACKGROUND,
+  color: UNSENT_BADGE_TEXT,
+  fontSize: 9,
+  fontWeight: 600,
+  lineHeight: 1.15,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
 function displayNumber(startNumber: number): string {
   return Number.isFinite(startNumber) && startNumber > 0
     ? String(startNumber)
@@ -60,6 +96,7 @@ function displayNumber(startNumber: number): string {
 function tileStyle(
   state: TimingParticipantTileState,
   interactive: boolean,
+  hasUnsent: boolean,
 ): CSSProperties {
   return {
     display: 'block',
@@ -72,10 +109,36 @@ function tileStyle(
     border: '1px solid',
     borderRadius: 6,
     ...STATE_STYLES[state],
+    // The dashed outline is the second, non-colour signal of an unsent mark
+    // (S-02, U-04); the state border and fill stay untouched (FR-34).
+    ...(hasUnsent
+      ? {
+          outlineWidth: 2,
+          outlineStyle: 'dashed',
+          outlineColor: UNSENT_OUTLINE_COLOUR,
+          outlineOffset: 1,
+        }
+      : {}),
     cursor: interactive ? 'pointer' : 'default',
     textAlign: 'left',
     font: 'inherit',
   };
+}
+
+/**
+ * The accessible name of a tile: number and name, plus both lap counts in words
+ * while marks are unsent (S-01, FR-07). A tile without pending marks keeps the
+ * bare number and name it has today.
+ */
+function tileAccessibleName(
+  number: string,
+  participant: TimingParticipantTileView,
+  pendingMarks: number,
+): string {
+  const base = `${number} ${participant.fullName}`;
+  if (pendingMarks === 0) return base;
+  const confirmed = `кругов подтверждено: ${participant.passCount}`;
+  return `${base}, ${confirmed}, не отправлено: ${pendingMarks}`;
 }
 
 /**
@@ -87,18 +150,61 @@ function tileStyle(
  * the whole card is an easy click target. It carries no capture logic: a tile
  * click is reported to the caller, and the capture wave decides what it means.
  * An excluded participant is never a control.
+ *
+ * MANUAL-TIMING-4 (S-01, S-02, FR-07, FR-08, FR-09, FR-34): `pendingMarks` is
+ * the count the page derived from the device outbox, never a server fact. While
+ * it is positive the lap line reads `confirmed+pending/required` instead of a
+ * sum, the tile gains a dashed violet outline and a light badge that names the
+ * unsent marks in words, and the accessible name states both counts. The state
+ * fill, state label, size and click handling stay exactly as they are, and a
+ * tile told nothing is pending renders as it did before.
  */
 export function ParticipantTile({
   participant,
+  pendingMarks = 0,
   onClick,
 }: {
   participant: TimingParticipantTileView;
+  /** Unsent marks this tile shows; `0` renders today's confirmed-only tile. */
+  pendingMarks?: number;
   onClick?: () => void;
 }) {
   const state = participant.state;
   const excluded = state === 'EXCLUDED';
   const interactive = onClick !== undefined && !excluded;
   const number = displayNumber(participant.startNumber);
+  // The queue is local and may hand back a negative or fractional figure only
+  // through a defect; the tile never invents a count from it.
+  const unsentMarks =
+    Number.isFinite(pendingMarks) && pendingMarks > 0
+      ? Math.trunc(pendingMarks)
+      : 0;
+  const hasUnsent = unsentMarks > 0;
+
+  const lapLine = hasUnsent ? (
+    <span
+      title={`Круги: ${participant.passCount} из ${participant.requiredLaps}, не отправлено: ${unsentMarks}`}
+      style={{
+        fontSize: 12,
+        lineHeight: 1.15,
+        fontVariantNumeric: 'tabular-nums',
+        ...UNSENT_MARK_STYLE,
+      }}
+    >
+      {`${participant.passCount}+${unsentMarks}/${participant.requiredLaps}`}
+    </span>
+  ) : (
+    <span
+      title={`Круги: ${participant.passCount} из ${participant.requiredLaps}`}
+      style={{
+        fontSize: 12,
+        lineHeight: 1.15,
+        fontVariantNumeric: 'tabular-nums',
+      }}
+    >
+      {participant.passCount}/{participant.requiredLaps}
+    </span>
+  );
 
   const content = (
     <div
@@ -154,16 +260,15 @@ export function ParticipantTile({
         >
           {participant.fullName}
         </span>
-        <span
-          title={`Круги: ${participant.passCount} из ${participant.requiredLaps}`}
-          style={{
-            fontSize: 12,
-            lineHeight: 1.15,
-            fontVariantNumeric: 'tabular-nums',
-          }}
-        >
-          {participant.passCount}/{participant.requiredLaps}
-        </span>
+        {lapLine}
+        {hasUnsent ? (
+          <span
+            title={`не отправлено: ${unsentMarks}`}
+            style={UNSENT_BADGE_STYLE}
+          >
+            не отправлено: {unsentMarks}
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -173,13 +278,27 @@ export function ParticipantTile({
       <button
         type="button"
         onClick={onClick}
-        aria-label={`${number} ${participant.fullName}`}
-        style={tileStyle(state, true)}
+        aria-label={tileAccessibleName(number, participant, unsentMarks)}
+        style={tileStyle(state, true, hasUnsent)}
       >
         {content}
       </button>
     );
   }
 
-  return <div style={tileStyle(state, false)}>{content}</div>;
+  // A tile that is not a control still has to name its unsent marks; the group
+  // role gives the label a place to live, and `0` keeps the plain tile (S-01).
+  return (
+    <div
+      role={hasUnsent ? 'group' : undefined}
+      aria-label={
+        hasUnsent
+          ? tileAccessibleName(number, participant, unsentMarks)
+          : undefined
+      }
+      style={tileStyle(state, false, hasUnsent)}
+    >
+      {content}
+    </div>
+  );
 }
