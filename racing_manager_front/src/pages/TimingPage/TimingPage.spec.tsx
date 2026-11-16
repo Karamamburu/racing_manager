@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { useEventDetailsQuery } from '../../features/events/useEventDetailsQuery';
 import type { AttemptRecordDrawerProps } from '../../features/timing/AttemptRecordDrawer';
+import type { TimingQueueItem } from '../../features/timing/timingQueue';
 import { timingService } from '../../features/timing/timingService';
 import type {
   TimingAnonymousSplitView,
@@ -13,7 +14,10 @@ import type {
   TimingStageGroupView,
   TimingSurfaceView,
 } from '../../features/timing/types';
-import type { UseTimingCaptureResult } from '../../features/timing/useTimingCapture';
+import type {
+  TimingCaptureOutcome,
+  UseTimingCaptureResult,
+} from '../../features/timing/useTimingCapture';
 import {
   timingSurfaceQueryKey,
   useTimingCapture,
@@ -249,19 +253,52 @@ function anonymousSplit(
   };
 }
 
+/** One confirmed outcome: the field reads only the status of an accepted press. */
+function confirmedOutcome(): Promise<TimingCaptureOutcome> {
+  return Promise.resolve({ status: 'CONFIRMED' });
+}
+
+/**
+ * One entry of the device outbox, in the shape `deriveTimingOfflineView` reads
+ * (FR-11, FR-12). A number pass names its attempt and its number; an anonymous
+ * split names neither participant nor attempt.
+ */
+function queueItem(overrides: Partial<TimingQueueItem> = {}): TimingQueueItem {
+  return {
+    id: 'queue-1',
+    attemptId: 'attempt-1',
+    workstationInstanceId: 'ws-1',
+    deviceSequence: 1,
+    operation: 'PASS',
+    payload: {
+      kind: 'NUMBER',
+      attemptId: 'attempt-1',
+      startNumber: 17,
+      clientCapturedAt: '2026-11-13T09:00:01.000Z',
+      clientElapsedMs: 1000,
+      clockEpochId: 'epoch-1',
+      workstationInstanceId: 'ws-1',
+      deviceSequence: 1,
+    },
+    status: 'PENDING',
+    createdAt: '2026-11-13T09:00:01.000Z',
+    ...overrides,
+  };
+}
+
 function captureResult(
   overrides: Partial<UseTimingCaptureResult> = {},
 ): UseTimingCaptureResult {
   return {
     resolveCandidates: vi.fn(() => []),
-    commitNumber: vi.fn(() => Promise.resolve()),
-    commitTile: vi.fn(() => Promise.resolve()),
-    captureAnonymous: vi.fn(() => Promise.resolve()),
-    assignAnonymousSplit: vi.fn(() => Promise.resolve()),
+    commitNumber: vi.fn(confirmedOutcome),
+    commitTile: vi.fn(confirmedOutcome),
+    captureAnonymous: vi.fn(confirmedOutcome),
+    assignAnonymousSplit: vi.fn(confirmedOutcome),
     cancelAnonymousSplit: vi.fn(() => Promise.resolve()),
     undoAnonymousSplit: vi.fn(() => Promise.resolve()),
-    bindPending: vi.fn(() => Promise.resolve()),
-    quickUndo: vi.fn(() => Promise.resolve()),
+    bindPending: vi.fn(confirmedOutcome),
+    quickUndo: vi.fn(confirmedOutcome),
     startAttempt: vi.fn(() => Promise.resolve()),
     complete: vi.fn(() => Promise.resolve()),
     forceComplete: vi.fn(() => Promise.resolve()),
@@ -270,6 +307,11 @@ function captureResult(
     transferCapture: vi.fn(() => Promise.resolve()),
     forceRelease: vi.fn(() => Promise.resolve()),
     flush: vi.fn(() => Promise.resolve()),
+    sendNow: vi.fn(() => Promise.resolve()),
+    queueItems: [],
+    refreshQueue: vi.fn(() => Promise.resolve()),
+    dismissRejected: vi.fn(() => Promise.resolve()),
+    isOnline: true,
     pendingCount: 0,
     isFlushing: false,
     ...overrides,
@@ -380,7 +422,22 @@ describe('TimingPage', () => {
       ],
     });
     getSurface.mockResolvedValue(view);
-    mockCapture({ pendingCount: 2 });
+    const capture = mockCapture({
+      queueItems: [
+        queueItem(),
+        queueItem({
+          id: 'queue-2',
+          attemptId: 'event:event-1',
+          deviceSequence: 2,
+          payload: {
+            kind: 'ANONYMOUS_SPLIT',
+            clientCapturedAt: '2026-11-13T09:00:02.000Z',
+          },
+          createdAt: '2026-11-13T09:00:02.000Z',
+        }),
+      ],
+      pendingCount: 2,
+    });
 
     renderPage();
 
@@ -391,7 +448,12 @@ describe('TimingPage', () => {
     expect(screen.getByText('Захват у этого устройства')).not.toBeNull();
     expect(screen.getByText(/Захват: это устройство/)).not.toBeNull();
     expect(screen.getByText(/Устройство: ws-1/)).not.toBeNull();
-    expect(screen.getByText(/Не синхронизировано: 2/)).not.toBeNull();
+    // The figure is derived from the outbox: two entries are unsent and one of
+    // them is a mark (FR-11, FR-46).
+    expect(
+      screen.getByText('Не отправлено: 2 · из них отметок: 1'),
+    ).not.toBeNull();
+    expect(screen.getByText('Связь есть')).not.toBeNull();
     expect(screen.getByText('Ход хронометража')).not.toBeNull();
     expect(screen.getByText('5 км · Мужчины')).not.toBeNull();
     expect(useTimingCapture).toHaveBeenCalledWith(
@@ -402,9 +464,11 @@ describe('TimingPage', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Обновить' }));
+    // `Обновить` reads both halves of the report again (FR-11, FR-12).
     await waitFor(() => {
       expect(getSurface).toHaveBeenCalledTimes(2);
     });
+    expect(capture.refreshQueue).toHaveBeenCalledTimes(1);
   });
 
   it('copies this device id so it can receive a capture transfer', async () => {
@@ -1503,6 +1567,312 @@ describe('TimingPage', () => {
       (screen.getByRole('button', { name: /Старт/ }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
+    expect(capture.startAttempt).not.toHaveBeenCalled();
+  });
+
+  it('states the missing connection beside the controls and keeps capture open', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 1000,
+            startControlEnabled: false,
+          }),
+        ],
+      }),
+    );
+    mockCapture({ isOnline: false });
+
+    renderPage();
+
+    expect(await screen.findByText('Нет связи с сервером')).not.toBeNull();
+    // Offline timing is capture-only, never capture-less: the outbox records
+    // the press and the queue states that it is empty (E-01, FR-16).
+    expect(
+      (screen.getByLabelText('Номер участника') as HTMLInputElement).disabled,
+    ).toBe(false);
+    expect(screen.getByText('Всё отправлено')).not.toBeNull();
+  });
+
+  it('lists the send queue rows and wires send-now and dismissal', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 1000,
+            startControlEnabled: false,
+          }),
+        ],
+      }),
+    );
+    const capture = mockCapture({
+      queueItems: [
+        queueItem(),
+        queueItem({
+          id: 'queue-rejected',
+          deviceSequence: 2,
+          status: 'REJECTED',
+          error: 'Попытка уже закрыта другим устройством',
+          createdAt: '2026-11-13T09:00:02.000Z',
+          payload: {
+            kind: 'TILE',
+            attemptId: 'attempt-1',
+            enrollmentId: 'enrollment-1',
+            clientCapturedAt: '2026-11-13T09:00:02.000Z',
+          },
+        }),
+      ],
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Очередь отправки')).not.toBeNull();
+    // Every row names its kind, and a refusal keeps the server reason (FR-12).
+    expect(screen.getByText('Отметка по номеру')).not.toBeNull();
+    expect(screen.getByText('Отметка по плитке')).not.toBeNull();
+    expect(
+      screen.getByText('Попытка уже закрыта другим устройством'),
+    ).not.toBeNull();
+    expect(screen.getByText('не отправлено')).not.toBeNull();
+    expect(screen.getByText('Отклонено')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Отправить сейчас/ }));
+    await waitFor(() => expect(capture.sendNow).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Убрать отклонённую запись 2' }),
+    );
+    await waitFor(() =>
+      expect(capture.dismissRejected).toHaveBeenCalledWith('queue-rejected'),
+    );
+  });
+
+  it('shows the pending marks of each block from the derived outbox view', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    const heat = heatBlock({
+      gender: 'F',
+      state: 'RUNNING',
+      attemptId: 'attempt-heat',
+      officialStartedAt: '2026-11-13T09:00:00.000Z',
+      elapsedMs: 1000,
+      startControlEnabled: false,
+      participants: [
+        {
+          enrollmentId: 'enrollment-2',
+          registrationId: 'registration-2',
+          startNumber: 21,
+          fullName: 'Пётр Сидоров',
+          sectionId: '4 - Женщины (24–40)',
+          passCount: 0,
+          requiredLaps: 3,
+          lastPassAt: null,
+          state: 'RACING',
+          excludedReason: null,
+        },
+      ],
+    });
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 1000,
+            startControlEnabled: false,
+          }),
+          heat,
+        ],
+        stageGroups: [stageGroup()],
+      }),
+    );
+    mockCapture({
+      queueItems: [
+        queueItem(),
+        queueItem({
+          id: 'queue-heat',
+          attemptId: 'attempt-heat',
+          deviceSequence: 2,
+          createdAt: '2026-11-13T09:00:02.000Z',
+          payload: {
+            kind: 'NUMBER',
+            attemptId: 'attempt-heat',
+            startNumber: 21,
+            clientCapturedAt: '2026-11-13T09:00:02.000Z',
+          },
+        }),
+      ],
+    });
+
+    renderPage();
+
+    await screen.findByText('Заезд 1');
+    // A category and a heat each read their own share of the same derivation
+    // (FR-10, FR-37); no block invents a count of its own.
+    expect(screen.getAllByText('Отметок не отправлено: 1')).toHaveLength(2);
+    expect(
+      screen.getByRole('button', {
+        name: '17 Иван Петров, кругов подтверждено: 0, не отправлено: 1',
+      }),
+    ).not.toBeNull();
+    expect(
+      screen.getByRole('button', {
+        name: '21 Пётр Сидоров, кругов подтверждено: 0, не отправлено: 1',
+      }),
+    ).not.toBeNull();
+  });
+
+  it('withholds capture transfer and hands the drawer the outbox figures', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({ captureWorkstationInstanceId: 'ws-1' }),
+    );
+    mockCapture({ queueItems: [queueItem()], isOnline: false });
+
+    renderPage();
+
+    expect(
+      await screen.findByText(
+        'Передача захвата недоступна: есть неотправленные записи.',
+      ),
+    ).not.toBeNull();
+    expect(screen.getByText('Нужна связь с сервером.')).not.toBeNull();
+    // The drawer reads the same two facts as the controls, so its online-only
+    // family and its closure wait agree with the page (FR-24, FR-43).
+    const drawer = drawerProps.current.at(-1);
+    expect(drawer?.isOnline).toBe(false);
+    expect(drawer?.unsentEntries).toBe(1);
+  });
+
+  it('names the page unsent total in the status of an unsent press', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 1000,
+            startControlEnabled: false,
+          }),
+        ],
+      }),
+    );
+    mockCapture({
+      queueItems: [queueItem()],
+      resolveCandidates: vi.fn(() => [
+        {
+          enrollmentId: 'enrollment-1',
+          attemptId: 'attempt-1',
+          label: '17 Иван Петров',
+        },
+      ]),
+      commitNumber: vi.fn((): Promise<TimingCaptureOutcome> =>
+        Promise.resolve({ status: 'UNSENT' }),
+      ),
+    });
+
+    renderPage();
+
+    const field = (await screen.findByLabelText(
+      'Номер участника',
+    )) as HTMLInputElement;
+    fireEvent.change(field, { target: { value: '17' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+
+    expect(
+      await screen.findByText(
+        '№ 17 — отметка сохранена на устройстве, не отправлено: 1',
+      ),
+    ).not.toBeNull();
+    // An unsent press is recorded, so the field is free for the next number.
+    expect(field.value).toBe('');
+  });
+
+  it('leaves the assignment mode after an unsent assignment', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 1000,
+            startControlEnabled: false,
+          }),
+        ],
+        anonymousSplits: [anonymousSplit()],
+      }),
+    );
+    mockCapture({
+      assignAnonymousSplit: vi.fn((): Promise<TimingCaptureOutcome> =>
+        Promise.resolve({ status: 'UNSENT' }),
+      ),
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Отсечка 1:/ }));
+    const field = screen.getByLabelText('Номер участника');
+    fireEvent.change(field, { target: { value: '17' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+
+    // The unsent assignment keeps its queue row but the split is not offered
+    // for a second assignment from the field (E-13).
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole('button', { name: /^Отсечка 1:/ })
+          .getAttribute('aria-pressed'),
+      ).toBe('false'),
+    );
+  });
+
+  it('refuses a Start without connection and writes nothing', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({ captureWorkstationInstanceId: 'ws-1' }),
+    );
+    const capture = mockCapture({ isOnline: false });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Старт/ }));
+
+    await waitFor(() => {
+      // The controls state their own transfer reason, and the page states its
+      // refusal of the Start beside them (U-07, F-04).
+      expect(screen.getAllByText('Нужна связь с сервером.')).toHaveLength(2);
+    });
     expect(capture.startAttempt).not.toHaveBeenCalled();
   });
 });

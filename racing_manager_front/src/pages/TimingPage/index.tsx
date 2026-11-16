@@ -33,6 +33,11 @@ import { PendingFinishBar } from '../../features/timing/PendingFinishBar';
 import { TimingCategoryBlock } from '../../features/timing/TimingCategoryBlock';
 import { TimingHeatBlock } from '../../features/timing/TimingHeatBlock';
 import { TimingMetricsPanel } from '../../features/timing/TimingMetrics';
+import {
+  deriveTimingOfflineView,
+  timingOfflineBlockKey,
+} from '../../features/timing/timingOffline';
+import { TimingSendQueue } from '../../features/timing/TimingSendQueue';
 import { timingService } from '../../features/timing/timingService';
 import type {
   TimingAnonymousSplitView,
@@ -46,6 +51,7 @@ import type {
 } from '../../features/timing/types';
 import {
   timingSurfaceQueryKey,
+  type TimingCaptureOutcome,
   useTimingCapture,
 } from '../../features/timing/useTimingCapture';
 import { formatDateTime } from '../../shared/formatDateTime';
@@ -107,6 +113,20 @@ const STAGE_STATE_COLORS: Record<TimingStageState, string> = {
 
 /** What a stage header states when the API supplied no reason of its own. */
 const STAGE_HEATS_MISSING_MESSAGE = 'Заезды этого этапа ещё не сформированы.';
+
+/**
+ * The page states the online-only rule itself where no component owns the gate
+ * (U-07, F-04, FR-43, FR-48). A capture-side entry is queued instead, so this
+ * sentence never replaces an unsent status.
+ */
+const OFFLINE_REQUIRED_MESSAGE = 'Нужна связь с сервером.';
+
+/** The connection state the page shows beside its unsent figures (S-04). */
+const CONNECTED_LABEL = 'Связь есть';
+const DISCONNECTED_LABEL = 'Нет связи с сервером';
+
+/** The assignment press a cleared selection can no longer route (E-13). */
+const NO_SELECTED_SPLIT_MESSAGE = 'Назначение недоступно: отсечка не выбрана';
 
 /**
  * The workstation instance of this tab, created once and kept in
@@ -249,6 +269,14 @@ function surfaceHasAttempt(
  * workflow: the split the number field assigns (E-04) and the block whose
  * running attempt receives the next empty Enter (E-01, U-02). Neither is ever
  * written to the event, the attempt or a result.
+ *
+ * MANUAL-TIMING-4: the page derives the whole offline report once from the
+ * outbox the hook owns and the surface the server confirms (FR-11, FR-12), then
+ * hands the same figures to the send queue, to both figures beside the capture
+ * controls, to every block header and tile, to the number field and to the
+ * record drawer. Nothing here counts an unsent entry as a pass, and the only
+ * connection rule the page applies itself is the one no component owns
+ * (U-07, F-04).
  */
 export function TimingPage() {
   const { id } = useParams<{ id: string }>();
@@ -282,6 +310,9 @@ export function TimingPage() {
   // are page-session display state (AD-17, E-02).
   const [selectedSplitId, setSelectedSplitId] = useState<string | null>(null);
   const [anonymousNotice, setAnonymousNotice] = useState<string | null>(null);
+  // The page's own online-only refusal, for the presses no component gates
+  // (U-07, F-04). It never stands in for an unsent capture.
+  const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
   const [splitChoice, setSplitChoice] = useState<{
     splitId: string;
     startNumber: number;
@@ -316,6 +347,31 @@ export function TimingPage() {
     workstationInstanceId,
     (text) => message.error(text),
   );
+
+  /**
+   * The page's own online-only guard, for a press no component gates (U-07,
+   * F-04). A capture-side entry is queued and never reaches this guard.
+   */
+  const requireConnection = (): boolean => {
+    if (capture.isOnline) return true;
+    setOfflineNotice(OFFLINE_REQUIRED_MESSAGE);
+    return false;
+  };
+
+  /**
+   * `Обновить` reads both halves of the offline report again: the surface the
+   * server confirms and the outbox this device keeps (FR-11, FR-12).
+   */
+  const refreshReads = () => {
+    void queryClient.invalidateQueries({ queryKey: surfaceQueryKey });
+    void capture.refreshQueue();
+  };
+
+  /** A returned connection retires the page's own notice, not a component's reason. */
+  useEffect(() => {
+    if (!capture.isOnline) return;
+    setOfflineNotice(null);
+  }, [capture.isOnline]);
 
   // An open record never outlives its attempt on the surface: once a refetch
   // no longer lists it, the drawer closes instead of reading a record the
@@ -460,6 +516,26 @@ export function TimingPage() {
     (block) => block.state === 'RUNNING',
   );
 
+  // The device outbox as the page reports it. One derivation feeds the two
+  // figures, the send queue and both pending-mark maps, so the page total and
+  // the tile marks can never disagree (FR-11, FR-12, FR-37, FR-46, U-08).
+  const offlineView = deriveTimingOfflineView(capture.queueItems, surface);
+  // A block reads its own share under the identity the derivation used, so a
+  // tile mark and its block total stay one fact (FR-10, FR-37).
+  const pendingMarksByBlock = new Map<string, Map<string, number>>();
+  for (const tile of offlineView.participantMarks) {
+    const perParticipant =
+      pendingMarksByBlock.get(tile.blockKey) ?? new Map<string, number>();
+    perParticipant.set(tile.enrollmentId, tile.pendingMarks);
+    pendingMarksByBlock.set(tile.blockKey, perParticipant);
+  }
+  const pendingMarkTotalsByBlock = new Map<string, number>(
+    offlineView.blockMarks.map((blockMarks) => [
+      blockMarks.blockKey,
+      blockMarks.pendingMarks,
+    ]),
+  );
+
   const anonymousSplits: TimingAnonymousSplitView[] =
     surface.anonymousSplits ?? [];
   const selectedSplit =
@@ -497,9 +573,13 @@ export function TimingPage() {
 
   /** The Start press of one block; a refusal leaves capture state untouched. */
   const startBlock = (block: TimingCategoryBlockView) => {
+    // A start writes on the server and is never queued, so it waits for a
+    // connection instead of pretending to be an offline capture (U-07, F-04).
+    if (!requireConnection()) return;
     void capture.startAttempt(block).then(
       () => {
         setAnonymousNotice(null);
+        setOfflineNotice(null);
       },
       (failure: unknown) => {
         console.warn('timing: the Start press was refused', failure);
@@ -508,18 +588,35 @@ export function TimingPage() {
   };
 
   /** Enter on the empty field: one anonymous split of the current attempt. */
-  const captureAnonymousSplit = async () => {
-    await capture.captureAnonymous();
+  const captureAnonymousSplit = async (): Promise<TimingCaptureOutcome> => {
+    const outcome = await capture.captureAnonymous();
     setAnonymousNotice(null);
+    return outcome;
   };
 
-  /** A committed number in assignment mode belongs to the selected entry. */
-  const assignSelectedSplit = async (startNumber: number) => {
-    if (selectedSplit === null) return;
+  /**
+   * A committed number in assignment mode belongs to the selected entry.
+   *
+   * The outcome keeps the field's own rules (FR-15…FR-18): a confirmed or
+   * unsent assignment leaves the mode so the same split is not offered a second
+   * time while it is unsent (E-13), and a refused one stays in the queue and can
+   * be selected again later. An ambiguous number keeps the existing picker and
+   * records nothing.
+   */
+  const assignSelectedSplit = async (
+    startNumber: number,
+  ): Promise<TimingCaptureOutcome> => {
+    const split = selectedSplit;
+    if (split === null) {
+      throw new Error(NO_SELECTED_SPLIT_MESSAGE);
+    }
     try {
-      await capture.assignAnonymousSplit(selectedSplit.splitId, startNumber);
-      // Accepted: the entry leaves the queue and the field returns to capture.
+      const outcome = await capture.assignAnonymousSplit(
+        split.splitId,
+        startNumber,
+      );
       setSelectedSplitId(null);
+      return outcome;
     } catch (error) {
       if (
         error instanceof AxiosError &&
@@ -537,9 +634,9 @@ export function TimingPage() {
             };
           }
         ).details;
-        const labels = selectedSplit.candidates ?? [];
+        const labels = split.candidates ?? [];
         setSplitChoice({
-          splitId: selectedSplit.splitId,
+          splitId: split.splitId,
           startNumber,
           attempts: (details?.candidates ?? []).map((candidate) => ({
             attemptId: candidate.attemptId,
@@ -551,7 +648,6 @@ export function TimingPage() {
             requiredLaps: candidate.requiredLaps,
           })),
         });
-        return;
       }
       throw error;
     }
@@ -570,8 +666,28 @@ export function TimingPage() {
 
   /** A cancelled entry leaves the queue at once; the page clears the mode. */
   const cancelAnonymousSplit = async (splitId: string, reason: string) => {
+    // A cancellation is a record correction and stays online-only (U-07,
+    // F-04). The dialog keeps its reason open with the sentence.
+    if (!requireConnection()) throw new Error(OFFLINE_REQUIRED_MESSAGE);
     await capture.cancelAnonymousSplit(splitId, reason);
     setSelectedSplitId((current) => (current === splitId ? null : current));
+  };
+
+  /** Withdrawing a queued split writes on the server, so it is online-only too. */
+  const undoAnonymousSplit = async (
+    splitId: string,
+    deviceSequence: number,
+  ): Promise<void> => {
+    if (!requireConnection()) return;
+    await capture.undoAnonymousSplit(splitId, deviceSequence);
+  };
+
+  /** A bound finish is a queued capture-side entry, so its outcome is awaited. */
+  const bindPendingFinish = async (
+    pendingId: string,
+    startNumber: number,
+  ): Promise<void> => {
+    await capture.bindPending(pendingId, startNumber);
   };
 
   /**
@@ -603,6 +719,11 @@ export function TimingPage() {
     // A heat names itself from its own stage and heat fields; only a category
     // block reads the event starts and participation formats.
     const view = block.kind === 'HEAT' ? null : describeBlock(block, event);
+    // Both figures come from the page's outbox view, never from the block: the
+    // tiles and the header read one derivation (FR-10, FR-37, U-08).
+    const blockKey = timingOfflineBlockKey(block);
+    const pendingMarks = pendingMarksByBlock.get(blockKey);
+    const pendingMarkCount = pendingMarkTotalsByBlock.get(blockKey) ?? 0;
 
     return (
       <Space
@@ -620,6 +741,8 @@ export function TimingPage() {
             onTakeCapture={onTakeCapture}
             onParticipantClick={onParticipantClick}
             onOpenRecord={onOpenRecord}
+            pendingMarksByParticipant={pendingMarks}
+            pendingMarkCount={pendingMarkCount}
           />
         ) : (
           <TimingCategoryBlock
@@ -631,13 +754,15 @@ export function TimingPage() {
             onTakeCapture={onTakeCapture}
             onParticipantClick={onParticipantClick}
             onOpenRecord={onOpenRecord}
+            pendingMarksByParticipant={pendingMarks}
+            pendingMarkCount={pendingMarkCount}
           />
         )}
 
         {block.pendingFinishes.length > 0 ? (
           <PendingFinishBar
             pending={block.pendingFinishes}
-            onBind={capture.bindPending}
+            onBind={bindPendingFinish}
           />
         ) : null}
       </Space>
@@ -840,18 +965,16 @@ export function TimingPage() {
                     )}
                   </Space>
                   <Typography.Text
-                    type={capture.pendingCount > 0 ? 'warning' : 'secondary'}
+                    type={offlineView.totals.hasUnsent ? 'warning' : 'secondary'}
                   >
-                    Не синхронизировано: {capture.pendingCount}
+                    {`Не отправлено: ${offlineView.totals.unsentEntries} · из них отметок: ${offlineView.totals.pendingMarks}`}
                   </Typography.Text>
-                  <Button
-                    size="small"
-                    onClick={() => {
-                      void queryClient.invalidateQueries({
-                        queryKey: surfaceQueryKey,
-                      });
-                    }}
+                  <Typography.Text
+                    type={capture.isOnline ? 'secondary' : 'warning'}
                   >
+                    {capture.isOnline ? CONNECTED_LABEL : DISCONNECTED_LABEL}
+                  </Typography.Text>
+                  <Button size="small" onClick={refreshReads}>
                     Обновить
                   </Button>
                 </Space>
@@ -860,6 +983,8 @@ export function TimingPage() {
                   capture={captureView}
                   workstationInstanceId={workstationInstanceId}
                   canAdminister={canAdminister}
+                  isOnline={capture.isOnline}
+                  unsentEntries={offlineView.totals.unsentEntries}
                   onTake={capture.takeCapture}
                   onTransfer={capture.transferCapture}
                   onForceRelease={capture.forceRelease}
@@ -869,6 +994,9 @@ export function TimingPage() {
                   <Alert type="warning" showIcon message={anonymousNotice} />
                 )}
 
+                {offlineNotice === null ? null : (
+                  <Alert type="warning" showIcon message={offlineNotice} />
+                )}
               </Space>
             </Col>
             <Col
@@ -898,6 +1026,7 @@ export function TimingPage() {
                 }
                 onAssign={assignSelectedSplit}
                 onAnonymousSplit={captureAnonymousSplit}
+                pendingCount={offlineView.totals.unsentEntries}
               />
             </Col>
             <Col
@@ -912,7 +1041,7 @@ export function TimingPage() {
                 onSelect={setSelectedSplitId}
                 onCancel={cancelAnonymousSplit}
                 canCancel={canOperate}
-                onUndo={capture.undoAnonymousSplit}
+                onUndo={undoAnonymousSplit}
                 canUndo={canOperate && isCaptureHolder}
                 selectionDisabled={!isCaptureHolder}
               />
@@ -927,6 +1056,16 @@ export function TimingPage() {
             </Col>
           </Row>
         </Card>
+
+        <TimingSendQueue
+          entries={offlineView.entries}
+          unsentEntries={offlineView.totals.unsentEntries}
+          rejectedEntries={offlineView.totals.rejectedEntries}
+          isOnline={capture.isOnline}
+          isSending={capture.isFlushing}
+          onSendNow={capture.sendNow}
+          onDismiss={capture.dismissRejected}
+        />
 
         {surface.categories.length === 0 && stageGroups.length === 0 ? (
           <Card>
@@ -974,6 +1113,8 @@ export function TimingPage() {
           canAdminister={canAdminister}
           canOperate={canOperate}
           workstationInstanceId={workstationInstanceId}
+          isOnline={capture.isOnline}
+          unsentEntries={offlineView.totals.unsentEntries}
           onClose={() => {
             setRecordAttemptId(null);
           }}
