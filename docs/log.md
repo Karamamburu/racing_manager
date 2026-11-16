@@ -221,3 +221,7 @@ Every user-facing mention of the capture holder now says «устройство�
 ## 2026-11-16 — offline capture feedback
 
 The timing page now derives one offline report from the device outbox and the surface: unsent and rejected entries, per-participant and per-block pending marks, the page totals and the connection state. A pending tile shows `confirmed+pending/N` with a violet dashed outline and «не отправлено: N», a block shows «Отметок не отправлено: N» and loses the ready prompt, and the number field clears on local record while a late refusal is reported without restoring the number. The page renders a send queue, retries in press order, dismisses rejected entries, gates closure/transfer on connection and queue, and warns when the memory fallback cannot keep entries across a reload. No server route, response field or schema changed.
+
+## 2026-11-16 — refused captures are not queue rows
+
+A server refusal is now reported once in the number-field status/toast and the outbox row is removed immediately; a refresh also purges legacy `REJECTED` rows. The send queue and page totals contain unsent entries only, so old refusal history no longer fills the timing page. Server receipts/audit remain the record of the refusal.
