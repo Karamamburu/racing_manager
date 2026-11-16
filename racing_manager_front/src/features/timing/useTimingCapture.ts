@@ -61,27 +61,61 @@ export interface TimingNumberCommit {
   monotonicMs: number;
 }
 
-/** What the surface consumes from the hook. */
+/**
+ * What the server answered about one locally recorded capture (FR-15).
+ *
+ * `CONFIRMED` means the server applied the entry, `REJECTED` means it refused
+ * it and `reason` carries its message, and `UNSENT` means the entry is recorded
+ * on this device and still waits for an answer. `UNSENT` is not a failure: the
+ * press was recorded, so the field may clear and the queue keeps the entry
+ * (FR-14, FR-16).
+ */
+export const TIMING_CAPTURE_OUTCOME_STATUSES = [
+  'CONFIRMED',
+  'UNSENT',
+  'REJECTED',
+] as const;
+
+export type TimingCaptureOutcomeStatus =
+  (typeof TIMING_CAPTURE_OUTCOME_STATUSES)[number];
+
+/** The outcome of one capture-side action. */
+export interface TimingCaptureOutcome {
+  status: TimingCaptureOutcomeStatus;
+  /** The server's refusal message, verbatim; present only on `REJECTED`. */
+  reason?: string;
+}
+
+/**
+ * What the surface consumes from the hook.
+ *
+ * Local validation failures reject with the reason and keep the typed value; a
+ * recorded press always resolves with a `TimingCaptureOutcome`, because a
+ * request without an answer is `UNSENT`, not a lost capture (FR-16).
+ */
 export interface UseTimingCaptureResult {
   resolveCandidates: (startNumber: number) => TimingCaptureCandidate[];
-  commitNumber: (input: TimingNumberCommit) => Promise<void>;
+  commitNumber: (input: TimingNumberCommit) => Promise<TimingCaptureOutcome>;
   commitTile: (
     participant: TimingParticipantTileView,
     attemptId: string,
-  ) => Promise<void>;
+  ) => Promise<TimingCaptureOutcome>;
   /** Queues one anonymous split of the attempt; it needs no number and no N. */
-  captureAnonymous: () => Promise<void>;
+  captureAnonymous: () => Promise<TimingCaptureOutcome>;
   /** Binds one queued split to a start number of its own attempt. */
   assignAnonymousSplit: (
     splitId: string,
     startNumber: number,
     chosenAttemptId?: string,
-  ) => Promise<void>;
+  ) => Promise<TimingCaptureOutcome>;
   /** Retires one queued split with a reason; a referee or an administrator. */
   cancelAnonymousSplit: (splitId: string, reason: string) => Promise<void>;
   undoAnonymousSplit: (splitId: string, deviceSequence: number) => Promise<void>;
-  bindPending: (pendingId: string, startNumber: number) => Promise<void>;
-  quickUndo: (attemptId: string) => Promise<void>;
+  bindPending: (
+    pendingId: string,
+    startNumber: number,
+  ) => Promise<TimingCaptureOutcome>;
+  quickUndo: (attemptId: string) => Promise<TimingCaptureOutcome>;
   /** Starts a category block or a heat block on its own route. */
   startAttempt: (block: TimingCategoryBlockView) => Promise<void>;
   complete: (attemptId: string) => Promise<void>;
@@ -92,6 +126,23 @@ export interface UseTimingCaptureResult {
   forceRelease: (reason: string) => Promise<void>;
   /** Replays every unsynced item, oldest first, and stops at a lost network. */
   flush: () => Promise<void>;
+  /** The same replay, offered to the referee as «Отправить сейчас» (FR-13). */
+  sendNow: () => Promise<void>;
+  /**
+   * Every item of this device's outbox in capture order, raw and un-derived.
+   * The page feeds them to `deriveTimingOfflineView` (FR-11, FR-12).
+   */
+  queueItems: TimingQueueItem[];
+  /** Reads the outbox again; the hook also does this after every write. */
+  refreshQueue: () => Promise<void>;
+  /** Removes one refused entry; no count, state, pass or result changes (FR-21). */
+  dismissRejected: (id: string) => Promise<void>;
+  /**
+   * The connection as the page shows it: `navigator.onLine` plus the outcome of
+   * the last send. A send that got no answer turns it false; an answered send
+   * turns it true (AS-4).
+   */
+  isOnline: boolean;
   /** Queue items the server has not answered yet, across attempts. */
   pendingCount: number;
   isFlushing: boolean;
@@ -171,6 +222,11 @@ function isUnsynced(item: TimingQueueItem): boolean {
   return item.status === 'PENDING' || item.status === 'SENT';
 }
 
+/** The browser's idea of connectivity; a runtime without it starts online. */
+function browserOnline(): boolean {
+  return typeof navigator === 'undefined' ? true : navigator.onLine;
+}
+
 /** The raw elapsed of one press, derived from the attempt's own anchor (AD-2). */
 function elapsedFromAnchor(
   anchor: TimingEpochAnchor,
@@ -213,8 +269,10 @@ export function useTimingCapture(
   const opening = useRef<Map<string, Promise<TimingEpochAnchor>>>(new Map());
   const mounted = useRef(true);
   const onErrorRef = useRef(onError);
-  const [pendingCount, setPendingCount] = useState(0);
+  /** The raw outbox of this device; every offline view derives from it. */
+  const [queueItems, setQueueItems] = useState<TimingQueueItem[]>([]);
   const [isFlushing, setIsFlushing] = useState(false);
+  const [isOnline, setIsOnline] = useState<boolean>(browserOnline);
 
   useEffect(() => {
     onErrorRef.current = onError;
@@ -231,10 +289,21 @@ export function useTimingCapture(
     });
   }, [eventId, queryClient]);
 
-  const refreshPendingCount = useCallback(async () => {
+  /**
+   * Reads the outbox into state. Every enqueue, mark and remove of this hook
+   * calls it, so the page always derives its unsent figures from what is
+   * actually stored (FR-11, FR-12).
+   */
+  const refreshQueue = useCallback(async () => {
     const queue = await openTimingQueue();
-    const next = await queue.pendingCount();
-    if (mounted.current) setPendingCount(next);
+    const items = await queue.list();
+    if (mounted.current) setQueueItems(items);
+  }, []);
+
+  /** Applies a send outcome to the connection the page shows (AS-4). */
+  const setConnectivity = useCallback((online: boolean) => {
+    if (!mounted.current) return;
+    setIsOnline((current) => (current === online ? current : online));
   }, []);
 
   const requireEvent = useCallback((): string => {
@@ -294,35 +363,46 @@ export function useTimingCapture(
   /**
    * Stores the item, sends it, and records what the API answered. The queue
    * item exists before the request leaves (AD-3).
+   *
+   * A definitive refusal resolves `REJECTED` with the server message; a request
+   * without an answer stays queued, resolves `UNSENT` and is not reported as a
+   * failed capture (FR-16, FR-20).
    */
   const deliver = useCallback(
     async (
       item: TimingQueueItem,
       run: () => Promise<unknown>,
-    ): Promise<void> => {
+    ): Promise<TimingCaptureOutcome> => {
       const queue = await openTimingQueue();
       await queue.enqueue(item);
-      await refreshPendingCount();
+      await refreshQueue();
       try {
         await run();
         await queue.mark(item.id, 'APPLIED');
-        await refreshPendingCount();
+        await refreshQueue();
+        setConnectivity(true);
         await invalidate();
+        return { status: 'CONFIRMED' };
       } catch (error) {
         const message = describeTimingError(error);
         if (isDefinitiveRefusal(error)) {
+          // The server signed its answer: retrying would only replay it.
           await queue.mark(item.id, 'REJECTED', message);
-        } else {
-          // No answer: keep it unsynced so `flush` can confirm it later (E-27).
-          await queue.mark(item.id, 'PENDING');
+          await refreshQueue();
+          setConnectivity(true);
+          await invalidate();
+          report(message);
+          return { status: 'REJECTED', reason: message };
         }
-        await refreshPendingCount();
+        // No answer: keep it unsynced so a later flush can confirm it (E-27).
+        await queue.mark(item.id, 'PENDING');
+        await refreshQueue();
+        setConnectivity(false);
         await invalidate();
-        report(message);
-        throw error;
+        return { status: 'UNSENT' };
       }
     },
-    [refreshPendingCount, invalidate, report],
+    [refreshQueue, invalidate, report, setConnectivity],
   );
 
   /** One pass of one attempt, routed to that attempt's own epoch. */
@@ -334,7 +414,7 @@ export function useTimingCapture(
       enrollmentId: string;
       capturedAt: string;
       monotonicMs: number;
-    }): Promise<void> => {
+    }): Promise<TimingCaptureOutcome> => {
       const id = requireEvent();
       const anchor = await openEpoch(input.attemptId);
       const queue = await openTimingQueue();
@@ -364,7 +444,7 @@ export function useTimingCapture(
         deviceSequence,
       };
 
-      await deliver(
+      return deliver(
         queueItem(
           key,
           input.attemptId,
@@ -386,7 +466,7 @@ export function useTimingCapture(
    * number, N or the roster (AD-17).
    */
   const captureAnonymous = useCallback(
-    async (): Promise<void> => {
+    async (): Promise<TimingCaptureOutcome> => {
       const id = requireEvent();
       const anchorAttempt = surface?.categories.find(
         (block) => block.state === 'RUNNING' && block.attemptId !== null,
@@ -414,7 +494,7 @@ export function useTimingCapture(
         deviceSequence,
       };
 
-      await deliver(
+      return deliver(
         queueItem(
           key,
           eventScope,
@@ -456,7 +536,7 @@ export function useTimingCapture(
   );
 
   const commitNumber = useCallback(
-    async (input: TimingNumberCommit): Promise<void> => {
+    async (input: TimingNumberCommit): Promise<TimingCaptureOutcome> => {
       const candidates = resolveCandidates(input.startNumber);
       const chosen =
         input.enrollmentId === undefined
@@ -470,7 +550,7 @@ export function useTimingCapture(
         report(CANDIDATE_MISSING_MESSAGE);
         throw new Error(CANDIDATE_MISSING_MESSAGE);
       }
-      await sendPass({
+      return sendPass({
         attemptId: chosen.attemptId,
         kind: input.enrollmentId === undefined ? 'NUMBER' : 'TILE',
         startNumber: input.startNumber,
@@ -486,11 +566,11 @@ export function useTimingCapture(
     async (
       participant: TimingParticipantTileView,
       attemptId: string,
-    ): Promise<void> => {
+    ): Promise<TimingCaptureOutcome> => {
       // The click instant is read once, before anything else runs.
       const capturedAt = new Date().toISOString();
       const monotonicMs = performance.now();
-      await sendPass({
+      return sendPass({
         attemptId,
         kind: 'TILE',
         startNumber: participant.startNumber,
@@ -503,7 +583,10 @@ export function useTimingCapture(
   );
 
   const bindPending = useCallback(
-    async (pendingId: string, startNumber: number): Promise<void> => {
+    async (
+      pendingId: string,
+      startNumber: number,
+    ): Promise<TimingCaptureOutcome> => {
       const id = requireEvent();
       const pending = surface?.categories
         .flatMap((block) => block.pendingFinishes)
@@ -524,7 +607,7 @@ export function useTimingCapture(
         workstationInstanceId,
         deviceSequence,
       };
-      await deliver(
+      return deliver(
         queueItem(
           key,
           pending.attemptId,
@@ -540,7 +623,7 @@ export function useTimingCapture(
   );
 
   const quickUndo = useCallback(
-    async (attemptId: string): Promise<void> => {
+    async (attemptId: string): Promise<TimingCaptureOutcome> => {
       const id = requireEvent();
       const queue = await openTimingQueue();
       const deviceSequence = await queue.nextSequence(
@@ -552,7 +635,7 @@ export function useTimingCapture(
         workstationInstanceId,
         deviceSequence,
       };
-      await deliver(
+      return deliver(
         queueItem(
           key,
           attemptId,
@@ -577,7 +660,7 @@ export function useTimingCapture(
       splitId: string,
       startNumber: number,
       chosenAttemptId?: string,
-    ): Promise<void> => {
+    ): Promise<TimingCaptureOutcome> => {
       const id = requireEvent();
       const split = surface?.anonymousSplits?.find(
         (entry) => entry.splitId === splitId,
@@ -600,7 +683,7 @@ export function useTimingCapture(
         ...(chosenAttemptId === undefined ? {} : { chosenAttemptId }),
       };
       const payload: TimingAnonymousAssignPayload = { splitId, request };
-      await deliver(
+      return deliver(
         queueItem(
           key,
           eventScope,
@@ -818,6 +901,11 @@ export function useTimingCapture(
     [requireEvent],
   );
 
+  /**
+   * Replays every unsynced item in press order and stops at the first one the
+   * server did not answer, so nothing is ever dropped or reordered (E-09,
+   * E-10). `sendNow` and the automatic replay on mount and `online` share it.
+   */
   const flush = useCallback(async (): Promise<void> => {
     if (!eventId) return;
     if (mounted.current) setIsFlushing(true);
@@ -827,44 +915,81 @@ export function useTimingCapture(
       const unsynced = (await queue.list()).filter(isUnsynced);
       for (const item of unsynced) {
         await queue.mark(item.id, 'SENT');
+        await refreshQueue();
         try {
           await replay(item);
           await queue.mark(item.id, 'APPLIED');
+          await refreshQueue();
+          setConnectivity(true);
           applied = true;
         } catch (error) {
           const message = describeTimingError(error);
           if (isDefinitiveRefusal(error)) {
             // The server answered: retrying would only replay the refusal.
             await queue.mark(item.id, 'REJECTED', message);
+            await refreshQueue();
+            setConnectivity(true);
             report(message);
             continue;
           }
           // The network is gone: keep this item and every later one for a
           // later flush, so nothing is ever dropped (E-27).
           await queue.mark(item.id, 'PENDING');
+          await refreshQueue();
+          setConnectivity(false);
           report(message);
           break;
         }
       }
       if (applied) await invalidate();
     } finally {
-      await refreshPendingCount();
+      await refreshQueue();
       if (mounted.current) setIsFlushing(false);
     }
-  }, [eventId, replay, invalidate, refreshPendingCount, report]);
+  }, [
+    eventId,
+    replay,
+    invalidate,
+    refreshQueue,
+    report,
+    setConnectivity,
+  ]);
+
+  /**
+   * Removes one refused entry the referee dismissed. It only ever drops a
+   * `REJECTED` item: no lap, participant state, pass or result changes (FR-21).
+   */
+  const dismissRejected = useCallback(
+    async (id: string): Promise<void> => {
+      const queue = await openTimingQueue();
+      const item = (await queue.list()).find((entry) => entry.id === id);
+      if (item === undefined || item.status !== 'REJECTED') return;
+      await queue.remove(id);
+      await refreshQueue();
+    },
+    [refreshQueue],
+  );
 
   useEffect(() => {
     mounted.current = true;
+    setIsOnline(browserOnline());
+    void refreshQueue();
     void flush();
     const handleOnline = () => {
+      setIsOnline(true);
       void flush();
     };
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
     window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
     return () => {
       mounted.current = false;
       window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
     };
-  }, [flush]);
+  }, [flush, refreshQueue]);
 
   /**
    * A surface change opens the epoch of every running attempt that has no
@@ -907,7 +1032,12 @@ export function useTimingCapture(
     transferCapture,
     forceRelease,
     flush,
-    pendingCount,
+    sendNow: flush,
+    queueItems,
+    refreshQueue,
+    dismissRejected,
+    isOnline,
+    pendingCount: queueItems.filter(isUnsynced).length,
     isFlushing,
   };
 }
