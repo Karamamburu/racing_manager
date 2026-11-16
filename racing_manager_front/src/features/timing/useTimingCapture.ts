@@ -138,6 +138,12 @@ export interface UseTimingCaptureResult {
   /** Removes one refused entry; no count, state, pass or result changes (FR-21). */
   dismissRejected: (id: string) => Promise<void>;
   /**
+   * Whether the outbox outlives a reload, as the storage itself reported it.
+   * `true` until the first queue read, so an online surface is unchanged; a
+   * resolved memory fallback turns it false (FR-30).
+   */
+  isDurable: boolean;
+  /**
    * The connection as the page shows it: `navigator.onLine` plus the outcome of
    * the last send. A send that got no answer turns it false; an answered send
    * turns it true (AS-4).
@@ -271,6 +277,11 @@ export function useTimingCapture(
   const onErrorRef = useRef(onError);
   /** The raw outbox of this device; every offline view derives from it. */
   const [queueItems, setQueueItems] = useState<TimingQueueItem[]>([]);
+  /**
+   * The storage the outbox resolved. Online behavior is unchanged until the
+   * first read, which reports the truth from the queue itself (FR-30).
+   */
+  const [isDurable, setIsDurable] = useState(true);
   const [isFlushing, setIsFlushing] = useState(false);
   const [isOnline, setIsOnline] = useState<boolean>(browserOnline);
 
@@ -292,12 +303,16 @@ export function useTimingCapture(
   /**
    * Reads the outbox into state. Every enqueue, mark and remove of this hook
    * calls it, so the page always derives its unsent figures from what is
-   * actually stored (FR-11, FR-12).
+   * actually stored (FR-11, FR-12), and the durability flag follows the same
+   * read (FR-30).
    */
   const refreshQueue = useCallback(async () => {
     const queue = await openTimingQueue();
     const items = await queue.list();
-    if (mounted.current) setQueueItems(items);
+    if (mounted.current) {
+      setQueueItems(items);
+      setIsDurable(queue.isDurable);
+    }
   }, []);
 
   /** Applies a send outcome to the connection the page shows (AS-4). */
@@ -1036,6 +1051,7 @@ export function useTimingCapture(
     queueItems,
     refreshQueue,
     dismissRejected,
+    isDurable,
     isOnline,
     pendingCount: queueItems.filter(isUnsynced).length,
     isFlushing,

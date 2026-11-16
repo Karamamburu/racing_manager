@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   newTimingMutationKey,
   openTimingQueue,
@@ -224,5 +224,51 @@ describe('timingQueue outbox', () => {
 
     expect(first.length).toBeGreaterThan(0);
     expect(first).not.toBe(second);
+  });
+});
+
+/**
+ * The smallest IndexedDB surface `openTimingQueue` touches on open: one
+ * `open()` whose success callback carries a database handle. The queue only
+ * reports durability here; no store is read or written.
+ */
+class FakeIndexedDbOpenRequest {
+  public result: unknown = {};
+  public onsuccess: (() => void) | null = null;
+  public onerror: (() => void) | null = null;
+  public onblocked: (() => void) | null = null;
+  public onupgradeneeded: (() => void) | null = null;
+}
+
+describe('timingQueue durability', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it('reports a volatile queue when IndexedDB is unavailable', async () => {
+    expect(typeof indexedDB).toBe('undefined');
+
+    const queue = await openTimingQueue();
+
+    expect(queue.isDurable).toBe(false);
+  });
+
+  it('reports a durable queue when the resolved storage is IndexedDB', async () => {
+    const request = new FakeIndexedDbOpenRequest();
+    vi.stubGlobal('indexedDB', {
+      open: () => {
+        queueMicrotask(() => request.onsuccess?.());
+        return request;
+      },
+    });
+    vi.resetModules();
+
+    const { openTimingQueue: openWithIndexedDb } = await import(
+      './timingQueue'
+    );
+    const queue = await openWithIndexedDb();
+
+    expect(queue.isDurable).toBe(true);
   });
 });

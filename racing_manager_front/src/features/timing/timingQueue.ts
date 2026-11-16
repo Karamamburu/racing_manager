@@ -15,7 +15,8 @@
  * rendering, jsdom, a private window that refuses storage) or fails to open,
  * the same contract is served from a memory map so the surface still captures;
  * that fallback is lost on reload, and the unsynced items it holds remain
- * visible through `pendingCount`.
+ * visible through `pendingCount`. `isDurable` reports which storage the queue
+ * actually resolved, so the page never guesses from `typeof indexedDB`.
  */
 
 import type { AssignAnonymousSplitRequest } from './types';
@@ -71,6 +72,12 @@ export interface TimingQueueItem {
 
 /** The outbox contract the surface codes against. */
 export interface TimingQueue {
+  /**
+   * Whether the outbox outlives a reload. True only when the queue resolved
+   * IndexedDB; the memory fallback reports false, so the page never has to
+   * infer durability from `typeof indexedDB`.
+   */
+  readonly isDurable: boolean;
   /** Allocates the next sequence of one attempt and workstation, from 1. */
   nextSequence(attemptId: string, workstationInstanceId: string): Promise<number>;
   /**
@@ -128,6 +135,8 @@ export function newTimingMutationKey(): string {
 
 /** The persistence port; two implementations, one contract. */
 interface TimingQueueStorage {
+  /** Whether this storage survives a page reload. */
+  readonly isDurable: boolean;
   nextSequence(attemptId: string, workstationInstanceId: string): Promise<number>;
   lastSequence(attemptId: string, workstationInstanceId: string): Promise<number>;
   put(item: TimingQueueItem): Promise<void>;
@@ -143,6 +152,8 @@ interface TimingQueueStorage {
  * sequence cursors, mirroring a real reload against IndexedDB.
  */
 class MemoryTimingQueueStorage implements TimingQueueStorage {
+  public readonly isDurable = false;
+
   private readonly mutations = new Map<string, TimingQueueItem>();
 
   private readonly cursors = new Map<string, number>();
@@ -225,6 +236,8 @@ function openDatabase(): Promise<IDBDatabase> {
 }
 
 class IndexedDbTimingQueueStorage implements TimingQueueStorage {
+  public readonly isDurable = true;
+
   constructor(private readonly database: IDBDatabase) {}
 
   public async nextSequence(
@@ -328,7 +341,11 @@ async function openStorage(): Promise<TimingQueueStorage> {
 }
 
 class TimingOutbox implements TimingQueue {
-  constructor(private readonly storage: TimingQueueStorage) {}
+  public readonly isDurable: boolean;
+
+  constructor(private readonly storage: TimingQueueStorage) {
+    this.isDurable = storage.isDurable;
+  }
 
   public async nextSequence(
     attemptId: string,
@@ -389,7 +406,8 @@ class TimingOutbox implements TimingQueue {
   }
 }
 
-/** Opens the capture-surface outbox. */
+/** Opens the capture-surface outbox and reports the storage it resolved. */
 export async function openTimingQueue(): Promise<TimingQueue> {
-  return new TimingOutbox(await resolveStorage());
+  const storage = await resolveStorage();
+  return new TimingOutbox(storage);
 }
