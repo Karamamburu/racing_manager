@@ -36,6 +36,14 @@ import type {
  * administrator and always carry a reason. A cancelled attempt is shown as
  * non-authoritative, and a closed attempt says plainly that it is read-only.
  * Nothing here re-derives a time or applies a business rule of its own.
+ *
+ * The closure, forced closure, cancellation and the correction entry points
+ * are online-only (U-07, F-04, FR-43, FR-48): while the page has no connection
+ * they are not offered and «Нужна связь с сервером.» is stated in words. A
+ * closure also waits for this device's own unsent entries, so the closure
+ * family is disabled with a sentence naming the count while any remain (S-08,
+ * FR-24, FR-47). The record, its tables and both reasons stay readable either
+ * way, and both reasons can hold at once (E-21, E-22).
  */
 
 const STATE_LABELS: Record<TimingAttemptState, string> = {
@@ -71,6 +79,25 @@ interface CorrectionState {
   pendingFinishId?: string;
 }
 
+/** The online-only actions are withheld while the page has no connection (F-04). */
+const OFFLINE_REASON = 'Нужна связь с сервером.';
+
+/**
+ * A closure waits while this device still owes the server entries (S-08,
+ * FR-24, FR-47). The count is named so the referee knows what to send first.
+ */
+function closureUnsentReason(count: number): string {
+  return `Завершение ждёт отправки: неотправленных записей — ${count}. Сначала отправьте их на сервер.`;
+}
+
+/**
+ * A count the page derived from the outbox. A local negative or fractional
+ * value can only come from a defect; the gate never invents an entry from it.
+ */
+function wholeCount(value: number): number {
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+}
+
 export interface AttemptRecordDrawerProps {
   open: boolean;
   /** The record title for the block that opened it, for example «Запись категории». */
@@ -83,6 +110,10 @@ export interface AttemptRecordDrawerProps {
   canOperate: boolean;
   /** The workstation that would complete or undo the attempt. */
   workstationInstanceId: string;
+  /** False while the page has no server answer path; defaults to online (FR-43). */
+  isOnline?: boolean;
+  /** Unsent entries of this device; a closure waits for them (FR-24). */
+  unsentEntries?: number;
   onClose: () => void;
   /** Called after every successful mutation so the surface refreshes its reads. */
   onChanged: () => void;
@@ -127,6 +158,8 @@ export function AttemptRecordDrawer({
   canAdminister,
   canOperate,
   workstationInstanceId,
+  isOnline = true,
+  unsentEntries = 0,
   onClose,
   onChanged,
 }: AttemptRecordDrawerProps) {
@@ -147,6 +180,13 @@ export function AttemptRecordDrawer({
   const [actionError, setActionError] = useState<string | null>(null);
   const [correction, setCorrection] = useState<CorrectionState | null>(null);
 
+  const unsentCount = wholeCount(unsentEntries);
+  // Closure, forced closure, cancellation and every correction are online-only
+  // (U-07, F-04, FR-43, FR-48); a closure additionally waits for the entries
+  // this device still owes the server (S-08, FR-24, FR-47).
+  const onlineOnlyWithheld = !isOnline;
+  const closureWaitsForUnsent = unsentCount > 0;
+
   const describeParticipant = (
     enrollmentId: string | null,
   ): { name: string; id: string | null } => {
@@ -164,6 +204,16 @@ export function AttemptRecordDrawer({
 
   const runAttemptAction = async (action: 'COMPLETE' | 'UNDO') => {
     if (attemptId === null || busyAction !== null) return;
+    // Defensive: the controls are not offered while either gate holds, and a
+    // press that still arrives closes nothing (E-22, F-05).
+    if (onlineOnlyWithheld) {
+      setActionError(OFFLINE_REASON);
+      return;
+    }
+    if (action === 'COMPLETE' && closureWaitsForUnsent) {
+      setActionError(closureUnsentReason(unsentCount));
+      return;
+    }
     setBusyAction(action);
     setActionError(null);
     try {
@@ -200,6 +250,25 @@ export function AttemptRecordDrawer({
   };
 
   const record = recordQuery.data;
+
+  // A reason is only stated where this reader is actually losing a control:
+  // the closure family for an operator or administrator (S-08, F-04).
+  const showsOfflineReason =
+    onlineOnlyWithheld && (canOperate || canAdminister);
+  const showsUnsentClosureReason =
+    closureWaitsForUnsent &&
+    record !== undefined &&
+    record.state === 'RUNNING' &&
+    (canOperate || canAdminister);
+
+  // The action row is offered online only, and the closure family additionally
+  // waits for the entries this device still owes the server (S-08, F-04).
+  const offersCaptureActions =
+    canOperate && record?.state === 'RUNNING' && !onlineOnlyWithheld;
+  const offersStartCorrection =
+    canAdminister && record?.state !== 'CANCELLED' && !onlineOnlyWithheld;
+  const offersClosureActions =
+    canAdminister && record?.state === 'RUNNING' && !onlineOnlyWithheld;
 
   const passColumns: TableColumnsType<TimingPassView> = [
     {
@@ -248,7 +317,12 @@ export function AttemptRecordDrawer({
     },
   ];
 
-  if (record !== undefined && canAdminister && record.state !== 'CANCELLED') {
+  if (
+    record !== undefined &&
+    canAdminister &&
+    isOnline &&
+    record.state !== 'CANCELLED'
+  ) {
     passColumns.push({
       title: 'Действия',
       key: 'actions',
@@ -319,7 +393,12 @@ export function AttemptRecordDrawer({
     },
   ];
 
-  if (record !== undefined && canAdminister && record.state === 'RUNNING') {
+  if (
+    record !== undefined &&
+    canAdminister &&
+    isOnline &&
+    record.state === 'RUNNING'
+  ) {
     pendingColumns.push({
       title: 'Действия',
       key: 'actions',
@@ -466,13 +545,28 @@ export function AttemptRecordDrawer({
             />
           ) : null}
 
+          {showsOfflineReason || showsUnsentClosureReason ? (
+            <Space direction="vertical" size={2}>
+              {showsUnsentClosureReason ? (
+                <Typography.Text type="warning" style={{ fontSize: 12 }}>
+                  {closureUnsentReason(unsentCount)}
+                </Typography.Text>
+              ) : null}
+              {showsOfflineReason ? (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {OFFLINE_REASON}
+                </Typography.Text>
+              ) : null}
+            </Space>
+          ) : null}
+
           <Space wrap size={8}>
-            {canOperate && record.state === 'RUNNING' ? (
+            {offersCaptureActions ? (
               <>
                 <Button
                   type="primary"
                   loading={busyAction === 'COMPLETE'}
-                  disabled={busyAction !== null}
+                  disabled={busyAction !== null || closureWaitsForUnsent}
                   onClick={() => {
                     void runAttemptAction('COMPLETE');
                   }}
@@ -491,7 +585,7 @@ export function AttemptRecordDrawer({
               </>
             ) : null}
 
-            {canAdminister && record.state !== 'CANCELLED' ? (
+            {offersStartCorrection ? (
               <Button
                 disabled={busyAction !== null}
                 onClick={() => setCorrection({ mode: 'OFFICIAL_TIME' })}
@@ -500,18 +594,18 @@ export function AttemptRecordDrawer({
               </Button>
             ) : null}
 
-            {canAdminister && record.state === 'RUNNING' ? (
+            {offersClosureActions ? (
               <>
                 <Button
                   danger
-                  disabled={busyAction !== null}
+                  disabled={busyAction !== null || closureWaitsForUnsent}
                   onClick={() => setCorrection({ mode: 'FORCE_COMPLETE' })}
                 >
                   Завершить принудительно
                 </Button>
                 <Button
                   danger
-                  disabled={busyAction !== null}
+                  disabled={busyAction !== null || closureWaitsForUnsent}
                   onClick={() => setCorrection({ mode: 'CANCEL_ATTEMPT' })}
                 >
                   Отменить хронометраж

@@ -375,6 +375,210 @@ describe('AttemptRecordDrawer gating', () => {
   });
 });
 
+const OFFLINE_REASON = 'Нужна связь с сервером.';
+
+/** The statement the drawer must make before a closure that waits (S-08, FR-24). */
+function closureUnsentReason(count: number): string {
+  return `Завершение ждёт отправки: неотправленных записей — ${count}. Сначала отправьте их на сервер.`;
+}
+
+describe('AttemptRecordDrawer online-only gates', () => {
+  it('keeps closure, forced closure and cancellation offered while online with no unsent entry', async () => {
+    renderDrawer({ canAdminister: true, canOperate: true });
+
+    const complete = (await screen.findByRole('button', {
+      name: 'Завершить хронометраж',
+    })) as HTMLButtonElement;
+    const force = screen.getByRole('button', {
+      name: 'Завершить принудительно',
+    }) as HTMLButtonElement;
+    const cancelAttempt = screen.getByRole('button', {
+      name: 'Отменить хронометраж',
+    }) as HTMLButtonElement;
+    const undo = screen.getByRole('button', {
+      name: 'Отменить последнюю отметку',
+    }) as HTMLButtonElement;
+
+    expect(complete.disabled).toBe(false);
+    expect(force.disabled).toBe(false);
+    expect(cancelAttempt.disabled).toBe(false);
+    expect(undo.disabled).toBe(false);
+    expect(screen.queryByText(OFFLINE_REASON)).toBeNull();
+    expect(screen.queryByText(/Завершение ждёт отправки/)).toBeNull();
+  });
+
+  it('withholds a closure while this device has unsent entries and names the count', async () => {
+    const clock = formatTimingClock('2026-11-13T09:01:00.000Z');
+    renderDrawer({ canAdminister: true, canOperate: true, unsentEntries: 3 });
+
+    const complete = (await screen.findByRole('button', {
+      name: 'Завершить хронометраж',
+    })) as HTMLButtonElement;
+    const force = screen.getByRole('button', {
+      name: 'Завершить принудительно',
+    }) as HTMLButtonElement;
+    const cancelAttempt = screen.getByRole('button', {
+      name: 'Отменить хронометраж',
+    }) as HTMLButtonElement;
+
+    expect(complete.disabled).toBe(true);
+    expect(force.disabled).toBe(true);
+    expect(cancelAttempt.disabled).toBe(true);
+
+    // The reason is stated in words with the count, before the closure control.
+    expect(screen.getByText(closureUnsentReason(3))).not.toBeNull();
+    const text = document.body.textContent ?? '';
+    expect(text.indexOf(closureUnsentReason(3))).toBeLessThan(
+      text.indexOf('Завершить хронометраж'),
+    );
+
+    // Actions that do not close the attempt keep working and stay enabled.
+    expect(
+      (
+        screen.getByRole('button', {
+          name: 'Отменить последнюю отметку',
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+    expect(
+      (
+        screen.getByRole('button', {
+          name: `Отменить отсечку ${clock}`,
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+    expect(screen.queryByText(OFFLINE_REASON)).toBeNull();
+
+    fireEvent.click(complete);
+
+    expect(timingService.completeAttempt).not.toHaveBeenCalled();
+    expect(timingService.forceCompleteAttempt).not.toHaveBeenCalled();
+  });
+
+  it('does not offer closure, forced closure or cancellation without a connection', async () => {
+    renderDrawer({ canAdminister: true, canOperate: true, isOnline: false });
+
+    expect(await screen.findByText('Идёт')).not.toBeNull();
+    expect(screen.getByText(OFFLINE_REASON)).not.toBeNull();
+
+    expect(
+      screen.queryByRole('button', { name: 'Завершить хронометраж' }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Отменить последнюю отметку' }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Завершить принудительно' }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Отменить хронометраж' }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /Отменить отсечку/ }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /Скорректировать отсечку/ }),
+    ).toBeNull();
+
+    // The record itself stays readable.
+    expect(screen.getByText('Иван Петров')).not.toBeNull();
+    expect(screen.getByText('01:00.000')).not.toBeNull();
+    expect(screen.queryByText(/Завершение ждёт отправки/)).toBeNull();
+  });
+
+  it('states both reasons while offline with unsent entries', async () => {
+    renderDrawer({
+      canAdminister: true,
+      canOperate: true,
+      isOnline: false,
+      unsentEntries: 2,
+    });
+
+    expect(await screen.findByText(OFFLINE_REASON)).not.toBeNull();
+    expect(screen.getByText(closureUnsentReason(2))).not.toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Завершить хронометраж' }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Завершить принудительно' }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Отменить хронометраж' }),
+    ).toBeNull();
+  });
+
+  it('offers closure and cancellation again when online and the queue is clear', async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <AttemptRecordDrawer
+          {...drawerProps({
+            canAdminister: true,
+            canOperate: true,
+            isOnline: false,
+            unsentEntries: 2,
+          })}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText(OFFLINE_REASON)).not.toBeNull();
+    expect(screen.getByText(closureUnsentReason(2))).not.toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Завершить хронометраж' }),
+    ).toBeNull();
+
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <AttemptRecordDrawer
+          {...drawerProps({
+            canAdminister: true,
+            canOperate: true,
+            isOnline: true,
+            unsentEntries: 1,
+          })}
+        />
+      </QueryClientProvider>,
+    );
+
+    const stillWaiting = screen.getByRole('button', {
+      name: 'Завершить хронометраж',
+    }) as HTMLButtonElement;
+    expect(stillWaiting.disabled).toBe(true);
+    expect(screen.queryByText(OFFLINE_REASON)).toBeNull();
+    expect(screen.getByText(closureUnsentReason(1))).not.toBeNull();
+
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <AttemptRecordDrawer
+          {...drawerProps({
+            canAdminister: true,
+            canOperate: true,
+            isOnline: true,
+            unsentEntries: 0,
+          })}
+        />
+      </QueryClientProvider>,
+    );
+
+    const offered = screen.getByRole('button', {
+      name: 'Завершить хронометраж',
+    }) as HTMLButtonElement;
+    expect(offered.disabled).toBe(false);
+    expect(
+      (
+        screen.getByRole('button', {
+          name: 'Отменить хронометраж',
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+    expect(screen.queryByText(OFFLINE_REASON)).toBeNull();
+    expect(screen.queryByText(/Завершение ждёт отправки/)).toBeNull();
+  });
+});
+
 describe('AttemptRecordDrawer completion and undo', () => {
   it('completes the attempt through the service and reports the change', async () => {
     const { props } = renderDrawer({ canOperate: true });
