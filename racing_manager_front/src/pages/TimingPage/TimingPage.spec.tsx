@@ -310,7 +310,6 @@ function captureResult(
     sendNow: vi.fn(() => Promise.resolve()),
     queueItems: [],
     refreshQueue: vi.fn(() => Promise.resolve()),
-    dismissRejected: vi.fn(() => Promise.resolve()),
     isDurable: true,
     isOnline: true,
     pendingCount: 0,
@@ -1613,7 +1612,7 @@ describe('TimingPage', () => {
     expect(screen.getByText('Всё отправлено')).not.toBeNull();
   });
 
-  it('lists the send queue rows and wires send-now and dismissal', async () => {
+  it('lists only unsent send-queue rows and wires send-now', async () => {
     sessionStorage.setItem('timing-workstation-instance', 'ws-1');
     mockSession(['REFEREE']);
     mockEvent();
@@ -1631,46 +1630,17 @@ describe('TimingPage', () => {
         ],
       }),
     );
-    const capture = mockCapture({
-      queueItems: [
-        queueItem(),
-        queueItem({
-          id: 'queue-rejected',
-          deviceSequence: 2,
-          status: 'REJECTED',
-          error: 'Попытка уже закрыта другим устройством',
-          createdAt: '2026-11-13T09:00:02.000Z',
-          payload: {
-            kind: 'TILE',
-            attemptId: 'attempt-1',
-            enrollmentId: 'enrollment-1',
-            clientCapturedAt: '2026-11-13T09:00:02.000Z',
-          },
-        }),
-      ],
-    });
+    const capture = mockCapture({ queueItems: [queueItem()] });
 
     renderPage();
 
     expect(await screen.findByText('Очередь отправки')).not.toBeNull();
-    // Every row names its kind, and a refusal keeps the server reason (FR-12).
     expect(screen.getByText('Отметка по номеру')).not.toBeNull();
-    expect(screen.getByText('Отметка по плитке')).not.toBeNull();
-    expect(
-      screen.getByText('Попытка уже закрыта другим устройством'),
-    ).not.toBeNull();
     expect(screen.getByText('не отправлено')).not.toBeNull();
-    expect(screen.getByText('Отклонено')).not.toBeNull();
+    expect(screen.queryByText('Отклонено')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /Отправить сейчас/ }));
     await waitFor(() => expect(capture.sendNow).toHaveBeenCalledTimes(1));
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Убрать отклонённую запись 2' }),
-    );
-    await waitFor(() =>
-      expect(capture.dismissRejected).toHaveBeenCalledWith('queue-rejected'),
-    );
   });
 
   it('shows the pending marks of each block from the derived outbox view', async () => {
@@ -1920,14 +1890,9 @@ describe('TimingPage', () => {
     getSurface.mockResolvedValue(
       surface({ captureWorkstationInstanceId: 'ws-1' }),
     );
-    // A rejected entry is not unsent (S-05), and an empty queue has nothing to
-    // lose, so neither states the volatile risk (FR-30).
-    mockCapture({
-      isDurable: false,
-      queueItems: [
-        queueItem({ status: 'REJECTED', error: 'Попытка уже закрыта' }),
-      ],
-    });
+    // An empty queue has nothing to lose, so the volatile risk is not stated
+    // (FR-30).
+    mockCapture({ isDurable: false, queueItems: [] });
 
     renderPage();
 

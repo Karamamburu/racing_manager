@@ -135,8 +135,6 @@ export interface UseTimingCaptureResult {
   queueItems: TimingQueueItem[];
   /** Reads the outbox again; the hook also does this after every write. */
   refreshQueue: () => Promise<void>;
-  /** Removes one refused entry; no count, state, pass or result changes (FR-21). */
-  dismissRejected: (id: string) => Promise<void>;
   /**
    * Whether the outbox outlives a reload, as the storage itself reported it.
    * `true` until the first queue read, so an online surface is unchanged; a
@@ -309,8 +307,20 @@ export function useTimingCapture(
   const refreshQueue = useCallback(async () => {
     const queue = await openTimingQueue();
     const items = await queue.list();
+    // A refusal is a one-time answer, not a queue row: drop every refused
+    // entry (including leftovers from earlier sessions) before the page
+    // derives its view. The refusal reason is still returned to the caller
+    // and reported once; the server audit keeps the refusal itself.
+    const rejected = items.filter((item) => item.status === 'REJECTED');
+    for (const item of rejected) {
+      await queue.remove(item.id);
+    }
+    const visible =
+      rejected.length === 0
+        ? items
+        : items.filter((item) => item.status !== 'REJECTED');
     if (mounted.current) {
-      setQueueItems(items);
+      setQueueItems(visible);
       setIsDurable(queue.isDurable);
     }
   }, []);
@@ -970,21 +980,6 @@ export function useTimingCapture(
     setConnectivity,
   ]);
 
-  /**
-   * Removes one refused entry the referee dismissed. It only ever drops a
-   * `REJECTED` item: no lap, participant state, pass or result changes (FR-21).
-   */
-  const dismissRejected = useCallback(
-    async (id: string): Promise<void> => {
-      const queue = await openTimingQueue();
-      const item = (await queue.list()).find((entry) => entry.id === id);
-      if (item === undefined || item.status !== 'REJECTED') return;
-      await queue.remove(id);
-      await refreshQueue();
-    },
-    [refreshQueue],
-  );
-
   useEffect(() => {
     mounted.current = true;
     setIsOnline(browserOnline());
@@ -1050,7 +1045,6 @@ export function useTimingCapture(
     sendNow: flush,
     queueItems,
     refreshQueue,
-    dismissRejected,
     isDurable,
     isOnline,
     pendingCount: queueItems.filter(isUnsynced).length,

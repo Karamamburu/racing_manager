@@ -494,7 +494,7 @@ describe('useTimingCapture commits', () => {
     expect(payload).not.toHaveProperty('startNumber');
   });
 
-  it('keeps a refused commit in the queue with the API message', async () => {
+  it('shows a refused commit once and removes it from the queue', async () => {
     const onError = vi.fn();
     vi.mocked(timingService.capturePass).mockRejectedValue(
       apiRefusal('Последний круг уже записан'),
@@ -523,12 +523,8 @@ describe('useTimingCapture commits', () => {
       reason: 'Последний круг уже записан',
     });
     const queue = await openTimingQueue();
-    const [item] = await queue.list('attempt-refused');
-    expect(item.status).toBe('REJECTED');
-    expect(item.error).toBe('Последний круг уже записан');
-    expect(result.current.queueItems.map((entry) => entry.status)).toEqual([
-      'REJECTED',
-    ]);
+    await expect(queue.list('attempt-refused')).resolves.toEqual([]);
+    expect(result.current.queueItems).toEqual([]);
     expect(result.current.pendingCount).toBe(0);
     expect(onError).toHaveBeenCalledWith('Последний круг уже записан');
   });
@@ -803,12 +799,8 @@ describe('useTimingCapture anonymous splits', () => {
       reason: 'Отсечка уже назначена',
     });
     const queue = await openTimingQueue();
-    const [item] = await queue.list('event:event-1');
-    expect(item).toMatchObject({
-      operation: 'ANONYMOUS_ASSIGN',
-      status: 'REJECTED',
-      error: 'Отсечка уже назначена',
-    });
+    await expect(queue.list('event:event-1')).resolves.toEqual([]);
+    expect(result.current.queueItems).toEqual([]);
     expect(onError).toHaveBeenCalledWith('Отсечка уже назначена');
   });
 
@@ -1131,8 +1123,8 @@ describe('useTimingCapture send now', () => {
   });
 });
 
-describe('useTimingCapture dismiss rejected', () => {
-  it('removes only a rejected entry and touches no capture data', async () => {
+describe('useTimingCapture refused entries', () => {
+  it('purges a refused entry on refresh and keeps only the unsent one', async () => {
     const { result } = renderCapture({
       surface: surfaceOf([runningBlock()]),
     });
@@ -1149,21 +1141,9 @@ describe('useTimingCapture dismiss rejected', () => {
       await result.current.refreshQueue();
     });
 
-    // An unsent entry is never dismissed: only a refusal can be.
-    await act(async () => {
-      await result.current.dismissRejected('key-pending');
-    });
-    let items = await queue.list('attempt-a');
-    expect(items.map((entry) => entry.id)).toEqual([
-      'key-rejected',
-      'key-pending',
+    await expect(queue.list('attempt-a')).resolves.toEqual([
+      expect.objectContaining({ id: 'key-pending', status: 'PENDING' }),
     ]);
-
-    await act(async () => {
-      await result.current.dismissRejected('key-rejected');
-    });
-    items = await queue.list('attempt-a');
-    expect(items.map((entry) => entry.id)).toEqual(['key-pending']);
     expect(result.current.queueItems.map((entry) => entry.id)).toEqual([
       'key-pending',
     ]);

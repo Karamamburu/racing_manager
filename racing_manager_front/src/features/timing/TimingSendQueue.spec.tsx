@@ -22,15 +22,14 @@ import {
 /**
  * MANUAL-TIMING-4, Wave 6: the send queue of the timing page.
  *
- * The queue lists every entry the device recorded and the server has not
- * answered, plus every refusal it has not been dismissed from (FR-12). The
- * figures come from the page ("Не отправлено: N" counts entries, never marks)
- * and a rejected row is never counted as unsent, never offered for sending and
- * never carries the unsent word (FR-11, FR-13, FR-20, FR-21).
+ * The queue lists only entries the device recorded and the server has not
+ * answered (FR-12). A refusal is reported once and removed by the hook, so it
+ * never becomes a queue row. The figures come from the page ("Не отправлено: N"
+ * counts entries, never marks).
  *
  * Every state word the referee reads is present in text, so no cue depends on
- * colour (U-04, FR-09): the unsent row says «не отправлено», a refusal says
- * «Отклонено» with the server's reason, and an empty queue says «Всё отправлено».
+ * colour (U-04, FR-09): the unsent row says «не отправлено», and an empty queue
+ * says «Всё отправлено».
  */
 
 /** A local-wall-clock instant, so the rendered `HH:mm:ss.SSS` is timezone-safe. */
@@ -112,45 +111,19 @@ function anonymousSplit(
   });
 }
 
-/** An entry the server refused; it is no longer unsent (E-07, FR-20). */
-function rejected(
-  overrides: Partial<TimingOfflineEntryView> = {},
-): TimingOfflineEntryView {
-  return entry({
-    id: 'entry-rejected',
-    status: 'REJECTED',
-    unsent: false,
-    rejected: true,
-    pendingMarks: 0,
-    reason: 'Попытка уже закрыта сервером',
-    ...overrides,
-  });
-}
-
 function props(
   overrides: Partial<ComponentProps<typeof TimingSendQueue>> = {},
 ): ComponentProps<typeof TimingSendQueue> {
   return {
     entries: [],
     unsentEntries: 0,
-    rejectedEntries: 0,
     isOnline: true,
     isSending: false,
     onSendNow: vi.fn(() => Promise.resolve()),
-    onDismiss: vi.fn(() => Promise.resolve()),
     ...overrides,
   };
 }
 
-function deferred() {
-  let resolve!: () => void;
-  let reject!: (reason: unknown) => void;
-  const promise = new Promise<void>((next, fail) => {
-    resolve = next;
-    reject = fail;
-  });
-  return { promise, resolve, reject };
-}
 
 function queueArea(): HTMLElement {
   return screen.getByRole('list', { name: 'Очередь отправки' });
@@ -244,121 +217,11 @@ describe('TimingSendQueue unsent entries', () => {
   });
 
   it('does not offer the send control when nothing is unsent', () => {
-    render(
-      <TimingSendQueue
-        {...props({ entries: [rejected()], rejectedEntries: 1 })}
-      />,
-    );
+    render(<TimingSendQueue {...props()} />);
 
     expect(
       screen.queryByRole('button', { name: /Отправить сейчас/ }),
     ).toBeNull();
-  });
-});
-
-describe('TimingSendQueue rejected entries', () => {
-  it('lists a rejected entry with the server reason and dismisses it', async () => {
-    const gate = deferred();
-    const onDismiss = vi.fn(() => gate.promise);
-    render(
-      <TimingSendQueue
-        {...props({
-          entries: [rejected()],
-          unsentEntries: 0,
-          rejectedEntries: 1,
-          onDismiss,
-        })}
-      />,
-    );
-
-    // Only a refusal remains, so the figure reads zero and no send is offered
-    // (S-05, FR-11, FR-13).
-    expect(screen.getByText('Не отправлено: 0')).not.toBeNull();
-    expect(
-      screen.queryByRole('button', { name: /Отправить сейчас/ }),
-    ).toBeNull();
-
-    const row = rows()[0];
-    expect(within(row).getByText('Отклонено')).not.toBeNull();
-    expect(
-      within(row).getByText('Попытка уже закрыта сервером'),
-    ).not.toBeNull();
-    expect(row.textContent).toContain('Отметка по номеру');
-    expect(row.textContent).toContain('Отметка: 09:01:00.250');
-
-    const dismiss = screen.getByRole('button', {
-      name: 'Убрать отклонённую запись 1',
-    }) as HTMLButtonElement;
-    fireEvent.click(dismiss);
-    await waitFor(() => expect(onDismiss).toHaveBeenCalledWith('entry-rejected'));
-    expect(onDismiss).toHaveBeenCalledTimes(1);
-    // A second press cannot dismiss the same row twice while the first is in
-    // flight (FR-21).
-    expect(dismiss.disabled).toBe(true);
-
-    gate.resolve();
-    await waitFor(() => expect(dismiss.disabled).toBe(false));
-  });
-
-  it('keeps the rejected row and states the reason when a dismissal fails', async () => {
-    const onDismiss = vi.fn(() =>
-      Promise.reject(new Error('Отклонённую запись нельзя убрать')),
-    );
-    render(
-      <TimingSendQueue
-        {...props({
-          entries: [rejected()],
-          unsentEntries: 0,
-          rejectedEntries: 1,
-          onDismiss,
-        })}
-      />,
-    );
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Убрать отклонённую запись 1' }),
-    );
-
-    await waitFor(() =>
-      expect(screen.getByRole('alert').textContent).toBe(
-        'Отклонённую запись нельзя убрать',
-      ),
-    );
-    expect(rows()).toHaveLength(1);
-    expect(within(rows()[0]).getByText('Отклонено')).not.toBeNull();
-  });
-
-  it('keeps a rejected entry out of the unsent count and the send offer', () => {
-    render(
-      <TimingSendQueue
-        {...props({
-          entries: [
-            entry(),
-            rejected({
-              id: 'entry-rejected',
-              startNumber: 21,
-              fullName: 'Сидорова Анна',
-            }),
-          ],
-          unsentEntries: 1,
-          rejectedEntries: 1,
-        })}
-      />,
-    );
-
-    // One entry is unsent and the other is refused, so the page figure counts
-    // only the unsent one (FR-11, FR-20).
-    expect(screen.getByText('Не отправлено: 1')).not.toBeNull();
-    expect(screen.queryByText('Не отправлено: 2')).toBeNull();
-    expect(screen.getByRole('button', { name: /Отправить сейчас/ })).not.toBeNull();
-
-    const [unsentRow, rejectedRow] = rows();
-    expect(unsentRow.textContent).toContain('не отправлено');
-    expect(unsentRow.textContent).not.toContain('Отклонено');
-    expect(rejectedRow.textContent).toContain('Отклонено');
-    expect(rejectedRow.textContent).not.toContain('не отправлено');
-    expect(rejectedRow.textContent).not.toContain('Иванов Иван');
-    expect(rejectedRow.textContent).toContain('Сидорова Анна');
   });
 });
 
@@ -366,7 +229,7 @@ describe('TimingSendQueue empty and connection states', () => {
   it('says everything is sent when nothing is queued', () => {
     render(<TimingSendQueue {...props()} />);
 
-    expect(queueArea().textContent).toBe('Всё отправлено');
+    expect(screen.getByText('Всё отправлено')).not.toBeNull();
     expect(
       screen.queryByRole('button', { name: /Отправить сейчас/ }),
     ).toBeNull();
@@ -402,7 +265,7 @@ describe('TimingSendQueue empty and connection states', () => {
     // queue (UC-04); «Всё отправлено» stays the only message.
     rerender(<TimingSendQueue {...props({ isOnline: false })} />);
     expect(screen.queryByText('Нет связи с сервером')).toBeNull();
-    expect(queueArea().textContent).toBe('Всё отправлено');
+    expect(screen.getByText('Всё отправлено')).not.toBeNull();
   });
 });
 

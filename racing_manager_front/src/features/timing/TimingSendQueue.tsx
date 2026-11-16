@@ -1,30 +1,16 @@
-import { CloseOutlined, SendOutlined } from '@ant-design/icons';
+import { SendOutlined } from '@ant-design/icons';
 import { Button, Card, Space, Tag, Typography } from 'antd';
-import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import { formatTimingClock } from './ParticipantTile';
 import type { TimingOfflineEntryView } from './timingOffline';
-import { describeTimingError } from './useTimingCapture';
 
 /**
- * The send queue of one device (FR-11, FR-12, FR-13, FR-20, FR-21).
+ * The send queue of one device (FR-11, FR-12, FR-13).
  *
- * The queue lists every entry the device recorded and the server has not
- * answered, plus every refusal the referee has not dismissed yet. It is one
- * compact block above the capture controls, with a fixed area whose rows scroll
- * inside it, so a capture, a refusal or a dismissal never moves the number
- * field or a block (S-04, S-06).
- *
- * The component owns no product rule: the page derives the rows and the two
- * figures from the device outbox, and this component renders them and reports
- * the two presses. A rejected entry is never counted as unsent and is never
- * offered for sending again (FR-20); a dismissal only removes the row, it never
- * touches a lap, a participant state, a pass or a result (FR-21).
- *
- * The unsent word and the violet accent carry the state together, so a reader
- * never needs colour: an unsent row says «не отправлено», a refused row says
- * «Отклонено» with the server's reason, and the empty queue says
- * «Всё отправлено» (U-04, FR-09).
+ * A refusal is not a queue row: the hook reports the refusal once and removes
+ * the entry. This component therefore lists only entries the server has not
+ * answered yet, with a fixed area whose rows scroll inside it so a capture or
+ * an empty queue never moves the number field or a block (S-04, S-06).
  */
 
 /** Minimum height of the entry area when its column has no spare height. */
@@ -35,14 +21,7 @@ const LIST_LABEL = 'Очередь отправки';
 const ALL_SENT_LABEL = 'Всё отправлено';
 const OFFLINE_LABEL = 'Нет связи с сервером';
 const UNSENT_LABEL = 'не отправлено';
-const REJECTED_LABEL = 'Отклонено';
-/** A refusal still names a reason when the server sent none. */
-const REJECTION_FALLBACK_REASON = 'сервер не указал причину';
 
-/**
- * The unsent cue repeats the violet accent the tiles and block headers already
- * use, never the exclusion red and never a participant state colour (U-04).
- */
 const UNSENT_TAG_STYLE: CSSProperties = {
   backgroundColor: '#f9f0ff',
   borderColor: '#722ed1',
@@ -85,26 +64,18 @@ const ROW_CARD_STYLE: CSSProperties = {
 };
 
 export interface TimingSendQueueProps {
-  /** Every unsent and rejected entry, in the capture order of the outbox. */
+  /** Unsent entries of every kind, in the capture order of the outbox. */
   entries: TimingOfflineEntryView[];
   /** Unsent entries of every kind; the page figure «Не отправлено: N». */
   unsentEntries: number;
-  /** Undismissed rejections; they stay listed but are never unsent (FR-20). */
-  rejectedEntries: number;
   /** False while the device has no server answer path (AS-4). */
   isOnline: boolean;
   /** True while the page sends the queue; the offer is busy and inert then. */
   isSending: boolean;
   /** Asks the page to replay the queue now (FR-13). */
   onSendNow: () => Promise<void>;
-  /** Removes one rejected row; the page owns the request (FR-21). */
-  onDismiss: (id: string) => Promise<void>;
 }
 
-/**
- * A figure the page computed from the outbox. A local negative or fractional
- * value can only come from a defect; the queue never invents a count from it.
- */
 function wholeCount(value: number): number {
   return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
 }
@@ -129,40 +100,12 @@ function withdrawalFacts(entry: TimingOfflineEntryView): string | null {
     : `Отменяет отметку: ${parts.join(' ')}`;
 }
 
-function EntryRow({
-  entry,
-  ordinal,
-  dismissing,
-  dismissBusy,
-  onDismiss,
-}: {
-  entry: TimingOfflineEntryView;
-  ordinal: number;
-  /** This row's dismissal is in flight. */
-  dismissing: boolean;
-  /** Some dismissal is in flight, so no row offers a second one. */
-  dismissBusy: boolean;
-  onDismiss: () => void;
-}) {
+function EntryRow({ entry }: { entry: TimingOfflineEntryView }) {
   const participant = participantFacts(entry);
   const withdrawal = withdrawalFacts(entry);
-  const stateLabel = entry.rejected
-    ? REJECTED_LABEL
-    : entry.unsent
-      ? UNSENT_LABEL
-      : null;
 
   return (
-    <li
-      style={{
-        display: 'flex',
-        gap: 6,
-        alignItems: 'stretch',
-        // Rows never shrink into the fixed area: a long queue scrolls inside
-        // it instead of compressing its entries.
-        flexShrink: 0,
-      }}
-    >
+    <li style={{ display: 'flex', gap: 6, alignItems: 'stretch', flexShrink: 0 }}>
       <div style={ROW_CARD_STYLE}>
         <div
           style={{
@@ -215,42 +158,8 @@ function EntryRow({
           Отметка: {formatTimingClock(entry.pressTime)}
         </Typography.Text>
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'baseline',
-            gap: 6,
-            flexWrap: 'wrap',
-          }}
-        >
-          {stateLabel === null ? null : entry.rejected ? (
-            <Tag color="red" style={{ marginInlineEnd: 0 }}>
-              {stateLabel}
-            </Tag>
-          ) : (
-            <Tag style={UNSENT_TAG_STYLE}>{stateLabel}</Tag>
-          )}
-          {entry.rejected ? (
-            <Typography.Text type="danger" style={{ fontSize: 11 }}>
-              {'Причина: '}
-              <span>{entry.reason ?? REJECTION_FALLBACK_REASON}</span>
-            </Typography.Text>
-          ) : null}
-        </div>
+        <Tag style={UNSENT_TAG_STYLE}>{UNSENT_LABEL}</Tag>
       </div>
-
-      {entry.rejected ? (
-        <Button
-          size="small"
-          type="text"
-          danger
-          icon={<CloseOutlined />}
-          aria-label={`Убрать отклонённую запись ${ordinal}`}
-          loading={dismissing}
-          disabled={dismissBusy}
-          onClick={onDismiss}
-        />
-      ) : null}
     </li>
   );
 }
@@ -258,130 +167,49 @@ function EntryRow({
 export function TimingSendQueue({
   entries,
   unsentEntries,
-  rejectedEntries,
   isOnline,
   isSending,
   onSendNow,
-  onDismiss,
 }: TimingSendQueueProps) {
-  const [dismissingId, setDismissingId] = useState<string | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
-
-  const unsentCount = wholeCount(unsentEntries);
-  const rejectedCount = wholeCount(rejectedEntries);
-  const hasUnsent = unsentCount > 0;
-  const hasRejected = rejectedCount > 0;
-  const allClear = !hasUnsent && !hasRejected;
-  // The hint is part of the unsent report and disappears with a resolved queue
-  // (UC-04); an empty queue is a quiet fact, never an error state (E-04).
-  const showsOffline = !isOnline && !allClear;
-
-  const sendNow = async () => {
-    if (isSending) return;
-    setFailure(null);
-    try {
-      await onSendNow();
-    } catch (error) {
-      // Nothing was answered: the rows stay and the page states why.
-      setFailure(describeTimingError(error));
-    }
-  };
-
-  const dismiss = async (id: string) => {
-    if (dismissingId !== null) return;
-    setDismissingId(id);
-    setFailure(null);
-    try {
-      await onDismiss(id);
-    } catch (error) {
-      // The row stays in the queue and the refusal is readable (FR-21).
-      setFailure(describeTimingError(error));
-    } finally {
-      setDismissingId(null);
-    }
-  };
-
+  const count = wholeCount(unsentEntries);
   return (
-    <Card
-      size="small"
-      title={TITLE}
-      style={{ display: 'flex', flexDirection: 'column' }}
-      styles={{
-        body: {
-          display: 'flex',
-          flexDirection: 'column',
-          flex: 1,
-          minHeight: 0,
-        },
-      }}
-      extra={
-        <Space wrap size={8}>
-          {hasUnsent || hasRejected ? (
-            <Tag style={hasUnsent ? UNSENT_TAG_STYLE : undefined}>
-              {`Не отправлено: ${unsentCount}`}
+    <Card size="small" type="inner" title={TITLE}>
+      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        {count > 0 ? (
+          <Space wrap size={8} align="center">
+            <Tag color="purple" style={{ marginInlineEnd: 0 }}>
+              Не отправлено: {count}
             </Tag>
-          ) : null}
-          {hasUnsent ? (
             <Button
-              type="primary"
+              size="small"
               icon={<SendOutlined />}
               loading={isSending}
               disabled={isSending}
               onClick={() => {
-                void sendNow();
+                void onSendNow();
               }}
             >
               Отправить сейчас
             </Button>
-          ) : null}
-        </Space>
-      }
-    >
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 4,
-          flex: 1,
-          minHeight: 0,
-        }}
-      >
-        {showsOffline ? (
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {OFFLINE_LABEL}
-          </Typography.Text>
+          </Space>
         ) : null}
-        {failure === null ? null : (
-          <Typography.Text type="danger" role="alert" style={{ fontSize: 12 }}>
-            {failure}
-          </Typography.Text>
-        )}
+
+        {!isOnline && entries.length > 0 ? (
+          <Typography.Text type="secondary">{OFFLINE_LABEL}</Typography.Text>
+        ) : null}
 
         <ul aria-label={LIST_LABEL} style={LIST_STYLE}>
           {entries.length === 0 ? (
             <li style={EMPTY_ROW_STYLE}>
-              {allClear ? (
-                <Typography.Text type="secondary">
-                  {ALL_SENT_LABEL}
-                </Typography.Text>
-              ) : null}
+              <Typography.Text type="secondary">
+                {ALL_SENT_LABEL}
+              </Typography.Text>
             </li>
           ) : (
-            entries.map((entry, index) => (
-              <EntryRow
-                key={entry.id}
-                entry={entry}
-                ordinal={index + 1}
-                dismissing={dismissingId === entry.id}
-                dismissBusy={dismissingId !== null}
-                onDismiss={() => {
-                  void dismiss(entry.id);
-                }}
-              />
-            ))
+            entries.map((entry) => <EntryRow key={entry.id} entry={entry} />)
           )}
         </ul>
-      </div>
+      </Space>
     </Card>
   );
 }

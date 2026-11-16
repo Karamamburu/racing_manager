@@ -453,8 +453,8 @@ export function TimingPage() {
 
   /**
    * The volatile-storage protection (FR-30, O-01). It reads the same unsent
-   * total as the page figures and the send queue, so a durable device, an empty
-   * queue and a queue that holds only rejected entries stay unguarded.
+   * total as the page figures and the send queue, so a durable device and an
+   * empty queue stay unguarded.
    */
   const needsVolatileWarning =
     !capture.isDurable && offlineView.totals.unsentEntries > 0;
@@ -1122,13 +1122,11 @@ export function TimingPage() {
         </Card>
 
         <TimingSendQueue
-          entries={offlineView.entries}
+          entries={offlineView.unsentEntries}
           unsentEntries={offlineView.totals.unsentEntries}
-          rejectedEntries={offlineView.totals.rejectedEntries}
           isOnline={capture.isOnline}
           isSending={capture.isFlushing}
           onSendNow={capture.sendNow}
-          onDismiss={capture.dismissRejected}
         />
 
         {surface.categories.length === 0 && stageGroups.length === 0 ? (
