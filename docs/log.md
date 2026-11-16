@@ -225,3 +225,7 @@ The timing page now derives one offline report from the device outbox and the su
 ## 2026-11-16 — refused captures are not queue rows
 
 A server refusal is now reported once in the number-field status/toast and the outbox row is removed immediately; a refresh also purges legacy `REJECTED` rows. The send queue and page totals contain unsent entries only, so old refusal history no longer fills the timing page. Server receipts/audit remain the record of the refusal.
+
+## 2026-11-16 — send queue only when it has work
+
+The «Очередь отправки» block is now hidden when there is no unsent entry. It appears only while at least one capture-side entry is waiting to be sent, so an all-clear page has no empty queue card.

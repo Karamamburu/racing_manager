@@ -1121,13 +1121,15 @@ export function TimingPage() {
           </Row>
         </Card>
 
-        <TimingSendQueue
-          entries={offlineView.unsentEntries}
-          unsentEntries={offlineView.totals.unsentEntries}
-          isOnline={capture.isOnline}
-          isSending={capture.isFlushing}
-          onSendNow={capture.sendNow}
-        />
+        {offlineView.unsentEntries.length === 0 ? null : (
+          <TimingSendQueue
+            entries={offlineView.unsentEntries}
+            unsentEntries={offlineView.totals.unsentEntries}
+            isOnline={capture.isOnline}
+            isSending={capture.isFlushing}
+            onSendNow={capture.sendNow}
+          />
+        )}
 
         {surface.categories.length === 0 && stageGroups.length === 0 ? (
           <Card>

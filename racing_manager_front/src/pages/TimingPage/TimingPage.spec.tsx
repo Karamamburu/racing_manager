@@ -1609,7 +1609,7 @@ describe('TimingPage', () => {
     expect(
       (screen.getByLabelText('Номер участника') as HTMLInputElement).disabled,
     ).toBe(false);
-    expect(screen.getByText('Всё отправлено')).not.toBeNull();
+    expect(screen.queryByText('Очередь отправки')).toBeNull();
   });
 
   it('lists only unsent send-queue rows and wires send-now', async () => {
