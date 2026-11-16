@@ -529,6 +529,39 @@ describe('useTimingCapture commits', () => {
     expect(onError).toHaveBeenCalledWith('Последний круг уже записан');
   });
 
+  it('keeps an entry in flight until the server answers', async () => {
+    const { result } = renderCapture({
+      surface: surfaceOf([runningBlock({ attemptId: 'attempt-in-flight' })]),
+    });
+
+    await waitFor(() => {
+      expect(timingService.openClockEpoch).toHaveBeenCalledTimes(1);
+    });
+
+    let resolveCapture: (value: TimingPassView) => void = () => {};
+    vi.mocked(timingService.capturePass).mockImplementationOnce(
+      () =>
+        new Promise<TimingPassView>((resolve) => {
+          resolveCapture = resolve;
+        }),
+    );
+    let pending: Promise<TimingCaptureOutcome> | undefined;
+    act(() => {
+      pending = result.current.commitNumber({
+        startNumber: 17,
+        capturedAt: '2026-11-13T09:00:01.000Z',
+        monotonicMs: 1500,
+      });
+    });
+
+    await waitFor(() => expect(result.current.inFlightIds.size).toBe(1));
+    await act(async () => {
+      resolveCapture(passView());
+      await pending;
+    });
+    expect(result.current.inFlightIds.size).toBe(0);
+  });
+
   it('resolves an unanswered commit as unsent and confirms it on a later flush', async () => {
     const onError = vi.fn();
     const { result } = renderCapture({

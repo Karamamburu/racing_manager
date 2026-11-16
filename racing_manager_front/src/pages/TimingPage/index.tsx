@@ -451,6 +451,14 @@ export function TimingPage() {
     surfaceQuery.data ?? EMPTY_TIMING_SURFACE,
   );
 
+  // An entry whose request is still in flight is not a queue row the referee
+  // must manage. Filtering it keeps the send-queue card out of the layout during
+  // an ordinary online press; it appears only when an entry actually stays
+  // unanswered (or a previous entry is waiting).
+  const queueEntries = offlineView.unsentEntries.filter(
+    (entry) => !capture.inFlightIds.has(entry.id),
+  );
+
   /**
    * The volatile-storage protection (FR-30, O-01). It reads the same unsent
    * total as the page figures and the send queue, so a durable device and an
@@ -1121,10 +1129,10 @@ export function TimingPage() {
           </Row>
         </Card>
 
-        {offlineView.unsentEntries.length === 0 ? null : (
+        {queueEntries.length === 0 ? null : (
           <TimingSendQueue
-            entries={offlineView.unsentEntries}
-            unsentEntries={offlineView.totals.unsentEntries}
+            entries={queueEntries}
+            unsentEntries={queueEntries.length}
             isOnline={capture.isOnline}
             isSending={capture.isFlushing}
             onSendNow={capture.sendNow}

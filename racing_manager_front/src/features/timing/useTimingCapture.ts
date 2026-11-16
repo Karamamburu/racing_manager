@@ -133,6 +133,12 @@ export interface UseTimingCaptureResult {
    * The page feeds them to `deriveTimingOfflineView` (FR-11, FR-12).
    */
   queueItems: TimingQueueItem[];
+  /**
+   * The outbox ids of capture-side entries whose request is still in flight.
+   * The page keeps the send-queue card off while the only unsent rows are
+   * these, so an ordinary online press does not flash an empty-looking block.
+   */
+  inFlightIds: ReadonlySet<string>;
   /** Reads the outbox again; the hook also does this after every write. */
   refreshQueue: () => Promise<void>;
   /**
@@ -280,6 +286,9 @@ export function useTimingCapture(
    * first read, which reports the truth from the queue itself (FR-30).
    */
   const [isDurable, setIsDurable] = useState(true);
+  const [inFlightIds, setInFlightIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [isFlushing, setIsFlushing] = useState(false);
   const [isOnline, setIsOnline] = useState<boolean>(browserOnline);
 
@@ -329,6 +338,16 @@ export function useTimingCapture(
   const setConnectivity = useCallback((online: boolean) => {
     if (!mounted.current) return;
     setIsOnline((current) => (current === online ? current : online));
+  }, []);
+
+  const markInFlight = useCallback((id: string, inFlight: boolean) => {
+    if (!mounted.current) return;
+    setInFlightIds((current) => {
+      const next = new Set(current);
+      if (inFlight) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   }, []);
 
   const requireEvent = useCallback((): string => {
@@ -401,33 +420,38 @@ export function useTimingCapture(
       const queue = await openTimingQueue();
       await queue.enqueue(item);
       await refreshQueue();
+      markInFlight(item.id, true);
       try {
-        await run();
-        await queue.mark(item.id, 'APPLIED');
-        await refreshQueue();
-        setConnectivity(true);
-        await invalidate();
-        return { status: 'CONFIRMED' };
-      } catch (error) {
-        const message = describeTimingError(error);
-        if (isDefinitiveRefusal(error)) {
-          // The server signed its answer: retrying would only replay it.
-          await queue.mark(item.id, 'REJECTED', message);
+        try {
+          await run();
+          await queue.mark(item.id, 'APPLIED');
           await refreshQueue();
           setConnectivity(true);
           await invalidate();
-          report(message);
-          return { status: 'REJECTED', reason: message };
+          return { status: 'CONFIRMED' };
+        } catch (error) {
+          const message = describeTimingError(error);
+          if (isDefinitiveRefusal(error)) {
+            // The server signed its answer: retrying would only replay it.
+            await queue.mark(item.id, 'REJECTED', message);
+            await refreshQueue();
+            setConnectivity(true);
+            await invalidate();
+            report(message);
+            return { status: 'REJECTED', reason: message };
+          }
+          // No answer: keep it unsynced so a later flush can confirm it (E-27).
+          await queue.mark(item.id, 'PENDING');
+          await refreshQueue();
+          setConnectivity(false);
+          await invalidate();
+          return { status: 'UNSENT' };
         }
-        // No answer: keep it unsynced so a later flush can confirm it (E-27).
-        await queue.mark(item.id, 'PENDING');
-        await refreshQueue();
-        setConnectivity(false);
-        await invalidate();
-        return { status: 'UNSENT' };
+      } finally {
+        markInFlight(item.id, false);
       }
     },
-    [refreshQueue, invalidate, report, setConnectivity],
+    [refreshQueue, invalidate, markInFlight, report, setConnectivity],
   );
 
   /** One pass of one attempt, routed to that attempt's own epoch. */
@@ -1044,6 +1068,7 @@ export function useTimingCapture(
     flush,
     sendNow: flush,
     queueItems,
+    inFlightIds,
     refreshQueue,
     isDurable,
     isOnline,

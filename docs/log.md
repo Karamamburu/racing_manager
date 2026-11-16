@@ -229,3 +229,7 @@ A server refusal is now reported once in the number-field status/toast and the o
 ## 2026-11-16 — send queue only when it has work
 
 The «Очередь отправки» block is now hidden when there is no unsent entry. It appears only while at least one capture-side entry is waiting to be sent, so an all-clear page has no empty queue card.
+
+## 2026-11-16 — no queue flicker during an online capture
+
+The send queue no longer appears for an entry whose request is still in flight. A normal online press therefore does not push the page down for a fraction of a second; the block appears only when an entry actually remains unanswered (or an earlier entry is already waiting).

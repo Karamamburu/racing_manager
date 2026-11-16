@@ -309,6 +309,7 @@ function captureResult(
     flush: vi.fn(() => Promise.resolve()),
     sendNow: vi.fn(() => Promise.resolve()),
     queueItems: [],
+    inFlightIds: new Set<string>(),
     refreshQueue: vi.fn(() => Promise.resolve()),
     isDurable: true,
     isOnline: true,
@@ -1641,6 +1642,35 @@ describe('TimingPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Отправить сейчас/ }));
     await waitFor(() => expect(capture.sendNow).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not flash the send queue while the only unsent capture is in flight', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 1000,
+            startControlEnabled: false,
+          }),
+        ],
+      }),
+    );
+    mockCapture({
+      queueItems: [queueItem()],
+      inFlightIds: new Set(['queue-1']),
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('5 км · Мужчины')).not.toBeNull();
+    expect(screen.queryByText('Очередь отправки')).toBeNull();
   });
 
   it('shows the pending marks of each block from the derived outbox view', async () => {
