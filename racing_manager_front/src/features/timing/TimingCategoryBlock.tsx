@@ -6,6 +6,7 @@ import {
   UnlockOutlined,
 } from '@ant-design/icons';
 import { Alert, Button, Card, Space, Tag, Typography } from 'antd';
+import type { CSSProperties } from 'react';
 import { useState } from 'react';
 import { ParticipantTile, formatTimingClock } from './ParticipantTile';
 import type {
@@ -37,6 +38,75 @@ const READY_MESSAGES = {
     'Все отсечки в гонке данной категории получены, её можно завершить',
   HEAT: 'Все отсечки в заезде получены, его можно завершить',
 } as const;
+
+/**
+ * The unsent cue shares no colour with exclusion or a participant state (U-04).
+ * It repeats the violet accent the participant tiles already use (S-02).
+ */
+const UNSENT_TAG_STYLE: CSSProperties = {
+  backgroundColor: '#f9f0ff',
+  borderColor: '#722ed1',
+  borderStyle: 'dashed',
+  color: '#391085',
+  marginInlineEnd: 0,
+};
+
+const UNSENT_NOTICE_STYLE: CSSProperties = {
+  padding: '6px 10px',
+  borderWidth: 1,
+  borderStyle: 'dashed',
+  borderColor: '#722ed1',
+  borderRadius: 6,
+  backgroundColor: '#f9f0ff',
+  color: '#391085',
+  fontSize: 13,
+  lineHeight: 1.4,
+};
+
+/** The block marks the page derived from its device outbox; never a server fact. */
+const NO_PENDING_MARKS: ReadonlyMap<string, number> = new Map();
+
+/**
+ * The Russian plural form of a whole count: `0` for 1, `1` for 2–4 and `2` for
+ * 0 and 5+, with the 11–14 teens on the third form (S-03).
+ */
+function pluralForm(count: number): 0 | 1 | 2 {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return 0;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 1;
+  return 2;
+}
+
+/** The three agreement forms of the unsent sentence, keyed by `pluralForm`. */
+const UNSENT_NOTICE_FORMS = [
+  { marks: 'отметка', recorded: 'записана', sent: 'не отправлена' },
+  { marks: 'отметки', recorded: 'записаны', sent: 'не отправлены' },
+  { marks: 'отметок', recorded: 'записаны', sent: 'не отправлены' },
+] as const;
+
+/**
+ * The sentence that replaces the ready prompt while marks are unsent (S-03).
+ *
+ * It agrees with the count, so «1 отметка записана … не отправлена» reads as
+ * naturally as «5 отметок записаны … не отправлены».
+ */
+function unsentNotice(pendingMarks: number): string {
+  const form = UNSENT_NOTICE_FORMS[pluralForm(pendingMarks)];
+  return `${pendingMarks} ${form.marks} ${form.recorded} на устройстве и ещё ${form.sent}. Завершить можно после отправки.`;
+}
+
+/**
+ * A pending figure the surface handed over, clamped to a whole count.
+ *
+ * The queue is local and may only return a negative or fractional value through
+ * a defect; the block never invents a count from it (FR-10, FR-37, U-05).
+ */
+function pendingMarks(value: number | undefined): number {
+  return value !== undefined && Number.isFinite(value) && value > 0
+    ? Math.trunc(value)
+    : 0;
+}
 
 /** The finished-category fallback when the API sent no reason of its own. */
 const FINISHED_FALLBACK =
@@ -94,6 +164,14 @@ function genderClassName(gender: string): string | undefined {
  * A heat block is the same block with `kind: 'HEAT'`: it adds a kind tag and
  * its stage name, so it never reads as the category block it is grouped with
  * (FR-17). Start, tiles, pending finishes and the record behave identically.
+ *
+ * MANUAL-TIMING-4 (FR-10, FR-37, S-03): `pendingMarkCount` is the block total
+ * and `pendingMarksByParticipant` carries each tile's own share, both derived by
+ * the page from the device outbox. While the block total is positive the header
+ * gains «Отметок не отправлено: N» and, once every capture is collected, the
+ * ready-to-finish prompt is replaced by a sentence that the marks are still on
+ * the device. The cue uses the tiles' violet accent and states the count in
+ * words; state tags, tiles, block order and the capture controls stay untouched.
  */
 export function TimingCategoryBlock({
   block,
@@ -104,6 +182,8 @@ export function TimingCategoryBlock({
   onTakeCapture,
   onParticipantClick,
   onOpenRecord,
+  pendingMarksByParticipant = NO_PENDING_MARKS,
+  pendingMarkCount = 0,
 }: {
   block: TimingCategoryBlockView;
   title: string;
@@ -114,6 +194,10 @@ export function TimingCategoryBlock({
   onParticipantClick?: (participant: TimingParticipantTileView) => void;
   /** Opens the record of the block's current or last attempt; absent hides it. */
   onOpenRecord?: () => void;
+  /** Unsent marks per `enrollmentId`; a missing id shows a confirmed-only tile. */
+  pendingMarksByParticipant?: ReadonlyMap<string, number>;
+  /** Unsent marks of the whole block; `0` renders the block as it was. */
+  pendingMarkCount?: number;
 }) {
   const canStart = block.startControlEnabled && isCaptureHolder;
   const showsTakeCapture = !isCaptureHolder && onTakeCapture !== undefined;
@@ -122,6 +206,8 @@ export function TimingCategoryBlock({
   const showsRecord = block.attemptId !== null && onOpenRecord !== undefined;
   const showsStart = showsStartControl(block);
   const isHeat = block.kind === 'HEAT';
+  const unsentMarkTotal = pendingMarks(pendingMarkCount);
+  const hasUnsentMarks = unsentMarkTotal > 0;
   // Race-captured participants are timeable in their heat blocks, not in the
   // category attempt. Render them as one compact note instead of a wall of
   // EXCLUDED RACE_SECTION tiles (MANUAL-TIMING-2 UX fix).
@@ -163,6 +249,11 @@ export function TimingCategoryBlock({
           {isHeat ? <Tag color="geekblue">Заезд</Tag> : null}
           <Typography.Text strong>{title}</Typography.Text>
           <Tag color={STATE_COLORS[block.state]}>{STATE_LABELS[block.state]}</Tag>
+          {hasUnsentMarks ? (
+            <Tag style={UNSENT_TAG_STYLE}>
+              {`Отметок не отправлено: ${unsentMarkTotal}`}
+            </Tag>
+          ) : null}
         </Space>
       }
       extra={
@@ -239,11 +330,19 @@ export function TimingCategoryBlock({
             message={block.blockReason ?? FINISHED_FALLBACK}
           />
         ) : block.capturesComplete ? (
-          <Alert
-            type="info"
-            showIcon
-            message={isHeat ? READY_MESSAGES.HEAT : READY_MESSAGES.CATEGORY}
-          />
+          hasUnsentMarks ? (
+            // The block cannot claim it may be closed while this device still
+            // holds marks the server has not answered (S-03, FR-10).
+            <div style={UNSENT_NOTICE_STYLE}>
+              {unsentNotice(unsentMarkTotal)}
+            </div>
+          ) : (
+            <Alert
+              type="info"
+              showIcon
+              message={isHeat ? READY_MESSAGES.HEAT : READY_MESSAGES.CATEGORY}
+            />
+          )
         ) : block.blockReason && !allInRaces ? (
           <Alert type="warning" showIcon message={block.blockReason} />
         ) : null}
@@ -266,6 +365,9 @@ export function TimingCategoryBlock({
               <ParticipantTile
                 key={participant.enrollmentId}
                 participant={participant}
+                pendingMarks={pendingMarks(
+                  pendingMarksByParticipant.get(participant.enrollmentId),
+                )}
                 onClick={
                   onParticipantClick === undefined
                     ? undefined

@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { TimingCategoryBlock, formatElapsed } from './TimingCategoryBlock';
+import { TimingHeatBlock } from './TimingHeatBlock';
 import type {
   TimingCategoryBlockView,
   TimingParticipantTileView,
@@ -702,5 +703,250 @@ describe('independent block collapse', () => {
     expect(
       screen.getAllByRole('button', { name: 'Развернуть блок' }),
     ).toHaveLength(1);
+  });
+});
+
+/** The exclusion red, which the unsent cue must never borrow (U-04, FR-09). */
+const EXCLUSION_RED = '#cf1322';
+
+/** The five participant state fills, also never a cue colour (U-04). */
+const STATE_FILLS = ['#f0f0f0', '#1677ff', '#389e0d', '#d46b08', '#cf1322'];
+
+/** The violet accent the tiles already use for their unsent badge (S-02). */
+const UNSENT_BADGE_BACKGROUND = '#f9f0ff';
+const UNSENT_BADGE_TEXT = '#391085';
+
+const READY_CATEGORY =
+  'Все отсечки в гонке данной категории получены, её можно завершить';
+const READY_HEAT = 'Все отсечки в заезде получены, его можно завершить';
+
+/** The body sentences that stand in for the ready prompt, one per plural form. */
+const UNSENT_NOTICE_1 =
+  '1 отметка записана на устройстве и ещё не отправлена. Завершить можно после отправки.';
+const UNSENT_NOTICE_2 =
+  '2 отметки записаны на устройстве и ещё не отправлены. Завершить можно после отправки.';
+const UNSENT_NOTICE_5 =
+  '5 отметок записаны на устройстве и ещё не отправлены. Завершить можно после отправки.';
+
+/**
+ * One colour in the notation jsdom reports, so a comparison never depends on
+ * whether a value came back as `#rrggbb` or as `rgb(r, g, b)`.
+ */
+function colour(value: string): string {
+  const hex = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(value);
+  if (!hex) return value;
+  return `rgb(${parseInt(hex[1], 16)}, ${parseInt(hex[2], 16)}, ${parseInt(
+    hex[3],
+    16,
+  )})`;
+}
+
+/** A running block whose attempt exists, so the ready prompt can appear. */
+const RUNNING: Partial<TimingCategoryBlockView> = {
+  state: 'RUNNING',
+  attemptId: 'attempt-1',
+  officialStartedAt: RUNNING_START,
+  elapsedMs: 1000,
+  startControlEnabled: false,
+};
+
+describe('block unsent marks', () => {
+  it('shows each tile its own unsent count and the block total in the header tag', () => {
+    const first = participant({
+      enrollmentId: 'e-1',
+      passCount: 1,
+      requiredLaps: 2,
+      state: 'RACING',
+    });
+    const second = participant({
+      enrollmentId: 'e-2',
+      startNumber: 3,
+      fullName: 'Борис Сидоров',
+      passCount: 2,
+      requiredLaps: 5,
+    });
+
+    render(
+      <TimingCategoryBlock
+        block={block({ ...RUNNING, participants: [first, second] })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+        pendingMarksByParticipant={
+          new Map([
+            ['e-1', 1],
+            ['e-2', 1],
+          ])
+        }
+        pendingMarkCount={2}
+      />,
+    );
+
+    // Each tile states its own unsent mark, never the block total (S-01, FR-10).
+    expect(screen.getByText('1+1/2')).not.toBeNull();
+    expect(screen.getByText('2+1/5')).not.toBeNull();
+    expect(screen.queryByText('1+2/2')).toBeNull();
+    expect(screen.queryByText('2+2/5')).toBeNull();
+    expect(screen.getAllByText('не отправлено: 1')).toHaveLength(2);
+
+    const tag = screen.getByText('Отметок не отправлено: 2');
+    expect(tag.closest('.ant-card-head')).not.toBeNull();
+    expect(tag.textContent).toBe('Отметок не отправлено: 2');
+    // The header tag carries the same violet accent as the tiles (S-02, U-04).
+    expect(colour(tag.style.backgroundColor)).toBe(
+      colour(UNSENT_BADGE_BACKGROUND),
+    );
+    expect(colour(tag.style.color)).toBe(colour(UNSENT_BADGE_TEXT));
+    expect(tag.style.borderStyle).toBe('dashed');
+  });
+
+  it('replaces the ready prompt with a violet notice while marks are unsent', () => {
+    render(
+      <TimingCategoryBlock
+        block={block({
+          ...RUNNING,
+          capturesComplete: true,
+          participants: [
+            participant({ passCount: 1, requiredLaps: 2, state: 'RACING' }),
+          ],
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+        pendingMarksByParticipant={new Map([['enrollment-1', 2]])}
+        pendingMarkCount={2}
+      />,
+    );
+
+    expect(screen.getByText('1+2/2')).not.toBeNull();
+    expect(screen.getByText('Отметок не отправлено: 2')).not.toBeNull();
+
+    // The ready-to-finish prompt is gone and the unsent sentence takes its
+    // place, so a block never claims it can be closed (S-03, FR-10).
+    expect(screen.queryByText(READY_CATEGORY)).toBeNull();
+    const notice = screen.getByText(UNSENT_NOTICE_2);
+    expect(notice.textContent).toBe(UNSENT_NOTICE_2);
+
+    // The cue is the violet accent already used by the tiles, never the
+    // exclusion red or a participant state colour (U-04, FR-09).
+    expect(colour(notice.style.backgroundColor)).toBe(
+      colour(UNSENT_BADGE_BACKGROUND),
+    );
+    expect(colour(notice.style.color)).toBe(colour(UNSENT_BADGE_TEXT));
+    expect(notice.style.borderStyle).toBe('dashed');
+    expect(colour(notice.style.borderColor)).not.toBe(colour(EXCLUSION_RED));
+    expect(STATE_FILLS.map(colour)).not.toContain(
+      colour(notice.style.backgroundColor),
+    );
+    expect(STATE_FILLS.map(colour)).not.toContain(colour(notice.style.color));
+  });
+
+  it('keeps the ready prompt and no unsent cue while nothing is pending', () => {
+    render(
+      <TimingCategoryBlock
+        block={block({ ...RUNNING, capturesComplete: true })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    const message = screen.getByText(READY_CATEGORY);
+    expect(message.closest('.ant-alert')?.className).toContain(
+      'ant-alert-info',
+    );
+    expect(screen.queryByText(/Отметок не отправлено/)).toBeNull();
+    expect(screen.queryByText(/записаны на устройстве/)).toBeNull();
+    expect(screen.queryByText(/не отправлено:/)).toBeNull();
+  });
+
+  it('does not invent a pending count for an excluded participant', () => {
+    render(
+      <TimingCategoryBlock
+        block={block({
+          ...RUNNING,
+          participants: [
+            participant({
+              state: 'EXCLUDED',
+              excludedReason: 'Показан в гонке',
+              passCount: 0,
+              requiredLaps: 5,
+            }),
+          ],
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+        pendingMarksByParticipant={new Map()}
+        pendingMarkCount={0}
+      />,
+    );
+
+    expect(screen.getByText('Исключён')).not.toBeNull();
+    expect(screen.getByText('0/5')).not.toBeNull();
+    expect(screen.queryByText(/не отправлено:/)).toBeNull();
+    expect(screen.queryByText(/Отметок не отправлено/)).toBeNull();
+  });
+
+  it('passes the block marks through a heat block', () => {
+    render(
+      <TimingHeatBlock
+        block={block({
+          ...RUNNING,
+          capturesComplete: true,
+          participants: [
+            participant({ passCount: 1, requiredLaps: 2, state: 'RACING' }),
+          ],
+          kind: 'HEAT',
+          blockKey: 'heat:race-1:stage-1:1',
+          classCompetitionId: 'race-1',
+          stageId: 'stage-1',
+          stageLabel: 'Квалификация',
+          stageState: 'SEEDED',
+          heatNumber: 1,
+          heatLabel: 'Заезд 1',
+        })}
+        raceTitle="Кубковая гонка"
+        isCaptureHolder
+        onStart={vi.fn()}
+        pendingMarksByParticipant={new Map([['enrollment-1', 1]])}
+        pendingMarkCount={1}
+      />,
+    );
+
+    expect(screen.getByText('1+1/2')).not.toBeNull();
+    expect(screen.getByText('Отметок не отправлено: 1')).not.toBeNull();
+    expect(screen.getByText(UNSENT_NOTICE_1)).not.toBeNull();
+    expect(screen.queryByText(READY_HEAT)).toBeNull();
+  });
+
+  it('agrees the unsent sentence with the mark count', () => {
+    const cases: ReadonlyArray<readonly [number, string, string]> = [
+      [1, '0+1/5', UNSENT_NOTICE_1],
+      [2, '0+2/5', UNSENT_NOTICE_2],
+      [5, '0+5/5', UNSENT_NOTICE_5],
+    ];
+
+    cases.forEach(([count, lapLine, sentence]) => {
+      const rendered = render(
+        <TimingCategoryBlock
+          block={block({
+            ...RUNNING,
+            capturesComplete: true,
+            participants: [participant({ passCount: 0, requiredLaps: 5 })],
+          })}
+          title="5 км · Мужчины"
+          isCaptureHolder
+          onStart={vi.fn()}
+          pendingMarksByParticipant={new Map([['enrollment-1', count]])}
+          pendingMarkCount={count}
+        />,
+      );
+
+      expect(screen.getByText(lapLine)).not.toBeNull();
+      expect(screen.getByText(`Отметок не отправлено: ${count}`)).not.toBeNull();
+      expect(screen.getByText(sentence).textContent).toBe(sentence);
+      rendered.unmount();
+    });
   });
 });

@@ -22,6 +22,10 @@ function heatTitle(block: TimingCategoryBlockView): string {
  *
  * The block itself decides whether Start is offered: a stage whose heats are
  * not formed, or a closed stage, shows its reason and no Start (F-12, S-07).
+ *
+ * The unsent marks of the device outbox reach a heat exactly as they reach a
+ * category: this wrapper forwards both figures untouched, so a heat never
+ * invents or drops a pending count (FR-10, FR-37).
  */
 export function TimingHeatBlock({
   block,
@@ -31,6 +35,8 @@ export function TimingHeatBlock({
   onTakeCapture,
   onParticipantClick,
   onOpenRecord,
+  pendingMarksByParticipant,
+  pendingMarkCount,
 }: {
   /** A block whose `kind` is `HEAT`: it carries the stage and heat fields. */
   block: TimingCategoryBlockView;
@@ -42,6 +48,10 @@ export function TimingHeatBlock({
   onParticipantClick?: (participant: TimingParticipantTileView) => void;
   /** Opens the record of the block's current or last attempt; absent hides it. */
   onOpenRecord?: () => void;
+  /** Unsent marks per `enrollmentId`, straight from the page's outbox view. */
+  pendingMarksByParticipant?: ReadonlyMap<string, number>;
+  /** Unsent marks of this heat, straight from the page's outbox view. */
+  pendingMarkCount?: number;
 }) {
   return (
     <TimingCategoryBlock
@@ -53,6 +63,8 @@ export function TimingHeatBlock({
       onTakeCapture={onTakeCapture}
       onParticipantClick={onParticipantClick}
       onOpenRecord={onOpenRecord}
+      pendingMarksByParticipant={pendingMarksByParticipant}
+      pendingMarkCount={pendingMarkCount}
     />
   );
 }
