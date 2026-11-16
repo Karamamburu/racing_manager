@@ -2,6 +2,7 @@ import { Button, Input, Modal, Space, Spin, Typography } from 'antd';
 import type { InputRef } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
+import type { TimingCaptureOutcome } from './useTimingCapture';
 
 /**
  * The event-wide number field of the timing surface.
@@ -17,6 +18,13 @@ import type { KeyboardEvent } from 'react';
  * keys; while a queued split is selected the same keys assign that split
  * instead of capturing a pass, and an empty assignment is refused
  * (E-04, S-02, F-04).
+ *
+ * MANUAL-TIMING-4 (FR-14, FR-15, FR-16, FR-17, FR-18): the page answers every
+ * recorded press with a `TimingCaptureOutcome`. A confirmed or unsent press
+ * frees the field for the next number and keeps focus; an unsent press is not a
+ * failure. A refused press keeps the text the referee has now and states the
+ * number, the refusal and the server reason. Local validation failures keep
+ * their typed text and their own message.
  */
 
 /** One enrollment the page resolved for a typed start number. */
@@ -51,21 +59,29 @@ export interface NumberCaptureFieldProps {
   disabled?: boolean;
   /** Eligible enrollments of that number in the surface; empty means no pass. */
   resolve: (startNumber: number) => NumberCaptureCandidate[];
-  /** Sends the mutation; the page computes the epoch elapsed from `monotonicMs`. */
-  onCommit: (input: NumberCaptureCommitInput) => Promise<void>;
+  /**
+   * Records the press and answers with its outcome; the page computes the epoch
+   * elapsed from `monotonicMs` (FR-01, FR-14).
+   */
+  onCommit: (input: NumberCaptureCommitInput) => Promise<TimingCaptureOutcome>;
   /**
    * Set while a queued split is selected: the field names the entry's attempt
    * and a committed number assigns that split instead of capturing a pass.
    */
   assignment?: NumberCaptureAssignment | null;
   /** Sends the assignment of the selected split; used only in assignment mode. */
-  onAssign?: (startNumber: number) => Promise<void>;
+  onAssign?: (startNumber: number) => Promise<TimingCaptureOutcome>;
   /**
    * Enter or Space on the empty field in normal capture mode records one
    * anonymous split of the page's current attempt. Absent keeps the old
    * empty-field refusal.
    */
-  onAnonymousSplit?: () => Promise<void>;
+  onAnonymousSplit?: () => Promise<TimingCaptureOutcome>;
+  /**
+   * The entries this device has not sent yet, so the unsent status names the
+   * same total as the page figure «Не отправлено: N» (FR-11, FR-15).
+   */
+  pendingCount?: number;
   /** Optional notice hook; the field also shows the message next to itself. */
   onError?: (message: string) => void;
 }
@@ -78,6 +94,17 @@ interface AmbiguousChoice {
   candidates: NumberCaptureCandidate[];
 }
 
+/** What the field says about the last recorded press (FR-15). */
+type CaptureStatusTone = 'confirmed' | 'unsent' | 'rejected';
+
+interface CaptureStatus {
+  tone: CaptureStatusTone;
+  /** What the answer is about: «№ 17» or «Отсечка без номера». */
+  subject: string;
+  /** The server's message, verbatim; only on `rejected` (E-05). */
+  reason?: string;
+}
+
 const EMPTY_NUMBER_MESSAGE = 'Введите номер участника цифрами';
 const NON_POSITIVE_NUMBER_MESSAGE = 'Номер участника должен быть больше нуля';
 const EMPTY_ASSIGNMENT_MESSAGE = 'Введите номер участника для назначения отсечки';
@@ -85,6 +112,10 @@ const NO_ASSIGNMENT_TARGET_MESSAGE = 'Назначение недоступно:
 const COMMIT_BUSY_MESSAGE = 'Отправляем отметку…';
 const SPLIT_BUSY_MESSAGE = 'Отправляем отсечку…';
 const ASSIGN_BUSY_MESSAGE = 'Назначаем отсечку…';
+/** A split carries no participant, so its status names no number (E-15). */
+const ANONYMOUS_SUBJECT = 'Отсечка без номера';
+/** The status still names a refusal when the server sent no message. */
+const REJECTION_FALLBACK_REASON = 'сервер не указал причину';
 
 /** Digits only: a pasted `12 3` reads as `123`, never as a space or a sign. */
 function digitsOnly(value: string): string {
@@ -102,6 +133,22 @@ function parseStartNumber(value: string): number | null {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+/**
+ * The status line of one answered press. It names the subject, says whether the
+ * entry is confirmed or still on the device, and never reports an unsent press
+ * as a failure (FR-15, FR-16). The unsent total is read at render time so it
+ * follows the page figure as the queue drains (FR-11).
+ */
+function describeStatus(status: CaptureStatus, pendingCount: number): string {
+  if (status.tone === 'rejected') {
+    return `Отклонено: ${status.subject} — ${status.reason ?? REJECTION_FALLBACK_REASON}`;
+  }
+  if (status.tone === 'confirmed') {
+    return `${status.subject} — сервер подтвердил отметку`;
+  }
+  return `${status.subject} — отметка сохранена на устройстве, не отправлено: ${pendingCount}`;
+}
+
 export function NumberCaptureField({
   disabled = false,
   resolve,
@@ -109,11 +156,13 @@ export function NumberCaptureField({
   assignment = null,
   onAssign,
   onAnonymousSplit,
+  pendingCount = 0,
   onError,
 }: NumberCaptureFieldProps) {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  const [status, setStatus] = useState<CaptureStatus | null>(null);
   const [choice, setChoice] = useState<AmbiguousChoice | null>(null);
   const submitting = useRef(false);
   const inputRef = useRef<InputRef>(null);
@@ -124,6 +173,7 @@ export function NumberCaptureField({
   useEffect(() => {
     setText('');
     setError(null);
+    setStatus(null);
     if (assignmentId !== null) {
       inputRef.current?.focus();
     }
@@ -135,16 +185,53 @@ export function NumberCaptureField({
   };
 
   /**
+   * Applies what the page answered about one recorded press (FR-15).
+   *
+   * A confirmed or unsent press is recorded, so the field is free for the next
+   * number and keeps focus; unsent is not a failed capture (E-02, E-04). A
+   * refused press leaves the text exactly as the referee has it now and never
+   * writes the refused number back (E-05).
+   *
+   * `clearsField` is false for an anonymous split: it consumed no typed number,
+   * so it must not wipe what the referee typed while it was in flight.
+   */
+  const settle = (
+    subject: string,
+    outcome: TimingCaptureOutcome,
+    clearsField: boolean,
+  ) => {
+    if (outcome.status === 'REJECTED') {
+      setStatus({ tone: 'rejected', subject, reason: outcome.reason });
+      return;
+    }
+    if (clearsField) {
+      setText('');
+      setError(null);
+    }
+    inputRef.current?.focus();
+    setStatus({
+      tone: outcome.status === 'CONFIRMED' ? 'confirmed' : 'unsent',
+      subject,
+    });
+  };
+
+  /**
    * One press, one mutation. The guard is set before the first await so a burst
    * of keys keeps its order, and a refusal leaves the field as the page left it.
    */
-  const start = (label: string, work: () => Promise<void>) => {
+  const start = (
+    label: string,
+    subject: string,
+    clearsField: boolean,
+    work: () => Promise<TimingCaptureOutcome>,
+  ) => {
     if (disabled || submitting.current) return;
     submitting.current = true;
     setBusyLabel(label);
     void (async () => {
       try {
-        await work();
+        const outcome = await work();
+        settle(subject, outcome, clearsField);
       } catch (failure) {
         // The page owns HTTP errors: keep the typed number so the referee can
         // retry, and leave the message to the surface that sent the mutation.
@@ -186,16 +273,14 @@ export function NumberCaptureField({
 
     setError(null);
     if (candidates.length === 1) {
-      start(COMMIT_BUSY_MESSAGE, async () => {
-        await onCommit({
+      start(COMMIT_BUSY_MESSAGE, `№ ${startNumber}`, true, () =>
+        onCommit({
           startNumber,
           enrollmentId: candidates[0].enrollmentId,
           capturedAt,
           monotonicMs,
-        });
-        setText('');
-        setError(null);
-      });
+        }),
+      );
       return;
     }
 
@@ -221,11 +306,9 @@ export function NumberCaptureField({
     }
 
     setError(null);
-    start(ASSIGN_BUSY_MESSAGE, async () => {
-      await onAssign(startNumber);
-      setText('');
-      setError(null);
-    });
+    start(ASSIGN_BUSY_MESSAGE, `№ ${startNumber}`, true, () =>
+      onAssign(startNumber),
+    );
   };
 
   /** Enter or Space on the empty field records a split (U-03). */
@@ -236,10 +319,10 @@ export function NumberCaptureField({
       return;
     }
     setError(null);
-    start(SPLIT_BUSY_MESSAGE, async () => {
-      await onAnonymousSplit();
-      setError(null);
-    });
+    // The split consumed no number, so its answer never clears typed text.
+    start(SPLIT_BUSY_MESSAGE, ANONYMOUS_SUBJECT, false, () =>
+      onAnonymousSplit(),
+    );
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -274,11 +357,9 @@ export function NumberCaptureField({
       monotonicMs: choice.monotonicMs,
     };
     setChoice(null);
-    start(COMMIT_BUSY_MESSAGE, async () => {
-      await onCommit(picked);
-      setText('');
-      setError(null);
-    });
+    start(COMMIT_BUSY_MESSAGE, `№ ${picked.startNumber}`, true, () =>
+      onCommit(picked),
+    );
   };
 
   return (
@@ -330,6 +411,15 @@ export function NumberCaptureField({
           {error}
         </Typography.Text>
       ) : null}
+      {status === null ? null : (
+        <Typography.Text
+          role="status"
+          type={status.tone === 'rejected' ? 'danger' : 'secondary'}
+          style={{ textAlign: 'center' }}
+        >
+          {describeStatus(status, pendingCount)}
+        </Typography.Text>
+      )}
 
       <Modal
         open={choice !== null}
