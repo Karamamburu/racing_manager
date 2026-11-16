@@ -129,6 +129,29 @@ const DISCONNECTED_LABEL = 'Нет связи с сервером';
 const NO_SELECTED_SPLIT_MESSAGE = 'Назначение недоступно: отсечка не выбрана';
 
 /**
+ * The volatile-storage warning (FR-30, O-01).
+ *
+ * A memory-backed outbox cannot keep an entry beyond this page view, and the
+ * product cannot recover an entry it never stored. The page states that before
+ * the loss, while at least one unsent entry exists, and leaves the confirmation
+ * itself to the browser: no local dialog may imply a recovery that does not
+ * exist.
+ */
+const VOLATILE_STORAGE_WARNING =
+  'Записи хранятся только в этой вкладке. Перезагрузка или закрытие страницы их потеряет.';
+
+/**
+ * The surface the page derives against before its read resolves. The leave
+ * guard runs before the early returns, so it needs a derivation even while the
+ * surface is absent; an empty one derives empty views and renders nothing.
+ */
+const EMPTY_TIMING_SURFACE: TimingSurfaceView = {
+  eventId: '',
+  captureWorkstationInstanceId: null,
+  categories: [],
+};
+
+/**
  * The workstation instance of this tab, created once and kept in
  * `sessionStorage`, so a reload continues the same instance instead of
  * pretending to be a new workstation and asking for capture again.
@@ -276,7 +299,8 @@ function surfaceHasAttempt(
  * controls, to every block header and tile, to the number field and to the
  * record drawer. Nothing here counts an unsent entry as a pass, and the only
  * connection rule the page applies itself is the one no component owns
- * (U-07, F-04).
+ * (U-07, F-04). A device whose outbox is volatile states that while it holds an
+ * unsent entry and asks the browser to confirm a leave (FR-30, O-01).
  */
 export function TimingPage() {
   const { id } = useParams<{ id: string }>();
@@ -413,6 +437,42 @@ export function TimingPage() {
     setRecordAttemptId(attemptId);
   };
 
+  /**
+   * The device outbox as the page reports it. One derivation feeds the two
+   * figures, the send queue, both pending-mark maps and the volatile-storage
+   * guard, so the page total, the send queue and the tiles can never disagree
+   * (FR-11, FR-12, FR-30, FR-37, FR-46, U-08). It is derived here, before the
+   * early returns, because the leave guard below is a hook; the empty surface
+   * stands in only while the real read is absent, and every early return
+   * renders no surface at all.
+   */
+  const offlineView = deriveTimingOfflineView(
+    capture.queueItems,
+    surfaceQuery.data ?? EMPTY_TIMING_SURFACE,
+  );
+
+  /**
+   * The volatile-storage protection (FR-30, O-01). It reads the same unsent
+   * total as the page figures and the send queue, so a durable device, an empty
+   * queue and a queue that holds only rejected entries stay unguarded.
+   */
+  const needsVolatileWarning =
+    !capture.isDurable && offlineView.totals.unsentEntries > 0;
+
+  useEffect(() => {
+    if (!needsVolatileWarning) return;
+    // The browser owns the confirmation dialog: a local modal could imply a
+    // recovery the product cannot offer (FR-30).
+    const confirmLeave = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', confirmLeave);
+    return () => {
+      window.removeEventListener('beforeunload', confirmLeave);
+    };
+  }, [needsVolatileWarning]);
+
   const event = eventQuery.data;
   const subtitle = event
     ? `${event.name} · ${formatDateTime(event.eventDate)}`
@@ -516,10 +576,6 @@ export function TimingPage() {
     (block) => block.state === 'RUNNING',
   );
 
-  // The device outbox as the page reports it. One derivation feeds the two
-  // figures, the send queue and both pending-mark maps, so the page total and
-  // the tile marks can never disagree (FR-11, FR-12, FR-37, FR-46, U-08).
-  const offlineView = deriveTimingOfflineView(capture.queueItems, surface);
   // A block reads its own share under the identity the derivation used, so a
   // tile mark and its block total stay one fact (FR-10, FR-37).
   const pendingMarksByBlock = new Map<string, Map<string, number>>();
@@ -978,6 +1034,14 @@ export function TimingPage() {
                     Обновить
                   </Button>
                 </Space>
+
+                {needsVolatileWarning ? (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message={VOLATILE_STORAGE_WARNING}
+                  />
+                ) : null}
 
                 <CaptureControls
                   capture={captureView}

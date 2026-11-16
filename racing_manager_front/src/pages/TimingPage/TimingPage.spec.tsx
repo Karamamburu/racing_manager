@@ -311,6 +311,7 @@ function captureResult(
     queueItems: [],
     refreshQueue: vi.fn(() => Promise.resolve()),
     dismissRejected: vi.fn(() => Promise.resolve()),
+    isDurable: true,
     isOnline: true,
     pendingCount: 0,
     isFlushing: false,
@@ -357,6 +358,17 @@ function renderPage() {
   // The client is returned so a test can read the options the page configured
   // for the surface query, not only what it rendered.
   return { ...view, client };
+}
+
+/**
+ * Dispatches one cancelable `beforeunload`, the event the volatile-storage
+ * guard listens to (FR-30). It reports whether the page asked the browser to
+ * confirm the leave, which no other code on the page may do.
+ */
+function fireBeforeUnload(): boolean {
+  const event = new Event('beforeunload', { cancelable: true });
+  const notCancelled = window.dispatchEvent(event);
+  return !notCancelled || event.defaultPrevented;
 }
 
 beforeAll(() => {
@@ -1874,5 +1886,80 @@ describe('TimingPage', () => {
       expect(screen.getAllByText('Нужна связь с сервером.')).toHaveLength(2);
     });
     expect(capture.startAttempt).not.toHaveBeenCalled();
+  });
+
+  it('states the volatile loss risk and asks before leaving while entries are unsent', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({ captureWorkstationInstanceId: 'ws-1' }),
+    );
+    // A device that keeps its outbox in memory loses it on a reload, so the
+    // page states that before the loss and asks for confirmation (FR-30, O-01).
+    mockCapture({ isDurable: false, queueItems: [queueItem()] });
+
+    const { unmount } = renderPage();
+
+    expect(
+      await screen.findByText(
+        'Записи хранятся только в этой вкладке. Перезагрузка или закрытие страницы их потеряет.',
+      ),
+    ).not.toBeNull();
+    expect(fireBeforeUnload()).toBe(true);
+
+    // The guard follows the condition: an unmounted page asks for nothing.
+    unmount();
+    expect(fireBeforeUnload()).toBe(false);
+  });
+
+  it('keeps the volatile notice and the leave guard off when nothing is unsent', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({ captureWorkstationInstanceId: 'ws-1' }),
+    );
+    // A rejected entry is not unsent (S-05), and an empty queue has nothing to
+    // lose, so neither states the volatile risk (FR-30).
+    mockCapture({
+      isDurable: false,
+      queueItems: [
+        queueItem({ status: 'REJECTED', error: 'Попытка уже закрыта' }),
+      ],
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('5 км · Мужчины')).not.toBeNull();
+    expect(
+      screen.queryByText(
+        'Записи хранятся только в этой вкладке. Перезагрузка или закрытие страницы их потеряет.',
+      ),
+    ).toBeNull();
+    expect(fireBeforeUnload()).toBe(false);
+  });
+
+  it('keeps the volatile notice and the leave guard off when the outbox is durable', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({ captureWorkstationInstanceId: 'ws-1' }),
+    );
+    // Entries that survive the page need no warning (FR-30).
+    mockCapture({ isDurable: true, queueItems: [queueItem()] });
+
+    renderPage();
+
+    expect(
+      await screen.findByText('Не отправлено: 1 · из них отметок: 1'),
+    ).not.toBeNull();
+    expect(
+      screen.queryByText(
+        'Записи хранятся только в этой вкладке. Перезагрузка или закрытие страницы их потеряет.',
+      ),
+    ).toBeNull();
+    expect(fireBeforeUnload()).toBe(false);
   });
 });

@@ -1174,6 +1174,34 @@ describe('useTimingCapture dismiss rejected', () => {
   });
 });
 
+describe('useTimingCapture durability', () => {
+  it('reads a durable outbox until the first queue read and the volatile truth after it', async () => {
+    const { result } = renderCapture({
+      surface: surfaceOf([runningBlock({ attemptId: 'attempt-volatile' })]),
+    });
+
+    // Until the queue answers, the surface keeps the online behavior unchanged
+    // instead of guessing from `typeof indexedDB` (FR-30).
+    expect(result.current.isDurable).toBe(true);
+
+    await waitFor(() => {
+      expect(result.current.isDurable).toBe(false);
+    });
+
+    // jsdom has no IndexedDB, so the queue resolved its memory fallback: a
+    // later read reports the same storage and never flips back (FR-30).
+    const queue = await openTimingQueue();
+    expect(queue.isDurable).toBe(false);
+    await queue.enqueue(queuedPass('key-volatile', 1, 'attempt-volatile'));
+    await act(async () => {
+      await result.current.refreshQueue();
+    });
+
+    expect(result.current.pendingCount).toBe(1);
+    expect(result.current.isDurable).toBe(false);
+  });
+});
+
 describe('useTimingCapture connection restoration', () => {
   it('sends the unsent queue when the browser returns online', async () => {
     navigatorOnline = false;
