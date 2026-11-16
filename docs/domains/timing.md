@@ -1,6 +1,6 @@
 ---
 type: domain
-updated: 2026-11-15
+updated: 2026-11-16
 sources:
   - racing_manager_db/db/migrate_manual_timing_2026_11_13.sql
   - racing_manager_back/prisma/schema.prisma
@@ -54,10 +54,22 @@ Live manual timing of protocol categories: attempt lifecycle, number and tile ca
 - **Schema:** `migrate_manual_timing_3_2026_11_14.sql` (+ down) adds `timing_event_splits`, `timing_anonymous_split_candidates`, `timing_event_capture_receipts`, `timing_event_audit`, `timing_split_state`, `timing_capture_origin`, the receipt-key `origin` and the nullable/split-provenance mark columns. The down file refuses to run while split-derived passes exist.
 - **UI:** the «Текущий блок» selector is removed; the number field captures with no block, the queue shows every candidate's label and elapsed value, and an ambiguous number opens an explicit choice dialog with no pre-selection. Every user-facing label of the timing page calls a block-free capture «отсечка» (the queue, its action buttons, the capture field hints and the API refusals); routes, types and stored tables keep the `split` naming. The attempt record drawer is titled «Запись категории» for a category and «Запись заезда» for a heat; inside it the record is called «запись», and its closure actions are «Завершить хронометраж» and «Отменить хронометраж».
 
+## MANUAL-TIMING-4 delta
+
+- **Offline scope:** offline timing is capture-only. A device without a server answer records capture-side entries (a number or tile press, an anonymous split, a split assignment, a pending-finish bind and a withdrawal) in its device outbox and keeps them across a page reload while storage is durable. Closure, forced closure, cancellation, capture lock transfer, publication, protocol and result changes are online-only and are not offered while the page has no connection.
+- **Derived, not stored:** the server read model stays confirmed-only. The page derives unsent rows, per-participant and per-block pending marks and the page totals from the outbox plus `TimingSurfaceView`; nothing pending is written as a pass, split, result or place.
+- **Tile and block cues:** a participant with pending marks keeps its state fill and label and shows `confirmed+pending/N` (for example `1+1/2`), a dashed violet outline and the badge «не отправлено: N»; its accessible name states both counts. A block with pending marks shows «Отметок не отправлено: N» and replaces the ready-to-finish prompt with a pending notice. The unsent accent is violet, never the exclusion/cancelled red or a participant state colour.
+- **Page figures:** the top controls show «Не отправлено: N» counting every unsent entry of every kind, «из них отметок: K» equal to the sum of tile marks, and the connection state. «Отправить сейчас» is offered while any unsent entry exists; «Не отправлено: 0» remains while only rejected entries are listed.
+- **Send queue:** every unsent and rejected entry is listed with its kind, block, participant number and name where the kind has them, its press clock and its state; a rejected row carries the server reason and can be dismissed. Entries send automatically in press order on reconnect and on page open, and the `Idempotency-Key` header keeps retries at most once.
+- **Number field:** a press that passes local validation clears the field and keeps focus immediately, whether the server confirms or does not answer; a later refusal shows «Отклонено: № N — reason» and never restores the number. Local validation failures keep the typed value. An unsent press is never reported as a failed or lost capture.
+- **Withdrawal pair:** quick undo of the newest unsent capture drops its pending mark at once and keeps the capture and withdrawal adjacent in the queue; the pair contributes no tile or block marker. A withdrawal of a confirmed capture is reported separately and never lowers the confirmed count; if its capture is refused, the withdrawal is not sent.
+- **Reload and volatility:** durable storage restores every unsent entry of every kind and resends it after reload. When the device falls back to memory, the page warns «Записи хранятся только в этой вкладке. Перезагрузка или закрытие страницы их потеряет.» while unsent entries exist and asks the browser for leave confirmation; after a loss the page shows only confirmed server values.
+- **No server-contract change:** no new route, response field or database column is introduced by this delta.
+
 ## Code
 
 - API: `racing_manager_back/src/timing/` (`timing.controller.ts`, `timing.service.ts`, `timing.repository.ts`, `timing.domain.ts`, `timing.dto.ts`, `timing.views.ts`, `timing.exception.filter.ts`), `src/admin/referee-role.*`.
-- Front: `racing_manager_front/src/features/timing/`, `pages/TimingPage/`, the event-page `«Хронометраж»` entry and the `lapSplits` protocol column.
+- Front: `racing_manager_front/src/features/timing/` (including `timingOffline.ts` and `TimingSendQueue.tsx`), `pages/TimingPage/`, the event-page `«Хронометраж»` entry and the `lapSplits` protocol column.
 - SQL: `racing_manager_db/db/migrate_manual_timing_2026_11_13.sql` (+ down), `migrate_referee_role_2026_11_13.sql` (+ down), `migrate_manual_timing_3_2026_11_14.sql` (+ down) and `migrate_manual_timing_3_2026_11_14_split_sequence_guard.sql` (+ down).
 
 ## Breakage signals

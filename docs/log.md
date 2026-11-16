@@ -217,3 +217,7 @@ Category and heat cards are now tinted by gender: light blue for men and light p
 ## 2026-11-15 — capture holder is a device
 
 Every user-facing mention of the capture holder now says «устройство» rather than «станция»: the holder tag, the read-only notice, transfer refusals, validation labels and the API messages shown on the page. The workstation id, routes and stored columns keep their `workstation` naming.
+
+## 2026-11-16 — offline capture feedback
+
+The timing page now derives one offline report from the device outbox and the surface: unsent and rejected entries, per-participant and per-block pending marks, the page totals and the connection state. A pending tile shows `confirmed+pending/N` with a violet dashed outline and «не отправлено: N», a block shows «Отметок не отправлено: N» and loses the ready prompt, and the number field clears on local record while a late refusal is reported without restoring the number. The page renders a send queue, retries in press order, dismisses rejected entries, gates closure/transfer on connection and queue, and warns when the memory fallback cannot keep entries across a reload. No server route, response field or schema changed.
