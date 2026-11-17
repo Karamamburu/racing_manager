@@ -1,9 +1,21 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { AxiosError } from 'axios';
 import type { AxiosResponse } from 'axios';
 import { createElement, type ReactNode } from 'react';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
+import {
+  CAPTURE_RETRY_BACKOFF_MS,
+  MAX_CONCURRENT_CAPTURE_DELIVERIES,
+} from './timingDelivery';
 import { openTimingQueue } from './timingQueue';
 import type { TimingQueueItem } from './timingQueue';
 import { timingService } from './timingService';
@@ -205,15 +217,59 @@ function apiRefusal(message: string): AxiosError {
   } as unknown as AxiosResponse);
 }
 
+/** The coded 409 of an open idempotency claim: unresolved, not a refusal. */
+function inProgressRefusal(): AxiosError {
+  return new AxiosError(
+    'A request with this Idempotency-Key is still in progress.',
+    'ERR_BAD_REQUEST',
+    undefined,
+    undefined,
+    {
+      data: {
+        statusCode: 409,
+        code: 'IDEMPOTENCY_IN_PROGRESS',
+        message: 'A request with this Idempotency-Key is still in progress.',
+      },
+      status: 409,
+      statusText: 'Conflict',
+      headers: {},
+    } as unknown as AxiosResponse,
+  );
+}
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve: (value: T) => void = () => {};
+  let reject: (error: unknown) => void = () => {};
+  const promise = new Promise<T>((resolveValue, rejectValue) => {
+    resolve = resolveValue;
+    reject = rejectValue;
+  });
+  return { promise, resolve, reject };
+}
+
+/** Lets every pending promise chain run without advancing a fake clock. */
+async function drainMicrotasks(rounds = 300): Promise<void> {
+  for (let index = 0; index < rounds; index += 1) {
+    await Promise.resolve();
+  }
+}
+
 function queuedPass(
   id: string,
   deviceSequence: number,
   attemptId = 'attempt-a',
+  startNumber = 17,
 ): TimingQueueItem {
   const payload: CaptureTimingPassRequest = {
     attemptId,
     kind: 'NUMBER',
-    startNumber: 17,
+    startNumber,
     clientCapturedAt: '2026-11-13T09:00:03.000Z',
     clientElapsedMs: 3000,
     clockEpochId: 'epoch-attempt-a',
@@ -289,11 +345,12 @@ function renderCapture(initial: HookProps) {
   });
   const wrapper = ({ children }: { children: ReactNode }) =>
     createElement(QueryClientProvider, { client }, children);
-  return renderHook(
+  const rendered = renderHook(
     (props: HookProps) =>
       useTimingCapture('event-1', props.surface, 'ws-1', props.onError),
     { initialProps: initial, wrapper },
   );
+  return { ...rendered, client };
 }
 
 /** The browser network flag the hook reads on mount and on `online` (AS-4). */
@@ -346,6 +403,11 @@ beforeEach(async () => {
   vi.mocked(timingService.takeCapture).mockResolvedValue(captureView());
   vi.mocked(timingService.transferCapture).mockResolvedValue(captureView());
   vi.mocked(timingService.forceReleaseCapture).mockResolvedValue(captureView());
+});
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
 });
 
 describe('useTimingCapture clock epochs', () => {
@@ -518,15 +580,22 @@ describe('useTimingCapture commits', () => {
       });
     });
 
-    expect(outcome).toEqual({
-      status: 'REJECTED',
-      reason: 'Последний круг уже записан',
+    // The referee is released on acceptance; the refusal arrives later.
+    expect(outcome).toEqual({ status: 'ACCEPTED' });
+    await waitFor(() => {
+      expect(onError).toHaveBeenCalledWith('Последний круг уже записан');
     });
     const queue = await openTimingQueue();
     await expect(queue.list('attempt-refused')).resolves.toEqual([]);
     expect(result.current.queueItems).toEqual([]);
     expect(result.current.pendingCount).toBe(0);
-    expect(onError).toHaveBeenCalledWith('Последний круг уже записан');
+    expect(result.current.captureOutcomes).toEqual([
+      expect.objectContaining({
+        subject: '№ 17',
+        tone: 'refused',
+        reason: 'Последний круг уже записан',
+      }),
+    ]);
   });
 
   it('keeps an entry in flight until the server answers', async () => {
@@ -562,7 +631,7 @@ describe('useTimingCapture commits', () => {
     expect(result.current.inFlightIds.size).toBe(0);
   });
 
-  it('resolves an unanswered commit as unsent and confirms it on a later flush', async () => {
+  it('accepts an unanswered commit, keeps it unsent and confirms it after the backoff', async () => {
     const onError = vi.fn();
     const { result } = renderCapture({
       surface: surfaceOf([runningBlock({ attemptId: 'attempt-offline' })]),
@@ -586,19 +655,542 @@ describe('useTimingCapture commits', () => {
     });
 
     // The press was recorded, so the field may clear and no failure is shown.
-    expect(outcome).toEqual({ status: 'UNSENT' });
+    expect(outcome).toEqual({ status: 'ACCEPTED' });
     expect(onError).not.toHaveBeenCalled();
     const queue = await openTimingQueue();
-    const [queued] = await queue.list('attempt-offline');
-    expect(queued.status).toBe('PENDING');
+    await waitFor(async () => {
+      const [queued] = await queue.list('attempt-offline');
+      expect(queued.status).toBe('PENDING');
+    });
+    let [queued] = await queue.list('attempt-offline');
 
+    // The retry waits out the backoff; the scheduled wake confirms it.
+    await new Promise((resolve) =>
+      setTimeout(resolve, CAPTURE_RETRY_BACKOFF_MS + 20),
+    );
     await act(async () => {
       await result.current.flush();
     });
 
-    const [confirmed] = await queue.list('attempt-offline');
-    expect(confirmed.id).toBe(queued.id);
+    [queued] = await queue.list('attempt-offline');
+    expect(queued.status).toBe('APPLIED');
+    expect(onError).not.toHaveBeenCalled();
+  });
+});
+
+describe('useTimingCapture concurrent pump', () => {
+  function numberedSurfaces(numbers: number[]): TimingCategoryBlockView {
+    return runningBlock({
+      attemptId: 'attempt-burst',
+      participants: numbers.map((startNumber) =>
+        participant({
+          enrollmentId: `enrollment-${startNumber}`,
+          registrationId: `registration-${startNumber}`,
+          startNumber,
+          fullName: `Участник ${startNumber}`,
+        }),
+      ),
+    });
+  }
+
+  it('accepts 15 presses in one tick with distinct sequences and starts at most the bound', async () => {
+    const numbers = Array.from({ length: 15 }, (_, index) => index + 1);
+    const { result } = renderCapture({
+      surface: surfaceOf([numberedSurfaces(numbers)]),
+    });
+
+    await waitFor(() => {
+      expect(timingService.openClockEpoch).toHaveBeenCalledTimes(1);
+    });
+
+    const answers = numbers.map(() => deferred<TimingPassView>());
+    let callIndex = 0;
+    vi.mocked(timingService.capturePass).mockImplementation(
+      () => answers[callIndex++].promise,
+    );
+
+    let outcomes: TimingCaptureOutcome[] = [];
+    await act(async () => {
+      const presses = numbers.map((startNumber, index) =>
+        result.current.commitNumber({
+          startNumber,
+          capturedAt: `2026-11-13T09:00:0${index}.000Z`,
+          monotonicMs: 1000 + index,
+        }),
+      );
+      outcomes = await Promise.all(presses);
+    });
+
+    expect(outcomes).toEqual(
+      Array.from({ length: 15 }, () => ({ status: 'ACCEPTED' })),
+    );
+    await waitFor(() => {
+      expect(timingService.capturePass).toHaveBeenCalledTimes(
+        MAX_CONCURRENT_CAPTURE_DELIVERIES,
+      );
+    });
+    expect(result.current.inFlightIds.size).toBe(
+      MAX_CONCURRENT_CAPTURE_DELIVERIES,
+    );
+
+    await act(async () => {
+      answers
+        .slice(0, MAX_CONCURRENT_CAPTURE_DELIVERIES)
+        .forEach((answer) => answer.resolve(passView()));
+      await drainMicrotasks();
+    });
+    await waitFor(() => {
+      expect(timingService.capturePass).toHaveBeenCalledTimes(15);
+    });
+    await act(async () => {
+      answers
+        .slice(MAX_CONCURRENT_CAPTURE_DELIVERIES)
+        .forEach((answer) => answer.resolve(passView()));
+      await drainMicrotasks();
+    });
+
+    const queue = await openTimingQueue();
+    await waitFor(async () => {
+      const items = await queue.list('attempt-burst');
+      expect(items).toHaveLength(15);
+      expect(items.every((item) => item.status === 'APPLIED')).toBe(true);
+    });
+
+    const sequenceByNumber = new Map<number, number>();
+    for (const [, payload] of vi.mocked(timingService.capturePass).mock.calls) {
+      if (payload.kind === 'NUMBER' && payload.startNumber !== undefined) {
+        sequenceByNumber.set(payload.startNumber, payload.deviceSequence);
+      }
+    }
+    const sequences = numbers.map((number) => sequenceByNumber.get(number));
+    expect(new Set(sequences).size).toBe(15);
+    expect(sequences).toEqual(
+      [...sequences].sort((first, second) => (first ?? 0) - (second ?? 0)),
+    );
+    const items = await queue.list('attempt-burst');
+    expect(items.map((item) => item.deviceSequence)).toEqual(sequences);
+    expect(
+      result.current.captureOutcomes?.filter(
+        (event) => event.tone === 'confirmed',
+      ),
+    ).toHaveLength(15);
+  });
+
+  it('does not start a second press of one number before the first answers', async () => {
+    const { result } = renderCapture({
+      surface: surfaceOf([runningBlock({ attemptId: 'attempt-gate' })]),
+    });
+
+    await waitFor(() => {
+      expect(timingService.openClockEpoch).toHaveBeenCalledTimes(1);
+    });
+
+    const answers = [deferred<TimingPassView>(), deferred<TimingPassView>()];
+    let callIndex = 0;
+    vi.mocked(timingService.capturePass).mockImplementation(
+      () => answers[callIndex++].promise,
+    );
+
+    await act(async () => {
+      await Promise.all([
+        result.current.commitNumber({
+          startNumber: 17,
+          capturedAt: '2026-11-13T09:00:01.000Z',
+          monotonicMs: 1100,
+        }),
+        result.current.commitNumber({
+          startNumber: 17,
+          capturedAt: '2026-11-13T09:00:02.000Z',
+          monotonicMs: 2100,
+        }),
+      ]);
+    });
+
+    await waitFor(() => {
+      expect(timingService.capturePass).toHaveBeenCalledTimes(1);
+    });
+    const firstKey = vi.mocked(timingService.capturePass).mock.calls[0][2];
+
+    await act(async () => {
+      answers[0].resolve(passView());
+      await drainMicrotasks();
+    });
+    await waitFor(() => {
+      expect(timingService.capturePass).toHaveBeenCalledTimes(2);
+    });
+    const secondKey = vi.mocked(timingService.capturePass).mock.calls[1][2];
+    expect(secondKey).not.toBe(firstKey);
+
+    await act(async () => {
+      answers[1].resolve(passView());
+      await drainMicrotasks();
+    });
+  });
+
+  it('starts presses of different numbers together', async () => {
+    const { result } = renderCapture({
+      surface: surfaceOf([numberedSurfaces([17, 18])]),
+    });
+
+    await waitFor(() => {
+      expect(timingService.openClockEpoch).toHaveBeenCalledTimes(1);
+    });
+
+    const answers = [deferred<TimingPassView>(), deferred<TimingPassView>()];
+    let callIndex = 0;
+    vi.mocked(timingService.capturePass).mockImplementation(
+      () => answers[callIndex++].promise,
+    );
+
+    await act(async () => {
+      await Promise.all([
+        result.current.commitNumber({
+          startNumber: 17,
+          capturedAt: '2026-11-13T09:00:01.000Z',
+          monotonicMs: 1100,
+        }),
+        result.current.commitNumber({
+          startNumber: 18,
+          capturedAt: '2026-11-13T09:00:02.000Z',
+          monotonicMs: 2100,
+        }),
+      ]);
+    });
+
+    await waitFor(() => {
+      expect(timingService.capturePass).toHaveBeenCalledTimes(2);
+    });
+
+    await act(async () => {
+      answers.forEach((answer) => answer.resolve(passView()));
+      await drainMicrotasks();
+    });
+  });
+
+  it('does not let a slow answer of one number hold another number', async () => {
+    const { result } = renderCapture({
+      surface: surfaceOf([numberedSurfaces([17, 18])]),
+    });
+
+    await waitFor(() => {
+      expect(timingService.openClockEpoch).toHaveBeenCalledTimes(1);
+    });
+
+    const slow = deferred<TimingPassView>();
+    const fast = deferred<TimingPassView>();
+    vi.mocked(timingService.capturePass)
+      .mockImplementationOnce(() => slow.promise)
+      .mockImplementationOnce(() => fast.promise);
+
+    await act(async () => {
+      await Promise.all([
+        result.current.commitNumber({
+          startNumber: 17,
+          capturedAt: '2026-11-13T09:00:01.000Z',
+          monotonicMs: 1100,
+        }),
+        result.current.commitNumber({
+          startNumber: 18,
+          capturedAt: '2026-11-13T09:00:02.000Z',
+          monotonicMs: 2100,
+        }),
+      ]);
+    });
+
+    await waitFor(() => {
+      expect(timingService.capturePass).toHaveBeenCalledTimes(2);
+    });
+
+    await act(async () => {
+      fast.resolve(passView());
+      await drainMicrotasks();
+    });
+
+    const queue = await openTimingQueue();
+    const startNumberOf = (item: TimingQueueItem): number | undefined => {
+      const payload = item.payload as CaptureTimingPassRequest;
+      return payload.startNumber;
+    };
+    await waitFor(async () => {
+      const items = await queue.list('attempt-burst');
+      expect(
+        items.find((item) => startNumberOf(item) === 18)?.status,
+      ).toBe('APPLIED');
+      expect(items.find((item) => startNumberOf(item) === 17)?.status).toBe(
+        'SENT',
+      );
+    });
+
+    await act(async () => {
+      slow.resolve(passView());
+      await drainMicrotasks();
+    });
+  });
+
+  it('retries a lost answer only after the backoff and never as a refusal', async () => {
+    vi.useFakeTimers();
+    const { result } = renderCapture({
+      surface: surfaceOf([runningBlock({ attemptId: 'attempt-retry' })]),
+    });
+    await act(async () => {
+      await drainMicrotasks();
+    });
+
+    vi.mocked(timingService.capturePass)
+      .mockRejectedValueOnce(new Error('Network Error'))
+      .mockResolvedValue(passView());
+
+    await act(async () => {
+      void result.current.commitNumber({
+        startNumber: 17,
+        capturedAt: '2026-11-13T09:00:01.000Z',
+        monotonicMs: 1500,
+      });
+      await drainMicrotasks();
+    });
+
+    const queue = await openTimingQueue();
+    const items = await queue.list('attempt-retry');
+    expect(items).toHaveLength(1);
+    expect(items[0].status).toBe('PENDING');
+    expect(timingService.capturePass).toHaveBeenCalledTimes(1);
+    expect(
+      result.current.captureOutcomes?.some((event) => event.tone === 'refused'),
+    ).toBe(false);
+    expect(
+      result.current.captureOutcomes?.filter((event) => event.tone === 'unsent'),
+    ).toHaveLength(1);
+
+    await act(async () => {
+      await result.current.flush();
+      await drainMicrotasks();
+    });
+    expect(timingService.capturePass).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CAPTURE_RETRY_BACKOFF_MS - 1);
+      await drainMicrotasks();
+    });
+    expect(timingService.capturePass).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+      await drainMicrotasks();
+    });
+    expect(timingService.capturePass).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await drainMicrotasks();
+    });
+    const [confirmed] = await queue.list('attempt-retry');
     expect(confirmed.status).toBe('APPLIED');
+  });
+
+  it('keeps the coded in-progress 409 pending, unreported and retryable', async () => {
+    vi.useFakeTimers();
+    const { result } = renderCapture({
+      surface: surfaceOf([runningBlock({ attemptId: 'attempt-in-progress' })]),
+    });
+    await act(async () => {
+      await drainMicrotasks();
+    });
+
+    vi.mocked(timingService.capturePass)
+      .mockRejectedValueOnce(inProgressRefusal())
+      .mockResolvedValue(passView());
+
+    await act(async () => {
+      void result.current.commitNumber({
+        startNumber: 17,
+        capturedAt: '2026-11-13T09:00:01.000Z',
+        monotonicMs: 1500,
+      });
+      await drainMicrotasks();
+    });
+
+    const queue = await openTimingQueue();
+    const items = await queue.list('attempt-in-progress');
+    expect(items).toHaveLength(1);
+    expect(items[0].status).toBe('PENDING');
+    expect(timingService.capturePass).toHaveBeenCalledTimes(1);
+    expect(
+      result.current.captureOutcomes?.some((event) => event.tone === 'refused'),
+    ).toBe(false);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CAPTURE_RETRY_BACKOFF_MS);
+      await drainMicrotasks();
+    });
+    expect(timingService.capturePass).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await drainMicrotasks();
+    });
+    const [confirmed] = await queue.list('attempt-in-progress');
+    expect(confirmed.status).toBe('APPLIED');
+  });
+
+  it('keeps the answer of a press whose caller already resolved ACCEPTED', async () => {
+    const { result } = renderCapture({
+      surface: surfaceOf([runningBlock({ attemptId: 'attempt-feed' })]),
+    });
+
+    await waitFor(() => {
+      expect(timingService.openClockEpoch).toHaveBeenCalledTimes(1);
+    });
+
+    const answer = deferred<TimingPassView>();
+    vi.mocked(timingService.capturePass).mockImplementation(
+      () => answer.promise,
+    );
+
+    let outcome: TimingCaptureOutcome | undefined;
+    await act(async () => {
+      outcome = await result.current.commitNumber({
+        startNumber: 17,
+        capturedAt: '2026-11-13T09:00:01.000Z',
+        monotonicMs: 1500,
+      });
+    });
+    expect(outcome).toEqual({ status: 'ACCEPTED' });
+    expect(result.current.captureOutcomes).toEqual([]);
+
+    await act(async () => {
+      answer.resolve(passView());
+      await drainMicrotasks();
+    });
+    await waitFor(() => {
+      expect(result.current.captureOutcomes).toEqual([
+        expect.objectContaining({ subject: '№ 17', tone: 'confirmed' }),
+      ]);
+    });
+  });
+
+  it('runs one surface invalidation at a time and exactly one trailing refresh', async () => {
+    const { result, client } = renderCapture({
+      surface: surfaceOf([numberedSurfaces([17, 18])]),
+    });
+
+    await waitFor(() => {
+      expect(timingService.openClockEpoch).toHaveBeenCalledTimes(1);
+    });
+
+    const firstInvalidation = deferred<void>();
+    let invalidations = 0;
+    const spy = vi
+      .spyOn(client, 'invalidateQueries')
+      .mockImplementation(() => {
+        invalidations += 1;
+        return invalidations === 1
+          ? firstInvalidation.promise
+          : Promise.resolve();
+      });
+
+    const answers = deferred<void>();
+    vi.mocked(timingService.capturePass).mockImplementation(() =>
+      answers.promise.then(() => passView()),
+    );
+
+    await act(async () => {
+      await Promise.all([
+        result.current.commitNumber({
+          startNumber: 17,
+          capturedAt: '2026-11-13T09:00:01.000Z',
+          monotonicMs: 1100,
+        }),
+        result.current.commitNumber({
+          startNumber: 18,
+          capturedAt: '2026-11-13T09:00:02.000Z',
+          monotonicMs: 2100,
+        }),
+      ]);
+    });
+    await waitFor(() => {
+      expect(timingService.capturePass).toHaveBeenCalledTimes(2);
+    });
+
+    await act(async () => {
+      answers.resolve();
+      await drainMicrotasks();
+    });
+    await waitFor(() => {
+      expect(invalidations).toBe(1);
+    });
+
+    await act(async () => {
+      firstInvalidation.resolve();
+      await drainMicrotasks();
+    });
+    await waitFor(() => {
+      expect(invalidations).toBe(2);
+    });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('counts queued records and in-chain acceptances per attempt only', async () => {
+    const epoch = deferred<TimingClockEpochView>();
+    vi.mocked(timingService.openClockEpoch).mockImplementation(
+      () => epoch.promise,
+    );
+    const { result } = renderCapture({
+      surface: surfaceOf([numberedSurfaces([17])]),
+    });
+
+    await waitFor(() => {
+      expect(timingService.openClockEpoch).toHaveBeenCalledTimes(1);
+    });
+
+    const queue = await openTimingQueue();
+    await queue.enqueue(queuedPass('key-other-attempt', 1, 'attempt-b', 18));
+    await act(async () => {
+      await result.current.refreshQueue();
+    });
+
+    const answers = deferred<void>();
+    vi.mocked(timingService.capturePass).mockImplementation(() =>
+      answers.promise.then(() => passView()),
+    );
+
+    let presses: Promise<TimingCaptureOutcome>[] = [];
+    await act(async () => {
+      presses = [
+        result.current.commitNumber({
+          startNumber: 17,
+          capturedAt: '2026-11-13T09:00:01.000Z',
+          monotonicMs: 1100,
+        }),
+        result.current.commitNumber({
+          startNumber: 17,
+          capturedAt: '2026-11-13T09:00:02.000Z',
+          monotonicMs: 2100,
+        }),
+      ];
+      await drainMicrotasks();
+    });
+
+    await waitFor(() => {
+      expect(result.current.unresolvedByAttempt?.['attempt-burst']).toBe(2);
+      expect(result.current.unresolvedByAttempt?.['attempt-b']).toBe(1);
+    });
+
+    await act(async () => {
+      epoch.resolve(epochView('attempt-burst'));
+      await Promise.all(presses);
+    });
+
+    await waitFor(() => {
+      expect(result.current.unresolvedByAttempt?.['attempt-burst']).toBe(2);
+      expect(result.current.unresolvedByAttempt?.['attempt-b']).toBe(1);
+    });
+
+    await act(async () => {
+      answers.resolve();
+      await drainMicrotasks();
+    });
+    await waitFor(() => {
+      expect(result.current.unresolvedByAttempt?.['attempt-burst']).toBe(
+        undefined,
+      );
+      expect(result.current.unresolvedByAttempt?.['attempt-b']).toBe(undefined);
+    });
   });
 });
 
@@ -827,14 +1419,19 @@ describe('useTimingCapture anonymous splits', () => {
       outcome = await result.current.assignAnonymousSplit('split-refused', 17);
     });
 
-    expect(outcome).toEqual({
-      status: 'REJECTED',
-      reason: 'Отсечка уже назначена',
+    expect(outcome).toEqual({ status: 'ACCEPTED' });
+    await waitFor(() => {
+      expect(onError).toHaveBeenCalledWith('Отсечка уже назначена');
     });
     const queue = await openTimingQueue();
     await expect(queue.list('event:event-1')).resolves.toEqual([]);
     expect(result.current.queueItems).toEqual([]);
-    expect(onError).toHaveBeenCalledWith('Отсечка уже назначена');
+    expect(result.current.captureOutcomes).toEqual([
+      expect.objectContaining({
+        tone: 'refused',
+        reason: 'Отсечка уже назначена',
+      }),
+    ]);
   });
 
   it('cancels a queued split with a reason and takes no sequence', async () => {
@@ -860,7 +1457,7 @@ describe('useTimingCapture anonymous splits', () => {
     ).resolves.toBe(0);
   });
 
-  it('keeps an unanswered anonymous capture queued for a later flush', async () => {
+  it('keeps an unanswered anonymous capture queued after acceptance', async () => {
     const onError = vi.fn();
     const { result } = renderCapture({
       surface: surfaceOf([runningBlock({ attemptId: 'attempt-anon-offline' })]),
@@ -879,11 +1476,13 @@ describe('useTimingCapture anonymous splits', () => {
       outcome = await result.current.captureAnonymous();
     });
 
-    expect(outcome).toEqual({ status: 'UNSENT' });
+    expect(outcome).toEqual({ status: 'ACCEPTED' });
     expect(onError).not.toHaveBeenCalled();
     const queue = await openTimingQueue();
-    const [queued] = await queue.list('event:event-1');
-    expect(queued).toMatchObject({ operation: 'PASS', status: 'PENDING' });
+    await waitFor(async () => {
+      const [queued] = await queue.list('event:event-1');
+      expect(queued).toMatchObject({ operation: 'PASS', status: 'PENDING' });
+    });
   });
 
   it('replays an anonymous capture and an assignment with their stored payloads', async () => {
@@ -966,7 +1565,7 @@ describe('useTimingCapture heat start', () => {
 });
 
 describe('useTimingCapture flush', () => {
-  it('replays unsynced items in order and stops at the first lost answer', async () => {
+  it('delivers unsynced items in order and keeps a lost answer recorded', async () => {
     const onError = vi.fn();
     const { result } = renderCapture({
       surface: surfaceOf([runningBlock()]),
@@ -997,13 +1596,17 @@ describe('useTimingCapture flush', () => {
 
     const items = await queue.list('attempt-a');
     expect(items.map((item) => item.status)).toEqual(['APPLIED', 'PENDING']);
-    expect(onError).toHaveBeenCalledTimes(1);
+    // A lost answer is not a refusal: it stays recorded for a later delivery.
+    expect(onError).not.toHaveBeenCalled();
+    expect(
+      result.current.captureOutcomes?.some((event) => event.tone === 'refused'),
+    ).toBe(false);
     expect(result.current.pendingCount).toBe(1);
   });
 });
 
 describe('useTimingCapture offline outcomes', () => {
-  it('resolves an unanswered number as UNSENT and turns the connection state from the outcome', async () => {
+  it('accepts an unanswered number, turns the connection state off and confirms it after the backoff', async () => {
     const onError = vi.fn();
     const { result } = renderCapture({
       surface: surfaceOf([runningBlock({ attemptId: 'attempt-unsent' })]),
@@ -1029,26 +1632,36 @@ describe('useTimingCapture offline outcomes', () => {
       });
     });
 
-    expect(outcome).toEqual({ status: 'UNSENT' });
+    expect(outcome).toEqual({ status: 'ACCEPTED' });
     expect(onError).not.toHaveBeenCalled();
-    expect(result.current.isOnline).toBe(false);
-    expect(result.current.queueItems).toHaveLength(1);
-    expect(result.current.queueItems[0].status).toBe('PENDING');
+    await waitFor(() => {
+      expect(result.current.isOnline).toBe(false);
+      expect(result.current.queueItems).toHaveLength(1);
+      expect(result.current.queueItems[0].status).toBe('PENDING');
+    });
     expect(result.current.pendingCount).toBe(1);
+    expect(
+      result.current.captureOutcomes?.filter((event) => event.tone === 'unsent'),
+    ).toHaveLength(1);
 
-    // A later send that does get an answer turns the state back on.
+    // A later send after the backoff that does get an answer turns the state on.
+    await new Promise((resolve) =>
+      setTimeout(resolve, CAPTURE_RETRY_BACKOFF_MS + 20),
+    );
     await act(async () => {
       await result.current.sendNow();
     });
 
-    expect(result.current.isOnline).toBe(true);
-    expect(result.current.pendingCount).toBe(0);
+    await waitFor(() => {
+      expect(result.current.isOnline).toBe(true);
+      expect(result.current.pendingCount).toBe(0);
+    });
     const queue = await openTimingQueue();
     const [confirmed] = await queue.list('attempt-unsent');
     expect(confirmed.status).toBe('APPLIED');
   });
 
-  it('resolves a confirmed number as CONFIRMED and keeps it out of the unsent total', async () => {
+  it('accepts a confirmed number and exposes the answer in the outcome feed', async () => {
     const { result } = renderCapture({
       surface: surfaceOf([runningBlock({ attemptId: 'attempt-confirmed' })]),
     });
@@ -1066,11 +1679,16 @@ describe('useTimingCapture offline outcomes', () => {
       });
     });
 
-    expect(outcome).toEqual({ status: 'CONFIRMED' });
-    expect(result.current.queueItems.map((entry) => entry.status)).toEqual([
-      'APPLIED',
-    ]);
+    expect(outcome).toEqual({ status: 'ACCEPTED' });
+    await waitFor(() => {
+      expect(result.current.queueItems.map((entry) => entry.status)).toEqual([
+        'APPLIED',
+      ]);
+    });
     expect(result.current.pendingCount).toBe(0);
+    expect(result.current.captureOutcomes).toEqual([
+      expect.objectContaining({ id: expect.any(String), subject: '№ 17', tone: 'confirmed' }),
+    ]);
   });
 });
 
@@ -1152,7 +1770,7 @@ describe('useTimingCapture send now', () => {
     expect(result.current.pendingCount).toBe(1);
     expect(result.current.isOnline).toBe(false);
     expect(result.current.isFlushing).toBe(false);
-    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
   });
 });
 

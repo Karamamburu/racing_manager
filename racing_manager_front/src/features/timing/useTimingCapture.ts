@@ -1,11 +1,16 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  CAPTURE_RETRY_BACKOFF_MS,
+  decideDeliveries,
+} from './timingDelivery';
 import {
   newTimingMutationKey,
   openTimingQueue,
   type TimingAnonymousAssignPayload,
   type TimingMutationOperation,
+  type TimingQueue,
   type TimingQueueItem,
 } from './timingQueue';
 import { timingService } from './timingService';
@@ -14,9 +19,20 @@ import type {
   BindPendingFinishRequest,
   CaptureTimingPassRequest,
   QuickUndoTimingPassRequest,
+  TimingCaptureOutcome,
+  TimingCaptureOutcomeEvent,
   TimingCategoryBlockView,
   TimingParticipantTileView,
   TimingSurfaceView,
+} from './types';
+
+export { TIMING_CAPTURE_OUTCOME_STATUSES } from './types';
+export type {
+  TimingCaptureOutcome,
+  TimingCaptureOutcomeEvent,
+  TimingCaptureOutcomeStatus,
+  TimingCaptureOutcomeTone,
+  TimingRefusalNotice,
 } from './types';
 
 /**
@@ -62,31 +78,6 @@ export interface TimingNumberCommit {
 }
 
 /**
- * What the server answered about one locally recorded capture (FR-15).
- *
- * `CONFIRMED` means the server applied the entry, `REJECTED` means it refused
- * it and `reason` carries its message, and `UNSENT` means the entry is recorded
- * on this device and still waits for an answer. `UNSENT` is not a failure: the
- * press was recorded, so the field may clear and the queue keeps the entry
- * (FR-14, FR-16).
- */
-export const TIMING_CAPTURE_OUTCOME_STATUSES = [
-  'CONFIRMED',
-  'UNSENT',
-  'REJECTED',
-] as const;
-
-export type TimingCaptureOutcomeStatus =
-  (typeof TIMING_CAPTURE_OUTCOME_STATUSES)[number];
-
-/** The outcome of one capture-side action. */
-export interface TimingCaptureOutcome {
-  status: TimingCaptureOutcomeStatus;
-  /** The server's refusal message, verbatim; present only on `REJECTED`. */
-  reason?: string;
-}
-
-/**
  * What the surface consumes from the hook.
  *
  * Local validation failures reject with the reason and keep the typed value; a
@@ -124,9 +115,12 @@ export interface UseTimingCaptureResult {
   takeCapture: () => Promise<void>;
   transferCapture: (toWorkstationInstanceId: string) => Promise<void>;
   forceRelease: (reason: string) => Promise<void>;
-  /** Replays every unsynced item, oldest first, and stops at a lost network. */
+  /**
+   * Starts the delivery pump and resolves when the current unsent set is
+   * settled or paused (offline, or waiting out a retry backoff).
+   */
   flush: () => Promise<void>;
-  /** The same replay, offered to the referee as «Отправить сейчас» (FR-13). */
+  /** The same pump start, offered to the referee as «Отправить сейчас» (FR-13). */
   sendNow: () => Promise<void>;
   /**
    * Every item of this device's outbox in capture order, raw and un-derived.
@@ -156,6 +150,18 @@ export interface UseTimingCaptureResult {
   /** Queue items the server has not answered yet, across attempts. */
   pendingCount: number;
   isFlushing: boolean;
+  /**
+   * Every answer about a recorded capture, in arrival order. It contains the
+   * answers of presses whose caller already resolved `ACCEPTED`, so the field
+   * never loses a refusal it no longer awaits (AD-7).
+   */
+  captureOutcomes?: TimingCaptureOutcomeEvent[];
+  /**
+   * The unresolved captures of each attempt: outbox items still `PENDING` or
+   * `SENT` plus the acceptances this device has taken but not yet recorded.
+   * Closure reads this number (FR-27); the API gate stays authoritative.
+   */
+  unresolvedByAttempt?: Readonly<Record<string, number>>;
 }
 
 const FALLBACK_ERROR_MESSAGE = 'Не удалось выполнить запрос хронометража';
@@ -194,13 +200,81 @@ export function describeTimingError(
   return fallback;
 }
 
+/** The wire code of a repeat that reached an open idempotency claim (AD-4). */
+const IDEMPOTENCY_IN_PROGRESS_CODE = 'IDEMPOTENCY_IN_PROGRESS';
+
+function responseBody(error: AxiosError): Record<string, unknown> | null {
+  const data: unknown = error.response?.data;
+  return typeof data === 'object' && data !== null
+    ? (data as Record<string, unknown>)
+    : null;
+}
+
 /**
- * A refusal the server signed: it answered with a status, so retrying the same
- * idempotency key would only replay the same answer. A request that never got
- * an answer stays replayable instead (E-27).
+ * Whether the server answered that the first request of this key is still
+ * running. That is not a refusal: the capture may already be applied, so the
+ * client keeps it recorded and asks again later (AD-4, E-10, F-04).
+ */
+function isIdempotencyInProgress(error: unknown): boolean {
+  if (!(error instanceof AxiosError) || error.response?.status !== 409) {
+    return false;
+  }
+  return responseBody(error)?.code === IDEMPOTENCY_IN_PROGRESS_CODE;
+}
+
+/**
+ * A refusal the server signed: a 4xx it answered, so retrying the same
+ * idempotency key would only replay the same answer. A request without an
+ * answer, a 5xx without a capture-specific refusal and the coded in-progress
+ * 409 all stay replayable instead (E-21, E-27, AD-4).
  */
 function isDefinitiveRefusal(error: unknown): boolean {
-  return error instanceof AxiosError && error.response !== undefined;
+  if (!(error instanceof AxiosError) || error.response === undefined) {
+    return false;
+  }
+  const status = error.response.status;
+  return status >= 400 && status < 500 && !isIdempotencyInProgress(error);
+}
+
+/** The answer's subject, read from the recorded payload and the surface (AD-7). */
+function captureSubject(
+  item: TimingQueueItem,
+  numberForEnrollment: (enrollmentId: string) => number | null,
+): string {
+  const payload =
+    typeof item.payload === 'object' && item.payload !== null
+      ? (item.payload as Record<string, unknown>)
+      : {};
+  const number =
+    typeof payload.startNumber === 'number' ? payload.startNumber : null;
+  if (number !== null) return `№ ${number}`;
+  const splitRequest =
+    typeof payload.request === 'object' && payload.request !== null
+      ? (payload.request as Record<string, unknown>)
+      : null;
+  if (typeof splitRequest?.startNumber === 'number') {
+    return `№ ${splitRequest.startNumber}`;
+  }
+  if (typeof splitRequest?.enrollmentId === 'string') {
+    const resolved = numberForEnrollment(splitRequest.enrollmentId);
+    return resolved === null ? 'Участник' : `№ ${resolved}`;
+  }
+  if (item.operation === 'PASS' && payload.kind === 'ANONYMOUS_SPLIT') {
+    return 'Отсечка без номера';
+  }
+  if (item.operation === 'PASS' && payload.kind === 'PENDING_FINISH') {
+    return 'Непривязанный финиш';
+  }
+  if (item.operation === 'BIND') return 'Непривязанный финиш';
+  if (item.operation === 'ANONYMOUS_ASSIGN') return 'Отсечка без номера';
+  if (item.operation === 'UNDO') return 'Отмена последней отметки';
+  const enrollmentId =
+    typeof payload.enrollmentId === 'string' ? payload.enrollmentId : null;
+  if (enrollmentId !== null) {
+    const resolved = numberForEnrollment(enrollmentId);
+    return resolved === null ? 'Участник' : `№ ${resolved}`;
+  }
+  return 'Отметка';
 }
 
 function describeAttemptLabel(participant: TimingParticipantTileView): string {
@@ -291,6 +365,32 @@ export function useTimingCapture(
   );
   const [isFlushing, setIsFlushing] = useState(false);
   const [isOnline, setIsOnline] = useState<boolean>(browserOnline);
+  /** Answers in arrival order, independent of the press promise (AD-7). */
+  const [captureOutcomes, setCaptureOutcomes] = useState<
+    TimingCaptureOutcomeEvent[]
+  >([]);
+  /** Acceptances this device took but has not recorded in the outbox yet. */
+  const [chainDepth, setChainDepth] = useState<Record<string, number>>({});
+  /**
+   * ONE acceptance chain: anchor check, `nextSequence` and `enqueue` of every
+   * press run in press order, so `deviceSequence` never reorders (AD-2).
+   */
+  const acceptanceChain = useRef<Promise<void>>(Promise.resolve());
+  /** Captures with an outstanding delivery; one record, one delivery (U-04). */
+  const sendingIds = useRef<Set<string>>(new Set());
+  /** Per capture, when its own last unanswered delivery may retry (AD-5). */
+  const retryNotBefore = useRef<Map<string, number>>(new Map());
+  /** The live delivery runs of the pump, so `flush` can drain them. */
+  const deliveryRuns = useRef<Map<string, Promise<void>>>(new Map());
+  const pumpLoop = useRef<Promise<void> | null>(null);
+  const pumpAgain = useRef(false);
+  const pumpRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  /** The browser's own connection flag; a lost answer does not clear it (AD-5). */
+  const networkOnline = useRef<boolean>(browserOnline());
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Single-flight surface refresh with one trailing run (AD-8). */
+  const invalidationLoop = useRef<Promise<void> | null>(null);
+  const invalidationDirty = useRef(false);
 
   useEffect(() => {
     onErrorRef.current = onError;
@@ -318,8 +418,8 @@ export function useTimingCapture(
     const items = await queue.list();
     // A refusal is a one-time answer, not a queue row: drop every refused
     // entry (including leftovers from earlier sessions) before the page
-    // derives its view. The refusal reason is still returned to the caller
-    // and reported once; the server audit keeps the refusal itself.
+    // derives its view. The refusal is reported once through the outcome feed;
+    // the server audit keeps the refusal itself.
     const rejected = items.filter((item) => item.status === 'REJECTED');
     for (const item of rejected) {
       await queue.remove(item.id);
@@ -340,15 +440,113 @@ export function useTimingCapture(
     setIsOnline((current) => (current === online ? current : online));
   }, []);
 
-  const markInFlight = useCallback((id: string, inFlight: boolean) => {
+  /** Mirrors the internal `sendingIds` to the page's `inFlightIds`. */
+  const syncInFlight = useCallback(() => {
     if (!mounted.current) return;
-    setInFlightIds((current) => {
-      const next = new Set(current);
-      if (inFlight) next.add(id);
-      else next.delete(id);
+    setInFlightIds(new Set(sendingIds.current));
+  }, []);
+
+  /**
+   * One surface invalidation at a time; answers arriving meanwhile mark the
+   * surface dirty and cause exactly one trailing refresh (AD-8). A failed read
+   * is logged and does not stop later answers from refreshing.
+   */
+  const invalidateCoalesced = useCallback(() => {
+    if (!eventId) return;
+    if (invalidationLoop.current !== null) {
+      invalidationDirty.current = true;
+      return;
+    }
+    let run: Promise<void> | null = null;
+    run = (async () => {
+      do {
+        invalidationDirty.current = false;
+        await queryClient.invalidateQueries({
+          queryKey: timingSurfaceQueryKey(eventId),
+        });
+      } while (invalidationDirty.current);
+    })()
+      .catch((error: unknown) => {
+        console.warn('timing: the surface refresh failed', error);
+      })
+      .finally(() => {
+        if (invalidationLoop.current === run) invalidationLoop.current = null;
+      });
+    invalidationLoop.current = run;
+  }, [eventId, queryClient]);
+
+  /** Tracks one acceptance until it is recorded in the outbox (AD-2). */
+  const adjustChainDepth = useCallback((attemptId: string, delta: number) => {
+    if (!mounted.current) return;
+    setChainDepth((current) => {
+      const next = { ...current };
+      const value = (next[attemptId] ?? 0) + delta;
+      if (value > 0) next[attemptId] = value;
+      else delete next[attemptId];
       return next;
     });
   }, []);
+
+  /**
+   * Appends one press's acceptance work to the single chain. `release` is called
+   * as soon as the record is in the outbox, so the unresolved count never adds
+   * the same capture twice; a failure releases it through the completion path.
+   */
+  const appendAcceptance = useCallback(
+    <T,>(
+      attemptId: string,
+      work: (release: () => void) => Promise<T>,
+    ): Promise<T> => {
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        adjustChainDepth(attemptId, -1);
+      };
+      adjustChainDepth(attemptId, 1);
+      const run = acceptanceChain.current.then(() => work(release));
+      const completion = run.then(
+        (value) => {
+          release();
+          return value;
+        },
+        (error: unknown) => {
+          release();
+          throw error;
+        },
+      );
+      acceptanceChain.current = completion.then(
+        () => undefined,
+        () => undefined,
+      );
+      return completion;
+    },
+    [adjustChainDepth],
+  );
+
+  /**
+   * Records one prepared capture and resolves `ACCEPTED` as soon as it is in the
+   * outbox. No answer is awaited: the pump reports it through `captureOutcomes`.
+   */
+  const acceptCapture = useCallback(
+    (
+      attemptId: string,
+      prepare: () => Promise<TimingQueueItem>,
+    ): Promise<TimingCaptureOutcome> => {
+      return appendAcceptance(attemptId, async (release) => {
+        const item = await prepare();
+        const queue = await openTimingQueue();
+        await queue.enqueue(item);
+        release();
+        return item;
+      }).then(async () => {
+        await refreshQueue();
+        void pumpRef.current();
+        return { status: 'ACCEPTED' as const };
+      });
+    },
+    [appendAcceptance, refreshQueue],
+  );
 
   const requireEvent = useCallback((): string => {
     if (eventId) return eventId;
@@ -405,58 +603,11 @@ export function useTimingCapture(
   );
 
   /**
-   * Stores the item, sends it, and records what the API answered. The queue
-   * item exists before the request leaves (AD-3).
-   *
-   * A definitive refusal resolves `REJECTED` with the server message; a request
-   * without an answer stays queued, resolves `UNSENT` and is not reported as a
-   * failed capture (FR-16, FR-20).
+   * One pass of one attempt, routed to that attempt's own epoch. The press
+   * instant was read before this call; only the acceptance work is chained.
    */
-  const deliver = useCallback(
-    async (
-      item: TimingQueueItem,
-      run: () => Promise<unknown>,
-    ): Promise<TimingCaptureOutcome> => {
-      const queue = await openTimingQueue();
-      await queue.enqueue(item);
-      await refreshQueue();
-      markInFlight(item.id, true);
-      try {
-        try {
-          await run();
-          await queue.mark(item.id, 'APPLIED');
-          await refreshQueue();
-          setConnectivity(true);
-          await invalidate();
-          return { status: 'CONFIRMED' };
-        } catch (error) {
-          const message = describeTimingError(error);
-          if (isDefinitiveRefusal(error)) {
-            // The server signed its answer: retrying would only replay it.
-            await queue.mark(item.id, 'REJECTED', message);
-            await refreshQueue();
-            setConnectivity(true);
-            await invalidate();
-            report(message);
-            return { status: 'REJECTED', reason: message };
-          }
-          // No answer: keep it unsynced so a later flush can confirm it (E-27).
-          await queue.mark(item.id, 'PENDING');
-          await refreshQueue();
-          setConnectivity(false);
-          await invalidate();
-          return { status: 'UNSENT' };
-        }
-      } finally {
-        markInFlight(item.id, false);
-      }
-    },
-    [refreshQueue, invalidate, markInFlight, report, setConnectivity],
-  );
-
-  /** One pass of one attempt, routed to that attempt's own epoch. */
   const sendPass = useCallback(
-    async (input: {
+    (input: {
       attemptId: string;
       kind: 'NUMBER' | 'TILE';
       startNumber: number;
@@ -464,48 +615,47 @@ export function useTimingCapture(
       capturedAt: string;
       monotonicMs: number;
     }): Promise<TimingCaptureOutcome> => {
-      const id = requireEvent();
-      const anchor = await openEpoch(input.attemptId);
-      const queue = await openTimingQueue();
-      const deviceSequence = await queue.nextSequence(
-        input.attemptId,
-        workstationInstanceId,
-      );
-      const key = newTimingMutationKey();
-      const clientElapsedMs = elapsedFromAnchor(anchor, input.monotonicMs);
-      // The API refuses an identity field the kind must leave absent, so a
-      // number sends the number and a tile sends the enrollment, never both.
-      const identity: Pick<
-        CaptureTimingPassRequest,
-        'startNumber' | 'enrollmentId'
-      > =
-        input.kind === 'TILE'
-          ? { enrollmentId: input.enrollmentId }
-          : { startNumber: input.startNumber };
-      const payload: CaptureTimingPassRequest = {
-        attemptId: input.attemptId,
-        kind: input.kind,
-        ...identity,
-        clientCapturedAt: input.capturedAt,
-        clientElapsedMs,
-        clockEpochId: anchor.epochId,
-        workstationInstanceId,
-        deviceSequence,
-      };
+      requireEvent();
+      return acceptCapture(input.attemptId, async () => {
+        const anchor = await openEpoch(input.attemptId);
+        const queue = await openTimingQueue();
+        const deviceSequence = await queue.nextSequence(
+          input.attemptId,
+          workstationInstanceId,
+        );
+        const key = newTimingMutationKey();
+        const clientElapsedMs = elapsedFromAnchor(anchor, input.monotonicMs);
+        // The API refuses an identity field the kind must leave absent, so a
+        // number sends the number and a tile sends the enrollment, never both.
+        const identity: Pick<
+          CaptureTimingPassRequest,
+          'startNumber' | 'enrollmentId'
+        > =
+          input.kind === 'TILE'
+            ? { enrollmentId: input.enrollmentId }
+            : { startNumber: input.startNumber };
+        const payload: CaptureTimingPassRequest = {
+          attemptId: input.attemptId,
+          kind: input.kind,
+          ...identity,
+          clientCapturedAt: input.capturedAt,
+          clientElapsedMs,
+          clockEpochId: anchor.epochId,
+          workstationInstanceId,
+          deviceSequence,
+        };
 
-      return deliver(
-        queueItem(
+        return queueItem(
           key,
           input.attemptId,
           workstationInstanceId,
           deviceSequence,
           'PASS',
           payload,
-        ),
-        () => timingService.capturePass(id, payload, key),
-      );
+        );
+      });
     },
-    [requireEvent, openEpoch, workstationInstanceId, deliver],
+    [requireEvent, openEpoch, workstationInstanceId, acceptCapture],
   );
 
   /**
@@ -514,21 +664,22 @@ export function useTimingCapture(
    * The split carries no participant and no lap bound, so nothing here reads a
    * number, N or the roster (AD-17).
    */
-  const captureAnonymous = useCallback(
-    async (): Promise<TimingCaptureOutcome> => {
-      const id = requireEvent();
-      const anchorAttempt = surface?.categories.find(
-        (block) => block.state === 'RUNNING' && block.attemptId !== null,
-      )?.attemptId;
-      if (anchorAttempt === undefined || anchorAttempt === null) {
-        report(NO_RUNNING_ATTEMPT_MESSAGE);
-        throw new Error(NO_RUNNING_ATTEMPT_MESSAGE);
-      }
-      const capturedAt = new Date().toISOString();
-      const monotonicMs = performance.now();
+  const captureAnonymous = useCallback((): Promise<TimingCaptureOutcome> => {
+    const id = requireEvent();
+    const anchorAttempt = surface?.categories.find(
+      (block) => block.state === 'RUNNING' && block.attemptId !== null,
+    )?.attemptId;
+    if (anchorAttempt === undefined || anchorAttempt === null) {
+      report(NO_RUNNING_ATTEMPT_MESSAGE);
+      throw new Error(NO_RUNNING_ATTEMPT_MESSAGE);
+    }
+    // The press instant is read before anything is awaited, then chained.
+    const capturedAt = new Date().toISOString();
+    const monotonicMs = performance.now();
+    const eventScope = `event:${id}`;
+    return acceptCapture(eventScope, async () => {
       const anchor = await openEpoch(anchorAttempt);
       const queue = await openTimingQueue();
-      const eventScope = `event:${id}`;
       const deviceSequence = await queue.nextSequence(
         eventScope,
         workstationInstanceId,
@@ -543,20 +694,23 @@ export function useTimingCapture(
         deviceSequence,
       };
 
-      return deliver(
-        queueItem(
-          key,
-          eventScope,
-          workstationInstanceId,
-          deviceSequence,
-          'PASS',
-          payload,
-        ),
-        () => timingService.captureAnonymousSplit(id, payload, key),
+      return queueItem(
+        key,
+        eventScope,
+        workstationInstanceId,
+        deviceSequence,
+        'PASS',
+        payload,
       );
-    },
-    [requireEvent, surface, openEpoch, workstationInstanceId, deliver, report],
-  );
+    });
+  }, [
+    requireEvent,
+    surface,
+    acceptCapture,
+    openEpoch,
+    workstationInstanceId,
+    report,
+  ]);
 
   /**
    * Every eligible running enrollment of one number, across categories. This
@@ -632,11 +786,11 @@ export function useTimingCapture(
   );
 
   const bindPending = useCallback(
-    async (
+    (
       pendingId: string,
       startNumber: number,
     ): Promise<TimingCaptureOutcome> => {
-      const id = requireEvent();
+      requireEvent();
       const pending = surface?.categories
         .flatMap((block) => block.pendingFinishes)
         .find((finish) => finish.passId === pendingId);
@@ -644,59 +798,57 @@ export function useTimingCapture(
         report(PENDING_MISSING_MESSAGE);
         throw new Error(PENDING_MISSING_MESSAGE);
       }
-      const queue = await openTimingQueue();
-      const deviceSequence = await queue.nextSequence(
-        pending.attemptId,
-        workstationInstanceId,
-      );
-      const key = newTimingMutationKey();
-      const payload: BindPendingFinishRequest = {
-        pendingFinishId: pendingId,
-        startNumber,
-        workstationInstanceId,
-        deviceSequence,
-      };
-      return deliver(
-        queueItem(
+      return acceptCapture(pending.attemptId, async () => {
+        const queue = await openTimingQueue();
+        const deviceSequence = await queue.nextSequence(
+          pending.attemptId,
+          workstationInstanceId,
+        );
+        const key = newTimingMutationKey();
+        const payload: BindPendingFinishRequest = {
+          pendingFinishId: pendingId,
+          startNumber,
+          workstationInstanceId,
+          deviceSequence,
+        };
+        return queueItem(
           key,
           pending.attemptId,
           workstationInstanceId,
           deviceSequence,
           'BIND',
           payload,
-        ),
-        () => timingService.bindPendingFinish(id, pendingId, payload, key),
-      );
+        );
+      });
     },
-    [requireEvent, surface, workstationInstanceId, deliver, report],
+    [requireEvent, surface, workstationInstanceId, acceptCapture, report],
   );
 
   const quickUndo = useCallback(
-    async (attemptId: string): Promise<TimingCaptureOutcome> => {
-      const id = requireEvent();
-      const queue = await openTimingQueue();
-      const deviceSequence = await queue.nextSequence(
-        attemptId,
-        workstationInstanceId,
-      );
-      const key = newTimingMutationKey();
-      const payload: QuickUndoTimingPassRequest = {
-        workstationInstanceId,
-        deviceSequence,
-      };
-      return deliver(
-        queueItem(
+    (attemptId: string): Promise<TimingCaptureOutcome> => {
+      requireEvent();
+      return acceptCapture(attemptId, async () => {
+        const queue = await openTimingQueue();
+        const deviceSequence = await queue.nextSequence(
+          attemptId,
+          workstationInstanceId,
+        );
+        const key = newTimingMutationKey();
+        const payload: QuickUndoTimingPassRequest = {
+          workstationInstanceId,
+          deviceSequence,
+        };
+        return queueItem(
           key,
           attemptId,
           workstationInstanceId,
           deviceSequence,
           'UNDO',
           payload,
-        ),
-        () => timingService.quickUndo(id, attemptId, payload, key),
-      );
+        );
+      });
     },
-    [requireEvent, workstationInstanceId, deliver],
+    [requireEvent, workstationInstanceId, acceptCapture],
   );
 
   /**
@@ -705,7 +857,7 @@ export function useTimingCapture(
    * accepted assignment leaves the queue with the surface refetch (AD-17).
    */
   const assignAnonymousSplit = useCallback(
-    async (
+    (
       splitId: string,
       startNumber: number,
       chosenAttemptId?: string,
@@ -719,32 +871,31 @@ export function useTimingCapture(
         throw new Error(SPLIT_MISSING_MESSAGE);
       }
       const eventScope = `event:${id}`;
-      const queue = await openTimingQueue();
-      const deviceSequence = await queue.nextSequence(
-        eventScope,
-        workstationInstanceId,
-      );
-      const key = newTimingMutationKey();
-      const request: AssignAnonymousSplitRequest = {
-        startNumber,
-        workstationInstanceId,
-        deviceSequence,
-        ...(chosenAttemptId === undefined ? {} : { chosenAttemptId }),
-      };
-      const payload: TimingAnonymousAssignPayload = { splitId, request };
-      return deliver(
-        queueItem(
+      return acceptCapture(eventScope, async () => {
+        const queue = await openTimingQueue();
+        const deviceSequence = await queue.nextSequence(
+          eventScope,
+          workstationInstanceId,
+        );
+        const key = newTimingMutationKey();
+        const request: AssignAnonymousSplitRequest = {
+          startNumber,
+          workstationInstanceId,
+          deviceSequence,
+          ...(chosenAttemptId === undefined ? {} : { chosenAttemptId }),
+        };
+        const payload: TimingAnonymousAssignPayload = { splitId, request };
+        return queueItem(
           key,
           eventScope,
           workstationInstanceId,
           deviceSequence,
           'ANONYMOUS_ASSIGN',
           payload,
-        ),
-        () => timingService.assignAnonymousSplit(id, splitId, request, key),
-      );
+        );
+      });
     },
-    [requireEvent, surface, workstationInstanceId, deliver, report],
+    [requireEvent, surface, workstationInstanceId, acceptCapture, report],
   );
 
   /** One thin service wrapper: invalidate on success, report and rethrow on failure. */
@@ -950,76 +1101,274 @@ export function useTimingCapture(
     [requireEvent],
   );
 
+  /** Resolves a tile press's number from the surface, so a status names it. */
+  const numberForEnrollment = useCallback(
+    (enrollmentId: string): number | null => {
+      for (const block of surface?.categories ?? []) {
+        for (const participant of block.participants) {
+          if (participant.enrollmentId === enrollmentId) {
+            return participant.startNumber;
+          }
+        }
+      }
+      return null;
+    },
+    [surface],
+  );
+
+  /** Appends one answer to the ordered feed (AD-7). */
+  const pushOutcome = useCallback(
+    (
+      item: TimingQueueItem,
+      tone: TimingCaptureOutcomeEvent['tone'],
+      reason?: string,
+    ) => {
+      if (!mounted.current) return;
+      const event: TimingCaptureOutcomeEvent = {
+        id: item.id,
+        subject: captureSubject(item, numberForEnrollment),
+        tone,
+        at: new Date().toISOString(),
+        ...(reason === undefined ? {} : { reason }),
+      };
+      setCaptureOutcomes((current) => [...current, event]);
+    },
+    [numberForEnrollment],
+  );
+
+  /** Wakes the pump when a capture's own retry backoff has elapsed (AD-5). */
+  const scheduleRetry = useCallback((delayMs: number) => {
+    if (!mounted.current || retryTimer.current !== null) return;
+    retryTimer.current = setTimeout(() => {
+      retryTimer.current = null;
+      void pumpRef.current();
+    }, delayMs);
+  }, []);
+
   /**
-   * Replays every unsynced item in press order and stops at the first one the
-   * server did not answer, so nothing is ever dropped or reordered (E-09,
-   * E-10). `sendNow` and the automatic replay on mount and `online` share it.
+   * Keeps a capture recorded after its delivery ended without a final answer.
+   * It is neither reported nor dropped: it becomes eligible after the backoff
+   * (E-09, E-21, AD-4, AD-5).
+   */
+  const keepUnresolved = useCallback(
+    async (
+      item: TimingQueueItem,
+      queue: TimingQueue,
+      connected: boolean,
+    ): Promise<void> => {
+      retryNotBefore.current.set(
+        item.id,
+        Date.now() + CAPTURE_RETRY_BACKOFF_MS,
+      );
+      await queue.mark(item.id, 'PENDING');
+      await refreshQueue();
+      setConnectivity(connected);
+      if (!connected) pushOutcome(item, 'unsent');
+      scheduleRetry(CAPTURE_RETRY_BACKOFF_MS);
+    },
+    [refreshQueue, setConnectivity, pushOutcome, scheduleRetry],
+  );
+
+  /**
+   * One delivery. A 4xx is a signed refusal; the coded in-progress 409, a 5xx
+   * without a capture-specific refusal and a transport failure are no answer
+   * and stay retryable (AD-4, E-21).
+   */
+  const deliverItem = useCallback(
+    async (item: TimingQueueItem): Promise<void> => {
+      const queue = await openTimingQueue();
+      try {
+        await replay(item);
+        retryNotBefore.current.delete(item.id);
+        await queue.mark(item.id, 'APPLIED');
+        await refreshQueue();
+        setConnectivity(true);
+        pushOutcome(item, 'confirmed');
+        invalidateCoalesced();
+      } catch (error) {
+        const message = describeTimingError(error);
+        const answered =
+          error instanceof AxiosError && error.response !== undefined;
+        if (isIdempotencyInProgress(error)) {
+          // The first request of this key may still apply: no refusal, no drop.
+          await keepUnresolved(item, queue, true);
+          return;
+        }
+        if (isDefinitiveRefusal(error)) {
+          // The server signed its answer: retrying would only replay it.
+          retryNotBefore.current.delete(item.id);
+          await queue.mark(item.id, 'REJECTED', message);
+          await refreshQueue();
+          setConnectivity(true);
+          pushOutcome(item, 'refused', message);
+          report(message);
+          invalidateCoalesced();
+          return;
+        }
+        await keepUnresolved(item, queue, answered);
+      }
+    },
+    [
+      replay,
+      refreshQueue,
+      setConnectivity,
+      pushOutcome,
+      invalidateCoalesced,
+      keepUnresolved,
+      report,
+    ],
+  );
+
+  /** Starts one delivery; the record is in the outbox before it leaves. */
+  const startDelivery = useCallback(
+    (item: TimingQueueItem) => {
+      if (sendingIds.current.has(item.id)) return;
+      sendingIds.current.add(item.id);
+      syncInFlight();
+      if (mounted.current) setIsFlushing(true);
+      const run = (async () => {
+        const queue = await openTimingQueue();
+        await queue.mark(item.id, 'SENT');
+        await refreshQueue();
+        await deliverItem(item);
+      })()
+        .catch((error: unknown) => {
+          retryNotBefore.current.set(
+            item.id,
+            Date.now() + CAPTURE_RETRY_BACKOFF_MS,
+          );
+          scheduleRetry(CAPTURE_RETRY_BACKOFF_MS);
+          console.warn('timing: the delivery could not be started', error);
+        })
+        .finally(() => {
+          sendingIds.current.delete(item.id);
+          deliveryRuns.current.delete(item.id);
+          syncInFlight();
+          if (mounted.current && deliveryRuns.current.size === 0) {
+            setIsFlushing(false);
+          }
+          void pumpRef.current();
+        });
+      deliveryRuns.current.set(item.id, run);
+    },
+    [deliverItem, refreshQueue, syncInFlight, scheduleRetry],
+  );
+
+  /**
+   * One pump pass: snapshot the outbox, ask the pure module which captures may
+   * start, and start them. Nothing here awaits an answer (AD-1, AD-5, AD-6).
+   */
+  const pumpOnce = useCallback(async (): Promise<number> => {
+    if (!eventId || !mounted.current) return 0;
+    const queue = await openTimingQueue();
+    const items = await queue.list();
+    const decision = decideDeliveries({
+      items,
+      sendingIds: new Set(sendingIds.current),
+      retryNotBefore: new Map(retryNotBefore.current),
+      now: Date.now(),
+      online: networkOnline.current,
+    });
+    for (const item of decision.start) startDelivery(item);
+    if (decision.start.length === 0) {
+      const due = decision.blocked
+        .filter((entry) => entry.reason === 'backoff')
+        .map((entry) => retryNotBefore.current.get(entry.item.id) ?? 0)
+        .filter((at) => at > 0);
+      if (due.length > 0) {
+        scheduleRetry(Math.max(0, Math.min(...due) - Date.now()));
+      }
+    }
+    return decision.start.length;
+  }, [eventId, startDelivery, scheduleRetry]);
+
+  /**
+   * The concurrent pump. It starts every eligible capture, waits for the
+   * running deliveries, and runs again after each answer and acceptance. It
+   * ends only when nothing is running and nothing may start (settled or paused
+   * by the browser's offline flag or a retry backoff).
+   */
+  const pump = useCallback(async (): Promise<void> => {
+    if (!eventId) return;
+    if (pumpLoop.current !== null) {
+      pumpAgain.current = true;
+      // The loop may be waiting on a slow delivery; plan again right away so a
+      // new acceptance or an answer starts without waiting for that delivery.
+      void pumpOnce().catch((error: unknown) => {
+        console.warn('timing: the delivery pump could not plan again', error);
+      });
+      await pumpLoop.current;
+      return;
+    }
+    const loop = (async () => {
+      let active = true;
+      while (active) {
+        pumpAgain.current = false;
+        await pumpOnce();
+        const running = [...deliveryRuns.current.values()];
+        if (running.length > 0) {
+          await Promise.allSettled(running);
+        }
+        active = pumpAgain.current || deliveryRuns.current.size > 0;
+      }
+    })().catch((error: unknown) => {
+      console.warn('timing: the delivery pump stopped unexpectedly', error);
+    });
+    pumpLoop.current = loop;
+    try {
+      await loop;
+    } finally {
+      if (pumpLoop.current === loop) pumpLoop.current = null;
+      if (pumpAgain.current) {
+        pumpAgain.current = false;
+        void pumpRef.current();
+      }
+    }
+  }, [eventId, pumpOnce]);
+
+  useEffect(() => {
+    pumpRef.current = pump;
+  }, [pump]);
+
+  /**
+   * Starts the pump and resolves when the current unsent set is settled or
+   * paused. `sendNow` and the automatic start on mount and `online` share it.
    */
   const flush = useCallback(async (): Promise<void> => {
     if (!eventId) return;
     if (mounted.current) setIsFlushing(true);
-    let applied = false;
     try {
-      const queue = await openTimingQueue();
-      const unsynced = (await queue.list()).filter(isUnsynced);
-      for (const item of unsynced) {
-        await queue.mark(item.id, 'SENT');
-        await refreshQueue();
-        try {
-          await replay(item);
-          await queue.mark(item.id, 'APPLIED');
-          await refreshQueue();
-          setConnectivity(true);
-          applied = true;
-        } catch (error) {
-          const message = describeTimingError(error);
-          if (isDefinitiveRefusal(error)) {
-            // The server answered: retrying would only replay the refusal.
-            await queue.mark(item.id, 'REJECTED', message);
-            await refreshQueue();
-            setConnectivity(true);
-            report(message);
-            continue;
-          }
-          // The network is gone: keep this item and every later one for a
-          // later flush, so nothing is ever dropped (E-27).
-          await queue.mark(item.id, 'PENDING');
-          await refreshQueue();
-          setConnectivity(false);
-          report(message);
-          break;
-        }
-      }
-      if (applied) await invalidate();
+      await pumpRef.current();
     } finally {
       await refreshQueue();
       if (mounted.current) setIsFlushing(false);
     }
-  }, [
-    eventId,
-    replay,
-    invalidate,
-    refreshQueue,
-    report,
-    setConnectivity,
-  ]);
+  }, [eventId, refreshQueue]);
 
   useEffect(() => {
     mounted.current = true;
-    setIsOnline(browserOnline());
+    const online = browserOnline();
+    networkOnline.current = online;
+    setIsOnline(online);
     void refreshQueue();
     void flush();
     const handleOnline = () => {
+      networkOnline.current = true;
       setIsOnline(true);
       void flush();
     };
     const handleOffline = () => {
+      networkOnline.current = false;
       setIsOnline(false);
     };
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
       mounted.current = false;
+      if (retryTimer.current !== null) {
+        clearTimeout(retryTimer.current);
+        retryTimer.current = null;
+      }
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
@@ -1048,6 +1397,24 @@ export function useTimingCapture(
     }
   }, [eventId, surface, openEpoch]);
 
+  /**
+   * The unresolved captures per attempt: recorded outbox entries plus the
+   * acceptances still in the chain. Another attempt's captures never leak into
+   * the count (FR-27, FR-43).
+   */
+  const unresolvedByAttempt = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const item of queueItems) {
+      if (!isUnsynced(item)) continue;
+      counts[item.attemptId] = (counts[item.attemptId] ?? 0) + 1;
+    }
+    for (const [attemptId, depth] of Object.entries(chainDepth)) {
+      if (depth <= 0) continue;
+      counts[attemptId] = (counts[attemptId] ?? 0) + depth;
+    }
+    return counts;
+  }, [queueItems, chainDepth]);
+
   return {
     resolveCandidates,
     commitNumber,
@@ -1074,5 +1441,7 @@ export function useTimingCapture(
     isOnline,
     pendingCount: queueItems.filter(isUnsynced).length,
     isFlushing,
+    captureOutcomes,
+    unresolvedByAttempt,
   };
 }
