@@ -109,3 +109,139 @@ Each self-contained category block in the event protocol now has a header collap
 ## 2026-11-12 — START-CATEGORY-BRACKETS legacy unique index fix
 
 A second multi-stage race in the same start but a different age section failed with 409 «уже создана». The database still carried Prisma's legacy unique index `class_competitions_event_format_gender_key` on `(event_id, format_id, gender)`, while the scoped identity index allows one race per `(event, start, format, gender, target_key)`. Added `db/migrate_start_category_brackets_2026_11_12_drop_legacy_unique.sql` (and its down file) and included both legacy index names in the original migration's drop step.
+
+## [2026-11-13] ingest | MANUAL-TIMING live timing and lap splits
+
+Implemented the manual timing service for concurrent protocol categories. A global `REFEREE` role (or `ADMINISTRATOR`) opens one event-wide surface, starts each category, captures passes by event-unique number or tile, binds pending finishes and closes attempts; `ORGANIZER` alone has no timing. The attempt is `event × start × format × gender × attempt number`; N is the start lap count; raw captures are immutable and official times are correctable with a reason and an audit row. One event-wide capture lock has no automatic lease. A closure atomically publishes each participant-at-N's authoritative enrollment `FINISHED` result with exactly N lap splits into `result_splits` (`Result.timing_session_id` provenance); manual result upserts clear stale splits, and protocol rows expose additive `lapSplits` while legacy `laps` stays unchanged. Race-section rows are excluded, start numbers are locked during a running attempt, and race creation is refused when it would capture a running-attempt participant. Schema: `racing_manager_db/db/migrate_manual_timing_2026_11_13.sql` and `migrate_referee_role_2026_11_13.sql`. Updated [domains/timing.md](domains/timing.md) (new), [domains/results.md](domains/results.md), [domains/events.md](domains/events.md), [domains/cms.md](domains/cms.md), [domains/registrations.md](domains/registrations.md), [entities/timing-session.md](entities/timing-session.md) (new), [entities/user-and-roles.md](entities/user-and-roles.md), [entities/registration.md](entities/registration.md), [INDEX.md](INDEX.md). Spec: `specs/manual-timing-ears.md`; PRD: `Tasks/MANUAL-TIMING/PRD.md`; architecture: `Tasks/MANUAL-TIMING/ARCHITECTURE.md`.
+
+## 2026-11-14 — MANUAL-TIMING-2
+
+Added anonymous Enter splits with a fixed top queue and number assignment/cancellation, per-heat timing attempts for multi-stage races that publish only `ClassHeatTime` total + `OK`, a per-attempt closure gate with rejected receipts, a 100 ms local elapsed display, and independent per-block protocol collapse. A heat attempt is `event + race + stage + heat + attempt number`; it shares the capture lock/epoch/mark model, keeps the category `RACE_SECTION` exclusion, and never advances or qualifies a stage. Existing manual heat-time form, stage seeding/reassignment/removal and stage commitment stay with ORGANIZER/ADMINISTRATOR; the timing surface stays REFEREE/ADMINISTRATOR. Updated [domains/timing.md](domains/timing.md), [domains/results.md](domains/results.md), [domains/cms.md](domains/cms.md), [domains/events.md](domains/events.md), [entities/timing-session.md](entities/timing-session.md). Spec: `specs/manual-timing-2-ears.md`; PRD: `Tasks/MANUAL-TIMING-2/PRD.md`; architecture: `Tasks/MANUAL-TIMING-2/ARCHITECTURE.md`.
+
+## 2026-11-14 — MANUAL-TIMING-2 capture retention and closure gaps
+
+A category closure no longer releases the event-wide capture lock: the workstation that timed one category keeps the hold for the next one, and releasing stays explicit (`force-release`/`transfer`). A capture refused by the capture-lock or clock-epoch check now writes a `REJECTED` receipt for its issued sequence instead of leaving a gap that later blocks closure with `UNCONFIRMED_MUTATIONS`; closure-gate messages are Russian. The anonymous split queue renders as two columns and the number field focuses itself in assignment mode without the attempt caption; the elapsed time cell has a fixed width and tabular digits. Updated [domains/timing.md](domains/timing.md).
+
+## 2026-11-14 — timing UI density and protocol splits
+
+The timing page now keeps the capture controls, current-block selector and number field in the left column of the top control block and the anonymous split queue in its right column with a shorter fixed area. Every category and heat block collapses independently while its header, state tag and actions stay visible. Participant tiles are compact and filled with the colour of their state, so more tiles fit on screen. In the event protocol the «Отсечки» column renders every split as `hh:mm:ss.mmm` and stacks the lap time over the cumulative time. No API or stored value changed. Updated [domains/timing.md](domains/timing.md).
+
+## 2026-11-14 — protocol split columns
+
+The «Отсечки» column of the event protocol lays laps side by side: each lap reads `N - lap time` with the cumulative time directly under the lap time, and laps wrap inside the column when they no longer fit. Times stay `hh:mm:ss.mmm`. Presentation-only.
+
+## 2026-11-14 — timing number field
+
+The top control block of the timing page is three symmetric columns: capture controls and current-block selector, a large square number field in the middle, and the anonymous split queue on the right. The number field is 132×132 px with 48 px centred digits, so it is easy to hit and the typed number is readable at a glance. Presentation-only.
+
+## 2026-11-14 — full-height timing controls
+
+The three columns of the timing top block now share its full height. The number field doubles to 264×264 px with 96 px centred digits, and the anonymous split queue stretches with its column instead of keeping a fixed 104 px area (104 px stays as the minimum). Presentation-only.
+
+## 2026-11-14 — MANUAL-TIMING-3 block-free splits
+
+Anonymous splits are now event-scoped: Enter queues one with no current block, the attempts running at the press are frozen as candidates, and assignment is by participant number only. The number resolves event-wide and then inside the candidates; an accepted assignment creates the pass at the captured instant in the chosen attempt, while an ambiguous number asks for an explicit choice and a non-qualifying one names every reason. The «Текущий блок» selector is removed. Closure gates every still-running candidate; legacy queued splits stay bound to their captured attempt. Added `timing_event_splits`, `timing_anonymous_split_candidates`, `timing_event_capture_receipts`, `timing_event_audit`, receipt origin and split-provenance columns; see `migrate_manual_timing_3_2026_11_14.sql` (+ down). Updated [domains/timing.md](domains/timing.md).
+
+## 2026-11-14 — split sequence provenance guard
+
+A split-derived pass must not borrow the assignment's event sequence as its attempt capture sequence: a closure that counted marks as capture evidence then demanded receipts for those numbers. The closure coverage now ignores split provenance, and SQL normalises existing split-derived marks to `device_sequence = NULL` and adds `timing_marks_split_capture_sequence_check` (`source_split_id IS NULL OR device_sequence IS NULL`), so a stale reader cannot reproduce the false gap. See `migrate_manual_timing_3_2026_11_14_split_sequence_guard.sql`.
+
+## 2026-11-14 — timing totals in a multi-stage stage panel
+
+A timing heat closure writes one total and no per-lap rows. The stage panel treated a multi-lap slot as incomplete unless every event lap had a row, so the timing total was invisible and «Зафиксировать этап» never appeared. A slot with status `OK` and a total is now filled regardless of per-lap detail; the starter card shows the timing total as «Итог» beside the optional lap rows.
+
+## 2026-11-14 — heat lap times from timing
+
+A heat closure now publishes one `ClassHeatLapTime` per event lap from the attempt's official-instant splits, in addition to the `ClassHeatTime` total + `OK`. The stage panel therefore shows Круг 1, Круг 2 and Итог for every participant; a total-only heat remains a complete slot. Existing timing heat times for the current event were backfilled from their bound marks.
+
+## 2026-11-15 — Russian timing errors
+
+All timing domain refusals and timing request-validation messages are now Russian and written for a referee: missing number, wrong attempt, capture holder, closure gates, ambiguous split, sequence conflict, invalid request field. The frontend already displays the API message verbatim; no behavior or error code changed.
+
+## 2026-11-15 — automatic DNS and DNF
+
+Ordinary category completion now publishes `DNS` for a non-excluded participant with no captures and `DNF` for one with some captures but fewer than N; participants at N keep `FINISHED` with time and splits. Ordinary heat completion writes the same outcomes as `ClassHeatTime` rows (`OK`/total, `DNS`, `DNF`), so the stage panel and stage commitment no longer need a manual status for every non-finisher. Forced completion and cancellation keep their previous rules: force publishes only at-N participants, cancellation publishes nothing. No synthetic time or split is written for DNS/DNF.
+
+## 2026-11-15 — legacy category-finish uniqueness removed
+
+`category_finishes_event_class` still enforced one finished classification per `(event, gender, format)`, so finishing the same format+gender on a second start failed with a 500 unique violation. The stored model has been start-aware since MULTI-START via `uq_category_finishes_start (event_id, start_id, format_id, gender)`; the legacy index is now dropped in `migrate_multi_start_2026_11_15_drop_legacy_finish_unique.sql` and no longer created in `init.sql`.
+
+## 2026-11-15 — timing page block order
+
+The timing page now sorts category slots by state: `RUNNING` first, then `NOT_STARTED`, then every closed state last. Backend order is preserved inside one state, and heat blocks stay in place so stage-header grouping does not change. This keeps the referee's active category at the top and folds finished ones to the bottom of a long event.
+
+## 2026-11-15 — timing page width by roster size
+
+The timing page now places category groups in a wrapping row instead of one full-width stack. A group with up to 6 visible participant tiles takes a third of the row (three per line), 7–12 takes a half (two per line), and 13 or more takes the full width; the group is sized by its widest category or heat block, and race-section rows do not count. Participant tiles switched from viewport breakpoints to a card-width grid (`auto-fill`, 120 px minimum), so a narrow card keeps readable tiles. Below 1440 px a third falls back to a half and below 992 px every group is full width.
+
+## 2026-11-15 — even timing rows
+
+The timing grid now packs same-width categories into explicit rows: three thirds, two halves or one full card. Two cards always split the row exactly in half, and a lone half or third keeps its fraction instead of growing to the full width, which had made a 7-participant category look like a full-width block.
+
+## 2026-11-15 — heats share their stage row
+
+The timing layout now fills a partial row with the next card of the same state and width, so a full-width race between two 7–12-participant categories no longer leaves one of them orphaned on an empty half-row. A multi-stage race stays one full-width section, but each stage packs its heat cards by their own roster size: two 7–8-participant heats now sit side by side instead of stacking as full-width cards, while a 30-participant heat keeps the full width.
+
+## 2026-11-15 — timing block completion cues
+
+The timing surface now reports `capturesComplete` for a running block that holds exactly N bound passes for every non-excluded participant with no unbound finish, and `finished` for a finished protocol category or multi-stage race. The page shows the blue «Все отсечки в гонке данной категории получены, её можно завершить» cue once every capture is in, and paints the locked-results plate of a finished category green instead of the warning tone.
+
+## 2026-11-15 — «отсечка» in the timing UI
+
+Every user-facing label of the timing page now calls a block-free capture «отсечка»: the queue title and items, the cancel dialog and its actions, the number-field hints, busy labels, local refusals and the API refusal messages shown on the page. The API routes, stored tables and code identifiers keep the `split` naming.
+
+## 2026-11-15 — Space captures an отсечка
+
+The empty number field now treats Space exactly like Enter: both queue a block-free capture, both commit a typed number, and both refuse an empty assignment. The former «Пробел ничего не записывает» refusal and its hint are gone; the queue and field hints name Enter or Space. The timing EARS and both manual-timing PRDs were amended accordingly.
+
+## 2026-11-15 — judge summary on the timing page
+
+The top block now shows «Ход хронометража»: categories finished/total, participants finished/total, participants on course, blocks ready to complete, outstanding unassigned captures and unbound finishes, and remaining passes. The summary is computed from the loaded surface, adds no request, and excludes race-section duplicates and participants outside timing.
+
+## 2026-11-15 — the timing record is a category record
+
+The attempt record drawer is now titled «Запись категории» for a category block and «Запись заезда» for a heat. Inside the drawer the record itself is called «запись» («Запись отменена», «Запись закрыта», «Запись пуста», «ID записи»), and its closure actions read «Завершить хронометраж» / «Отменить хронометраж». The generic correction dialogs use the same «хронометраж» wording.
+
+## 2026-11-15 — copying the device id for capture transfer
+
+The timing top block now has a «Копировать» action beside the workstation id, so a referee can move capture to another device without selecting a long UUID by hand. The transfer field is labelled «Устройство назначения» and refuses the current device locally; an unreadable clipboard reports an inline hint instead of a silent failure.
+
+## 2026-11-15 — back to the event from timing
+
+The timing page header now carries a «К мероприятию» action back to `/events/:id`, so leaving the timing surface no longer depends on the browser Back button.
+
+## 2026-11-15 — gender tint on timing cards
+
+Category and heat cards are now tinted by gender: light blue for men and light pink for women. The tint is a display-only class on the existing card, so it changes no state, no capture rule and no API.
+
+## 2026-11-15 — capture holder is a device
+
+Every user-facing mention of the capture holder now says «устройство» rather than «станция»: the holder tag, the read-only notice, transfer refusals, validation labels and the API messages shown on the page. The workstation id, routes and stored columns keep their `workstation` naming.
+
+## 2026-11-16 — offline capture feedback
+
+The timing page now derives one offline report from the device outbox and the surface: unsent and rejected entries, per-participant and per-block pending marks, the page totals and the connection state. A pending tile shows `confirmed+pending/N` with a violet dashed outline and «не отправлено: N», a block shows «Отметок не отправлено: N» and loses the ready prompt, and the number field clears on local record while a late refusal is reported without restoring the number. The page renders a send queue, retries in press order, dismisses rejected entries, gates closure/transfer on connection and queue, and warns when the memory fallback cannot keep entries across a reload. No server route, response field or schema changed.
+
+## 2026-11-16 — refused captures are not queue rows
+
+A server refusal is now reported once in the number-field status/toast and the outbox row is removed immediately; a refresh also purges legacy `REJECTED` rows. The send queue and page totals contain unsent entries only, so old refusal history no longer fills the timing page. Server receipts/audit remain the record of the refusal.
+
+## 2026-11-16 — send queue only when it has work
+
+The «Очередь отправки» block is now hidden when there is no unsent entry. It appears only while at least one capture-side entry is waiting to be sent, so an all-clear page has no empty queue card.
+
+## 2026-11-16 — no queue flicker during an online capture
+
+The send queue no longer appears for an entry whose request is still in flight. A normal online press therefore does not push the page down for a fraction of a second; the block appears only when an entry actually remains unanswered (or an earlier entry is already waiting).
+
+## 2026-11-16 — fixed feedback slot under the number field
+
+The number field's busy row, validation refusal and last-outcome status now share one fixed-height area. Pressing Enter no longer adds or removes a line that changes the top card height and pushes the category blocks down.
+
+## 2026-11-17 — multi-stage race after numbers are issued
+
+Multi-stage race creation no longer waits for the event to start when the numbers are already issued. The UI offers and the API accepts creation when the registration window is closed **or** every active registration holds a start number; a missing active number still refuses it while the window is open. Updated the start-category and category-self-contained EARS/PRDs.
+
+## 2026-11-17 — consolidated timing production migration
+
+Added `migrate_timing_service_2026_11_17.sql`, one guarded transaction that creates the final timing schema (attempts, heat identity, marks, anonymous splits, receipts, capture lock, audits, result splits, result provenance and the REFEREE seed). It refuses a partial or already-applied timing schema. Validated on a disposable database from `init.sql`; the resulting timing schema matches the current local schema apart from column order.

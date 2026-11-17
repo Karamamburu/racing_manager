@@ -68,6 +68,7 @@ import {
   racePlacementForRow,
   type RaceScopeRow,
 } from '../class-competitions/race-scope';
+import { TimingAttemptsReadService } from '../timing/timing-attempts-read.service';
 
 export type ParticipationFormatDto = {
   id: number;
@@ -180,6 +181,19 @@ export type CategoryFinishRef = {
   gender: string;
 };
 
+/**
+ * One published timing split of an enrollment result.
+ *
+ * `lapTimeMs` is that lap alone and `cumulativeMs` is the elapsed time at the
+ * end of it, so the last cumulative value equals the published total. The
+ * shape is additive beside the legacy `laps` array (AD-12).
+ */
+export type ProtocolLapSplit = {
+  lapNumber: number;
+  lapTimeMs: number;
+  cumulativeMs: number;
+};
+
 export type EventParticipant = {
   id: string;
   enrollmentId: string;
@@ -200,6 +214,8 @@ export type EventParticipant = {
   place: number | null;
   format: EventFormatRef | null;
   laps: { lapNumber: number; timeMilliseconds: number }[];
+  /** Published timing splits; absent when the result carries none. */
+  lapSplits?: ProtocolLapSplit[];
   status: string;
   isCupEligible: boolean;
   note: string | null;
@@ -284,6 +300,7 @@ type StoredEnrollmentResult = {
   outcome: string | null;
   timeMilliseconds: number | null;
   place: number | null;
+  splits: ProtocolLapSplit[];
 };
 
 type StoredEnrollment = {
@@ -578,6 +595,7 @@ type ProtocolBaseRow = RankableEnrollment & {
   ageGroupId: AgeGroupId | null;
   raceId: string | null;
   raceRole: 'CAPTURED' | 'OUTSIDE_RACE' | null;
+  lapSplits: ProtocolLapSplit[] | undefined;
 };
 
 type ProtocolRow = ProtocolBaseRow & { place: number | null };
@@ -710,6 +728,21 @@ function toProtocolGender(gender: string): 'M' | 'F' {
   return gender === 'F' ? 'F' : 'M';
 }
 
+/**
+ * Maps stored splits to the wire shape, or `undefined` when the result has
+ * none, so a manually entered result carries no invented split detail.
+ */
+function toProtocolLapSplits(
+  splits: readonly ProtocolLapSplit[] | undefined,
+): ProtocolLapSplit[] | undefined {
+  if (!splits || splits.length === 0) return undefined;
+  return splits.map((split) => ({
+    lapNumber: split.lapNumber,
+    lapTimeMs: split.lapTimeMs,
+    cumulativeMs: split.cumulativeMs,
+  }));
+}
+
 function compareProtocolRows(left: ProtocolRow, right: ProtocolRow): number {
   return (
     left.gender.localeCompare(right.gender) ||
@@ -723,6 +756,15 @@ function compareProtocolRows(left: ProtocolRow, right: ProtocolRow): number {
   );
 }
 
+/**
+ * F-17: a finish writes stored places and closes the category, so any category
+ * or heat attempt of it that still runs refuses the action. The heat kind is
+ * included because a heat carries its category's event, start, format and
+ * gender (AD-14, AD-21).
+ */
+const RUNNING_CATEGORY_ATTEMPT_MESSAGE =
+  'Нельзя завершить гонку, пока идёт попытка хронометража этой категории.';
+
 @Injectable()
 export class EventsService {
   private readonly logger = new Logger(EventsService.name);
@@ -733,6 +775,7 @@ export class EventsService {
     private readonly rolesService: RolesService,
     private readonly usersService: UsersService,
     private readonly eventStatusSync: EventStatusSyncService,
+    private readonly timingAttempts: TimingAttemptsReadService,
   ) {
     this.store = prisma as unknown as EventsStore;
   }
@@ -1051,6 +1094,14 @@ export class EventsService {
                           outcome: true,
                           timeMilliseconds: true,
                           place: true,
+                          splits: {
+                            select: {
+                              lapNumber: true,
+                              lapTimeMs: true,
+                              cumulativeMs: true,
+                            },
+                            orderBy: { lapNumber: 'asc' },
+                          },
                         },
                       },
                     },
@@ -1258,6 +1309,17 @@ export class EventsService {
       throw new BadRequestException('formatId is required.');
     }
     const formatId = parsed.formatId;
+
+    if (
+      await this.timingAttempts.hasRunningAttemptForCategory(
+        eventId,
+        parsed.startId,
+        formatId,
+        parsed.gender,
+      )
+    ) {
+      throw new ConflictException(RUNNING_CATEGORY_ATTEMPT_MESSAGE);
+    }
 
     const bracket = (await this.readClassCompetitions(eventId)).filter(
       (row) =>
@@ -2123,6 +2185,7 @@ export class EventsService {
             ),
             raceId: racePlacement?.race.id ?? null,
             raceRole: racePlacement?.role ?? null,
+            lapSplits: toProtocolLapSplits(enrollment.result?.splits),
           };
         }),
     );
@@ -2235,6 +2298,7 @@ export class EventsService {
       place: row.place,
       format: row.format ? toFormatRef(row.format) : null,
       laps: [],
+      lapSplits: row.lapSplits,
       status: registration.status,
       isCupEligible: start.purposeType === 'CUP_RACE',
       note: registration.note,

@@ -18,6 +18,7 @@ type HarnessOptions = {
   enrollmentStatus?: string;
   startNumber?: number | null;
   hasExistingResult?: boolean;
+  hasLegacyResult?: boolean;
   hasBracket?: boolean;
 };
 
@@ -46,10 +47,17 @@ function makeHarness(options: HarnessOptions = {}) {
     registrationId: REGISTRATION_ID,
     recordedAt: new Date('2026-11-07T00:00:00.000Z'),
     updatedAt: new Date('2026-11-07T00:00:00.000Z'),
+    splits: [],
   };
 
   const tx = {
-    $queryRaw: jest.fn(() => Promise.resolve([{ id: ENROLLMENT_ID }])),
+    $queryRaw: jest.fn((strings: TemplateStringsArray) => {
+      const sql = strings.join('');
+      if (sql.includes('INSERT INTO results')) {
+        return Promise.resolve([{ id: 'result-1' }]);
+      }
+      return Promise.resolve([{ id: ENROLLMENT_ID }]);
+    }),
     enrollment: {
       findFirst: jest.fn(() => Promise.resolve({ status: enrollment.status })),
     },
@@ -61,7 +69,11 @@ function makeHarness(options: HarnessOptions = {}) {
         }
         return Promise.resolve(null);
       }),
-      findFirst: jest.fn(() => Promise.resolve(null)),
+      findFirst: jest.fn(() =>
+        Promise.resolve(
+          options.hasLegacyResult ? { id: 'legacy-result-1' } : null,
+        ),
+      ),
     },
     $executeRaw: jest.fn(
       (strings: TemplateStringsArray, ...values: unknown[]) => {
@@ -195,6 +207,9 @@ describe('ResultsService enrollment upsert', () => {
       timeMilliseconds: 3_600_000,
     });
     expect(state.executeRawCalls).toHaveLength(1);
+    expect(state.executeRawCalls[0].join('')).toContain(
+      'DELETE FROM result_splits',
+    );
   });
 
   it('rejects a simple result for a row displayed in a race section', async () => {
@@ -218,6 +233,43 @@ describe('ResultsService enrollment upsert', () => {
 
     expect(saved).toMatchObject({ outcome: 'DNS', timeMilliseconds: null });
     expect(state.executeRawCalls[0].join('')).toContain('UPDATE results');
+  });
+
+  it('clears stale timing splits and returns an empty laps list', async () => {
+    const { service, state } = makeHarness({ hasExistingResult: true });
+
+    const saved = await service.upsert('admin-sub', EVENT_ID, ENROLLMENT_ID, {
+      outcome: 'FINISHED',
+      timeMilliseconds: 3_600_000,
+    });
+
+    expect(saved).toMatchObject({
+      outcome: 'FINISHED',
+      timeMilliseconds: 3_600_000,
+      laps: [],
+    });
+    const statements = state.executeRawCalls.map((call) => call.join(''));
+    // The manual total owns the result: the stored place is cleared and the
+    // timing splits are deleted in the same transaction.
+    expect(statements[0]).toContain('place = NULL');
+    expect(statements[1]).toContain('DELETE FROM result_splits');
+    expect(statements[1]).toContain('result-1');
+  });
+
+  it('clears splits when a legacy registration-only row is adopted', async () => {
+    const { service, state } = makeHarness({ hasLegacyResult: true });
+
+    const saved = await service.upsert('admin-sub', EVENT_ID, ENROLLMENT_ID, {
+      outcome: 'FINISHED',
+      timeMilliseconds: 3_600_000,
+    });
+
+    expect(saved.laps).toEqual([]);
+    const statements = state.executeRawCalls.map((call) => call.join(''));
+    expect(statements[0]).toContain('UPDATE results');
+    expect(statements[0]).toContain('enrollment_id');
+    expect(statements[1]).toContain('DELETE FROM result_splits');
+    expect(statements[1]).toContain('legacy-result-1');
   });
 
   it('rejects a result for a WITHDRAWN enrollment without writing', async () => {

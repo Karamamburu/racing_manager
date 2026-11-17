@@ -10,6 +10,7 @@ import { EventsService } from './events.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RolesService } from '../auth/roles.service';
 import { UsersService } from '../users/users.service';
+import { TimingAttemptsReadService } from '../timing/timing-attempts-read.service';
 
 type FakeFormat = {
   id: number;
@@ -430,12 +431,16 @@ function makeHarness() {
   const sync = {
     syncDueStatuses: jest.fn(() => Promise.resolve(undefined)),
   };
+  const timingAttempts = {
+    hasRunningAttemptForCategory: jest.fn(() => Promise.resolve(false)),
+  };
 
   const service = new EventsService(
     prisma as unknown as PrismaService,
     roles as unknown as RolesService,
     users as unknown as UsersService,
     sync as unknown as EventStatusSyncService,
+    timingAttempts as unknown as TimingAttemptsReadService,
   );
 
   return { service, state, prisma, tx };

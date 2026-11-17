@@ -1,6 +1,6 @@
 ---
 type: entity
-updated: 2026-11-03
+updated: 2026-11-13
 sources:
   - racing_manager_back/prisma/schema.prisma
   - racing_manager_back/src/auth/role-codes.ts
@@ -20,6 +20,9 @@ Via `Role` / `UserRole`. Application codes include:
 
 - `ADMINISTRATOR`
 - `ORGANIZER`
+- `REFEREE`
+
+A user holds a set of roles; capabilities are the union. `REFEREE` is global and grants timing on every event; `ORGANIZER` alone grants event management and no timing; `ADMINISTRATOR` includes the complete timing set without a separate `REFEREE` grant. See [timing domain](../domains/timing.md).
 
 Guards: session required for private routes; `@Roles(...)` for admin/organizer actions. Front helpers gate UI (e.g. can create events / manage news).
 

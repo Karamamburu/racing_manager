@@ -1,6 +1,6 @@
 ---
 type: entity
-updated: 2026-11-03
+updated: 2026-11-13
 sources:
   - racing_manager_back/prisma/schema.prisma
 ---
@@ -18,7 +18,7 @@ Participation record for an [Event](event.md). May be tied to a logged-in [User]
 - Logged-in: unique active registration by `user_id` per event (see SQL migrations).
 - Guest: one active guest registration per person (name + birth year) per event.
 
-Optional: start number, participation format, note. Results hang off registration (`Result` / laps).
+Optional: start number, participation format, note. The authoritative race Result hangs off the enrollment (`Result.enrollmentId`); a legacy registration-only row is adopted on the first enrollment write. Timing publishes `FINISHED` with N splits into `result_splits`; see [timing domain](../domains/timing.md).
 
 ## API surface
 

@@ -357,8 +357,15 @@ function heatNumberOf(stage: ClassCompetitionStage, registrationId: string): num
   return heat?.heatNumber ?? 1;
 }
 
-function slotFilled(slot: ClassHeatSlot, eventLaps: EventLap[]): boolean {
+export function slotFilled(slot: ClassHeatSlot, eventLaps: EventLap[]): boolean {
   if (slot.resultStatus === 'DNS' || slot.resultStatus === 'DNF' || slot.resultStatus === 'DSQ') {
+    return true;
+  }
+  // A timing heat closure publishes one authoritative total and no per-lap heat
+  // times (MANUAL-TIMING-2). A total is therefore a complete result even when
+  // the race has several event laps; requiring lap rows would hide the
+  // «Зафиксировать этап» action for every timing-produced prologue.
+  if (slot.resultStatus === 'OK' && slot.timeMilliseconds != null) {
     return true;
   }
   if (eventLaps.length > 1) {
@@ -366,7 +373,7 @@ function slotFilled(slot: ClassHeatSlot, eventLaps: EventLap[]): boolean {
       (slot.laps ?? []).some((item) => item.lapNumber === lap.lapNumber),
     );
   }
-  return slot.resultStatus === 'OK' && slot.timeMilliseconds != null;
+  return false;
 }
 
 function StageBoard({
@@ -727,6 +734,16 @@ function StarterCard({
                       />
                     </Space>
                   ))}
+                  {slot.resultStatus === 'OK' && slot.timeMilliseconds != null ? (
+                    <Space size={6}>
+                      <Typography.Text type="secondary" style={{ fontSize: 12, width: 52 }}>
+                        Итог
+                      </Typography.Text>
+                      <Typography.Text style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {formatFinishTime(slot.timeMilliseconds)}
+                      </Typography.Text>
+                    </Space>
+                  ) : null}
                 </Space>
               ) : (
                 <FinishTimeCell

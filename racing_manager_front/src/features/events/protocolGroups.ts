@@ -219,6 +219,21 @@ export function groupParticipants(
   return groups;
 }
 
+/**
+ * Stable identity of one displayed protocol block: gender group, protocol
+ * category (start × format × gender) and the block's own section or race key.
+ * The section id alone repeats — `CATEGORY`, `REMAINDER` and `NO_BIRTH_YEAR`
+ * appear in every category of every gender — so it must never key page state
+ * on its own (AD-20, U-23, E-19).
+ */
+export function protocolBlockKey(
+  genderKey: string,
+  categoryKey: string,
+  sectionKey: string,
+): string {
+  return `${genderKey}::${categoryKey}::${sectionKey}`;
+}
+
 export function categoryHasResults(rows: EventParticipant[]): boolean {
   return rows.some((row) => row.outcome != null || row.finishTimeMs != null);
 }

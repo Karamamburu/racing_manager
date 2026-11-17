@@ -12,6 +12,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { RegistrationsModule } from './registrations/registrations.module';
 import { ResultsModule } from './results/results.module';
 import { StorageModule } from './storage/storage.module';
+import { TimingModule } from './timing/timing.module';
 import { TracksModule } from './tracks/tracks.module';
 import { UsersModule } from './users/users.module';
 import { MainModule } from './main/main.module';
@@ -38,6 +39,7 @@ import { buildPinoParams } from './logging/pino.config';
     ResultsModule,
     MainModule,
     HealthModule,
+    TimingModule,
     IdempotencyModule,
   ],
   providers: [

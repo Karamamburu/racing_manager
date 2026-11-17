@@ -1,6 +1,6 @@
 ---
 type: domain
-updated: 2026-11-12
+updated: 2026-11-14
 ---
 
 # Domain: results
@@ -29,6 +29,15 @@ Authoritative race outcomes and timing for an enrollment; protocol place on read
 - Stored `Result.place` snapshots remain non-authoritative and are never touched by enabling, changing or disabling a configuration; they are not shown as the protocol place of a configured category.
 - `Enrollment.status` is only `REGISTERED` | `WITHDRAWN`; race outcomes live on `Result.outcome`.
 
+## Timing publication (MANUAL-TIMING)
+
+- A completed timing attempt publishes the enrollment's authoritative result: `FINISHED` with `timeMilliseconds` and exactly N lap splits at N, `DNS` when the participant has no capture, or `DNF` when the participant has some captures but fewer than N. `Result.timing_session_id` records the publishing attempt. Timing writes no place and no registration-only result. See [timing](timing.md).
+- `ResultResponseDto` gains additive `laps?: TimingLapSplitDto[]` (`lapNumber`, `lapTimeMs`, `cumulativeMs`); `EventParticipant` gains additive `lapSplits?: TimingLapSplitDto[]`. The legacy `ResultLap` rows and `EventParticipant.laps` stay for historical and race-stage data.
+- A manual upsert clears `result_splits` for that result; `laps[]` on `PUT .../enrollments/:enrollmentId/result` stays rejected (400). Timing is the only split writer.
+- A timing-published result is republished after an official-time correction while the category is unfinished; a cancelled attempt publishes nothing; after the category finish neither the total nor the splits change.
+- A split never breaks a tie, reorders rows or writes a stored place; the place stays computed on read from the total under the existing category/section rules.
+- A heat attempt of a multi-stage race publishes `ClassHeatTime` rows (`OK` + total at N, `DNS` with no capture, `DNF` with fewer than N captures) and never writes an enrollment `Result` or `result_splits`; the manual heat-time form is its correction path. See [cms](cms.md) and [timing](timing.md).
+
 ## Code
 
 - API: `racing_manager_back/src/results/`, parts of `events/`, `ranking/`
@@ -44,3 +53,7 @@ Authoritative race outcomes and timing for an enrollment; protocol place on read
 - Ordinary result entry blocked for a simple section because a sibling section has a race.
 - A race heat time or final classification writing to another start's enrollment or to a simple-section row.
 - Ranking ignoring the age-category boundary when a protocol category is configured.
+- A timing closure writing a place, a registration-only result, a result for an excluded/withdrawn/race participant, or a partial publication.
+- A heat attempt writing an enrollment `Result` or a timing split instead of a `ClassHeatTime`.
+- A manual result upsert leaving `result_splits` or returning a split set.
+- A published participant with fewer or more than N splits, a cumulative N different from the total, or a split changing a place, tie or row order.

@@ -30,6 +30,16 @@ export type ParticipantLap = {
   timeMilliseconds: number;
 };
 
+/**
+ * One published split of a timed result (AD-12). `lapSplits` is additive next
+ * to the legacy `laps` array, which keeps its own shape and meaning.
+ */
+export type ParticipantLapSplit = {
+  lapNumber: number;
+  lapTimeMs: number;
+  cumulativeMs: number;
+};
+
 export type CreateEventLapRequest = {
   lapNumber: number;
   distanceKm: number;
@@ -137,6 +147,8 @@ export type EventParticipant = {
   place: number | null;
   format: EventFormatRef | null;
   laps: ParticipantLap[];
+  /** Published timing splits; absent for legacy results and race rows (AD-12). */
+  lapSplits?: ParticipantLapSplit[];
   status: string;
   isCupEligible: boolean;
   note: string | null;

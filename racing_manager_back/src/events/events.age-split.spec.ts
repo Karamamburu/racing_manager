@@ -3,6 +3,7 @@ import { EventStatusSyncService } from './event-status-sync.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RolesService } from '../auth/roles.service';
 import { UsersService } from '../users/users.service';
+import { TimingAttemptsReadService } from '../timing/timing-attempts-read.service';
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
 const START_ID = '22222222-2222-4222-8222-222222222222';
@@ -236,12 +237,16 @@ function makeHarness(options: HarnessOptions = {}) {
   const roles = { assertAdminAccess: jest.fn(), assertHasAnyRole: jest.fn() };
   const users = { findBySub: jest.fn() };
   const sync = { syncDueStatuses: jest.fn(() => Promise.resolve(undefined)) };
+  const timingAttempts = {
+    hasRunningAttemptForCategory: jest.fn(() => Promise.resolve(false)),
+  };
 
   const service = new EventsService(
     prisma as unknown as PrismaService,
     roles as unknown as RolesService,
     users as unknown as UsersService,
     sync as unknown as EventStatusSyncService,
+    timingAttempts as unknown as TimingAttemptsReadService,
   );
 
   return { service, prisma, event };
