@@ -70,7 +70,7 @@ Live manual timing of protocol categories: attempt lifecycle, number and tile ca
 
 - API: `racing_manager_back/src/timing/` (`timing.controller.ts`, `timing.service.ts`, `timing.repository.ts`, `timing.domain.ts`, `timing.dto.ts`, `timing.views.ts`, `timing.exception.filter.ts`), `src/admin/referee-role.*`.
 - Front: `racing_manager_front/src/features/timing/` (including `timingOffline.ts` and `TimingSendQueue.tsx`), `pages/TimingPage/`, the event-page `«Хронометраж»` entry and the `lapSplits` protocol column.
-- SQL: `racing_manager_db/db/migrate_manual_timing_2026_11_13.sql` (+ down), `migrate_referee_role_2026_11_13.sql` (+ down), `migrate_manual_timing_3_2026_11_14.sql` (+ down) and `migrate_manual_timing_3_2026_11_14_split_sequence_guard.sql` (+ down).
+- SQL: `racing_manager_db/db/migrate_manual_timing_2026_11_13.sql` (+ down), `migrate_manual_timing_2_2026_11_13.sql` (+ down), `migrate_referee_role_2026_11_13.sql` (+ down), `migrate_manual_timing_3_2026_11_14.sql` (+ down) and `migrate_manual_timing_3_2026_11_14_split_sequence_guard.sql` (+ down). The consolidated production patch is `migrate_timing_service_2026_11_17.sql`; it creates the final timing schema in one transaction and refuses to run when a timing schema already exists.
 
 ## Breakage signals
 

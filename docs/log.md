@@ -241,3 +241,7 @@ The number field's busy row, validation refusal and last-outcome status now shar
 ## 2026-11-17 — multi-stage race after numbers are issued
 
 Multi-stage race creation no longer waits for the event to start when the numbers are already issued. The UI offers and the API accepts creation when the registration window is closed **or** every active registration holds a start number; a missing active number still refuses it while the window is open. Updated the start-category and category-self-contained EARS/PRDs.
+
+## 2026-11-17 — consolidated timing production migration
+
+Added `migrate_timing_service_2026_11_17.sql`, one guarded transaction that creates the final timing schema (attempts, heat identity, marks, anonymous splits, receipts, capture lock, audits, result splits, result provenance and the REFEREE seed). It refuses a partial or already-applied timing schema. Validated on a disposable database from `init.sql`; the resulting timing schema matches the current local schema apart from column order.
