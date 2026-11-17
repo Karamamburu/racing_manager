@@ -1,4 +1,5 @@
 import type { EventDetails } from '../../shared/types/event';
+import { isActiveRegistrationStatus } from '../../shared/registrationStatus';
 
 function registrationClosesAt(
   event: Pick<EventDetails, 'eventDate' | 'registrationClose'>,
@@ -34,4 +35,26 @@ export function registrationClosedReason(
     return 'Регистрация закрыта';
   }
   return null;
+}
+
+/**
+ * Whether every active registration already holds a start number.
+ *
+ * The bracket needs a frozen field; this is the second accepted moment for it,
+ * alongside the closed registration window. A registration with no number (or
+ * a zero placeholder) means number issuance is still in progress.
+ */
+export function areActiveStartNumbersIssued(
+  registrations: ReadonlyArray<{ status: string; startNumber: number | null }>,
+): boolean {
+  const active = registrations.filter((registration) =>
+    isActiveRegistrationStatus(registration.status),
+  );
+  return (
+    active.length > 0 &&
+    active.every(
+      (registration) =>
+        registration.startNumber !== null && registration.startNumber > 0,
+    )
+  );
 }

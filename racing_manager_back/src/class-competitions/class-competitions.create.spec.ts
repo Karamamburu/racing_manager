@@ -260,6 +260,35 @@ describe('ClassCompetitionsService create timing guard', () => {
     expect(cms.createCompetition).toHaveBeenCalledTimes(1);
   });
 
+  it('creates before registration close when every active registration has a start number', async () => {
+    const { service, state, cms } = makeHarness();
+    state.event.registrationClose = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    state.event.eventDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+
+    const view = await service.create('admin-sub', EVENT_ID, CREATE_BODY);
+
+    expect(view.id).toBe('race-1');
+    expect(cms.createCompetition).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses before registration close when an active registration has no number', async () => {
+    const { service, state, cms } = makeHarness({
+      registrations: [
+        { id: REGISTRATION_A, startNumber: 1 },
+        { id: REGISTRATION_B, startNumber: null },
+      ],
+    });
+    state.event.registrationClose = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    state.event.eventDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+
+    await expect(
+      service.create('admin-sub', EVENT_ID, CREATE_BODY),
+    ).rejects.toThrow(
+      'Регистрация ещё не закрыта или не все стартовые номера выданы.',
+    );
+    expect(cms.createCompetition).not.toHaveBeenCalled();
+  });
+
   it('keeps the existing protocol-result guard and creates nothing', async () => {
     const { service, prisma, cms } = makeHarness({ protocolResults: 1 });
 

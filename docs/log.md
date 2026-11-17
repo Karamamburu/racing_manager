@@ -237,3 +237,7 @@ The send queue no longer appears for an entry whose request is still in flight. 
 ## 2026-11-16 — fixed feedback slot under the number field
 
 The number field's busy row, validation refusal and last-outcome status now share one fixed-height area. Pressing Enter no longer adds or removes a line that changes the top card height and pushes the category blocks down.
+
+## 2026-11-17 — multi-stage race after numbers are issued
+
+Multi-stage race creation no longer waits for the event to start when the numbers are already issued. The UI offers and the API accepts creation when the registration window is closed **or** every active registration holds a start number; a missing active number still refuses it while the window is open. Updated the start-category and category-self-contained EARS/PRDs.

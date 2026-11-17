@@ -43,6 +43,7 @@ import {
 import {
   isEventRegistrationOpen,
   isRegistrationWindowClosed,
+  areActiveStartNumbersIssued,
   registrationClosedReason,
 } from '../../features/registrations/registrationWindow';
 import { registrationsService } from '../../features/registrations/registrationsService';
@@ -1047,6 +1048,8 @@ export function EventPage() {
   const canRunBracket =
     canCreateEvents(session?.roles) && event.status !== 'CANCELLED' && !pastCompleted;
   const registrationClosed = isRegistrationWindowClosed(event);
+  const bracketFieldReady =
+    registrationClosed || areActiveStartNumbersIssued(registrations);
   const participantColumns = getParticipantColumns({
     canAssignNumbers,
     canAssignResults,
@@ -1640,7 +1643,7 @@ export function EventPage() {
                                       gender={gender}
                                       eventLaps={event.laps ?? []}
                                       canManage={canRunBracket}
-                                      registrationClosed={registrationClosed}
+                                      registrationClosed={bracketFieldReady}
                                       categoryHasResults={categoryHasResults(view.allRows) || categoryFinished}
                                       onChanged={refreshEvent}
                                     />
@@ -1658,7 +1661,7 @@ export function EventPage() {
                                         gender={gender}
                                         eventLaps={event.laps ?? []}
                                         canManage={canRunBracket}
-                                        registrationClosed={registrationClosed}
+                                        registrationClosed={bracketFieldReady}
                                         categoryHasResults={categoryHasResults(view.allRows) || categoryFinished}
                                         onChanged={refreshEvent}
                                       />

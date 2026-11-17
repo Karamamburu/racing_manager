@@ -26,6 +26,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   LISTED_REGISTRATION_STATUSES,
   RegistrationStatusCode,
+  isActiveRegistrationStatus,
 } from '../registrations/registration-status';
 import { competitionPlaces } from '../ranking/competition-places';
 import { categoryIsFinished } from '../events/category-finish';
@@ -244,7 +245,8 @@ export class ClassCompetitionsService {
     const parsed = parseCreateClassCompetitionBody(body);
     const event = await this.requireEvent(eventId);
     this.assertMutableEvent(event);
-    this.assertRegistrationClosed(event);
+    const registrationsBeforeCreate = await this.loadRegistrations(eventId);
+    this.assertRegistrationClosed(event, registrationsBeforeCreate);
 
     const start =
       parsed.startId == null
@@ -1400,12 +1402,27 @@ export class ClassCompetitionsService {
     }
   }
 
-  private assertRegistrationClosed(event: StoredEvent) {
+  private assertRegistrationClosed(
+    event: StoredEvent,
+    registrations: readonly StoredRegistration[],
+  ) {
+    const active = registrations.filter((registration) =>
+      isActiveRegistrationStatus(registration.status),
+    );
+    const allNumbersIssued =
+      active.length > 0 &&
+      active.every(
+        (registration) =>
+          registration.startNumber !== null && registration.startNumber > 0,
+      );
+    if (allNumbersIssued) return;
     const closesAt = event.registrationClose
       ? Math.min(event.registrationClose.getTime(), event.eventDate.getTime())
       : event.eventDate.getTime();
     if (Date.now() <= closesAt) {
-      throw new BadRequestException('Регистрация ещё не закрыта.');
+      throw new BadRequestException(
+        'Регистрация ещё не закрыта или не все стартовые номера выданы.',
+      );
     }
   }
 
