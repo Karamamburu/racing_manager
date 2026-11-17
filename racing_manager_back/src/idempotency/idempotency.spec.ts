@@ -5,8 +5,10 @@ import type { Server } from 'http';
 import { Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import request from 'supertest';
 import { PrismaService } from '../prisma/prisma.service';
+import { IDEMPOTENCY_IN_PROGRESS_CODE } from './idempotency.errors';
 import { IdempotencyInterceptor } from './idempotency.interceptor';
 import {
+  IDEMPOTENCY_IN_PROGRESS_TTL_MS,
   IDEMPOTENCY_RETENTION_MS,
   IdempotencyService,
   hashPayload,
@@ -223,13 +225,13 @@ describe('IdempotencyInterceptor', () => {
   const complete = jest.fn(() => Promise.resolve(undefined));
   const release = jest.fn(() => Promise.resolve(undefined));
 
-  async function createApp() {
+  async function createApp(service?: IdempotencyService) {
     const moduleRef = await Test.createTestingModule({
       controllers: [DemoController],
       providers: [
         {
           provide: IdempotencyService,
-          useValue: { claim, complete, release },
+          useValue: service ?? { claim, complete, release },
         },
         { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
       ],
@@ -307,7 +309,63 @@ describe('IdempotencyInterceptor', () => {
       .send({ a: 2 });
 
     expect(conflict.status).toBe(409);
+    expect(conflict.body).toEqual({
+      statusCode: 409,
+      message: 'Idempotency-Key was already used with a different payload.',
+      error: 'Conflict',
+    });
+    expect(conflict.body).not.toHaveProperty('code');
     expect(controller.calls).toBe(1);
+  });
+
+  it('returns the coded 409 while the same key is still being processed', async () => {
+    const server = await createApp();
+    claim.mockResolvedValueOnce({ kind: 'claimed' });
+    claim.mockResolvedValueOnce({ kind: 'conflict', reason: 'in_progress' });
+
+    await request(server).post('/demo').set('Idempotency-Key', 'key-1').send({
+      a: 1,
+    });
+    const conflict = await request(server)
+      .post('/demo')
+      .set('Idempotency-Key', 'key-1')
+      .send({ a: 1 });
+
+    expect(conflict.status).toBe(409);
+    expect(conflict.body).toEqual({
+      statusCode: 409,
+      code: IDEMPOTENCY_IN_PROGRESS_CODE,
+      message: 'A request with this Idempotency-Key is still in progress.',
+    });
+    expect(controller.calls).toBe(1);
+  });
+
+  it('reclaims a stale open claim and runs the handler again', async () => {
+    const prisma = new FakePrisma();
+    const server = await createApp(
+      new IdempotencyService(prisma as unknown as PrismaService),
+    );
+
+    const first = await request(server)
+      .post('/demo')
+      .set('Idempotency-Key', 'key-1')
+      .send({ a: 1 });
+    expect(first.status).toBe(201);
+
+    // Simulate a first request that claimed the key and never answered.
+    const row = [...prisma.rows.values()][0];
+    row.responseStatus = 0;
+    row.responseBody = null;
+    row.createdAt = new Date(Date.now() - IDEMPOTENCY_IN_PROGRESS_TTL_MS - 1);
+
+    const retried = await request(server)
+      .post('/demo')
+      .set('Idempotency-Key', 'key-1')
+      .send({ a: 1 });
+
+    expect(retried.status).toBe(201);
+    expect(retried.body).toEqual({ ok: true, call: 2 });
+    expect(controller.calls).toBe(2);
   });
 
   it('releases the claim when the handler fails', async () => {
