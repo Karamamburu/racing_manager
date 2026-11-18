@@ -23,13 +23,46 @@ function categoryKey(block: TimingCategoryBlockView): string {
 }
 
 /**
+ * Whether one protocol category is finished on the timing surface.
+ *
+ * The protocol category finish counts as before. Beyond it, a category is
+ * finished when its timing is closed: a category without races by its own
+ * `COMPLETED` attempt (the state the block shows as «Завершён»), and a category
+ * with races only when every race is done and every timeable category block is
+ * closed. A closed heat therefore never finishes a category whose race, stage
+ * or category attempt still runs, and `INCOMPLETE`/`CANCELLED` never count.
+ */
+function categoryTimingFinished(
+  blocks: readonly TimingCategoryBlockView[],
+): boolean {
+  const categoryBlocks = blocks.filter((block) => block.kind !== 'HEAT');
+  const heatBlocks = blocks.filter((block) => block.kind === 'HEAT');
+  if (categoryBlocks.some((block) => block.finished === true)) {
+    return true;
+  }
+  const timeableCategoryBlocks = categoryBlocks.filter((block) =>
+    block.participants.some(
+      (participant) => participant.excludedReason === null,
+    ),
+  );
+  if (timeableCategoryBlocks.length === 0 && heatBlocks.length === 0) {
+    return false;
+  }
+  return (
+    timeableCategoryBlocks.every((block) => block.state === 'COMPLETED') &&
+    heatBlocks.every((block) => block.finished === true)
+  );
+}
+
+/**
  * Counts the surface for the referee summary.
  *
- * A category is finished when its block says `finished`; not started when every
- * block of that category is still `NOT_STARTED`. Participants are unique
- * enrollments of the timeable roster: race-section rows are the same people as
- * their heat rows, and withdrawn or already-result rows are outside the timing
- * denominator. A participant finishes by holding all N passes.
+ * A category is finished when its protocol category is finished or its timing
+ * is closed by `categoryTimingFinished`; not started when every block of that
+ * category is still `NOT_STARTED`. Participants are unique enrollments of the
+ * timeable roster: race-section rows are the same people as their heat rows,
+ * and withdrawn or already-result rows are outside the timing denominator. A
+ * participant finishes by holding all N passes.
  */
 export function computeTimingMetrics(
   surface: TimingSurfaceView,
@@ -45,7 +78,7 @@ export function computeTimingMetrics(
   let categoriesFinished = 0;
   let categoriesNotStarted = 0;
   for (const blocks of categories.values()) {
-    if (blocks.some((block) => block.finished === true)) {
+    if (categoryTimingFinished(blocks)) {
       categoriesFinished += 1;
     }
     if (blocks.every((block) => block.state === 'NOT_STARTED')) {

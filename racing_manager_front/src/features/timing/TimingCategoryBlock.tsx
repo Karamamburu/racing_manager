@@ -32,12 +32,60 @@ const STATE_COLORS: Record<TimingCategoryState, string> = {
   CANCELLED: 'red',
 };
 
-/** The prompt shown once every participant of a running block holds N passes. */
-const READY_MESSAGES = {
-  CATEGORY:
-    'Все отсечки в гонке данной категории получены, её можно завершить',
-  HEAT: 'Все отсечки в заезде получены, его можно завершить',
-} as const;
+/** One shared header row height, so name, status and buttons line up (U-04). */
+const HEADER_HEIGHT = 24;
+
+/**
+ * The one reserved header status area of a block (U-01, U-02, U-03).
+ *
+ * The area is always rendered, so the unsent chip, the ready chip and the
+ * empty state all occupy the same single line and cost no layout. Its width is
+ * sized for «Отметок не отправлено: 999»; a four-digit count may grow beyond it
+ * and the title yields instead (S-10).
+ */
+const STATUS_AREA_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  flex: 'none',
+  height: HEADER_HEIGHT,
+  minWidth: 190,
+  whiteSpace: 'nowrap',
+  overflow: 'visible',
+};
+
+/** A header item that keeps its width while the title yields space. */
+const HEADER_ITEM_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  flex: 'none',
+  height: HEADER_HEIGHT,
+};
+
+/** The collapse control keeps the same square box as the header row. */
+const HEADER_COLLAPSE_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flex: 'none',
+  width: HEADER_HEIGHT,
+  height: HEADER_HEIGHT,
+  padding: 0,
+};
+
+/** The action cluster keeps its width and centers its buttons on the row. */
+const HEADER_ACTIONS_STYLE: CSSProperties = { flex: 'none' };
+
+/** The only shrinkable header item: the block title (U-04). */
+const HEADER_TITLE_STYLE: CSSProperties = {
+  display: 'inline-block',
+  flex: '0 1 auto',
+  minWidth: 0,
+  height: HEADER_HEIGHT,
+  lineHeight: `${HEADER_HEIGHT}px`,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
 
 /**
  * The unsent cue shares no colour with exclusion or a participant state (U-04).
@@ -49,18 +97,6 @@ const UNSENT_TAG_STYLE: CSSProperties = {
   borderStyle: 'dashed',
   color: '#391085',
   marginInlineEnd: 0,
-};
-
-const UNSENT_NOTICE_STYLE: CSSProperties = {
-  padding: '6px 10px',
-  borderWidth: 1,
-  borderStyle: 'dashed',
-  borderColor: '#722ed1',
-  borderRadius: 6,
-  backgroundColor: '#f9f0ff',
-  color: '#391085',
-  fontSize: 13,
-  lineHeight: 1.4,
 };
 
 /** The block marks the page derived from its device outbox; never a server fact. */
@@ -136,12 +172,18 @@ export function formatElapsed(elapsedMs: number): string {
 /**
  * Whether the block renders its Start control at all.
  *
- * A heat of a stage whose heats are not formed, or of a closed stage, offers no
- * Start: the block reason states why and the press is not available (F-12,
- * S-07). A category keeps its disabled Start, so a reader still sees the
- * control and the reason beside it.
+ * A block whose start has already been given has no Start to press, so a
+ * running or closed block hides the control instead of keeping it disabled. An
+ * unstarted block, and a block whose attempt was cancelled (the accepted
+ * re-time), keep it. A heat of a stage whose heats are not formed, or of a
+ * closed stage, offers no Start: the block reason states why and the press is
+ * not available (F-12, S-07). An unstarted category keeps its disabled Start,
+ * so a reader still sees the control and the reason beside it.
  */
 function showsStartControl(block: TimingCategoryBlockView): boolean {
+  if (block.state !== 'NOT_STARTED' && block.state !== 'CANCELLED') {
+    return false;
+  }
   if (block.kind !== 'HEAT') return true;
   return block.stageState === undefined || block.stageState === 'SEEDED';
 }
@@ -165,13 +207,16 @@ function genderClassName(gender: string): string | undefined {
  * its stage name, so it never reads as the category block it is grouped with
  * (FR-17). Start, tiles, pending finishes and the record behave identically.
  *
- * MANUAL-TIMING-4 (FR-10, FR-37, S-03): `pendingMarkCount` is the block total
- * and `pendingMarksByParticipant` carries each tile's own share, both derived by
- * the page from the device outbox. While the block total is positive the header
- * gains «Отметок не отправлено: N» and, once every capture is collected, the
- * ready-to-finish prompt is replaced by a sentence that the marks are still on
- * the device. The cue uses the tiles' violet accent and states the count in
- * words; state tags, tiles, block order and the capture controls stay untouched.
+ * MANUAL-TIMING-4 (FR-10, FR-37, S-03) / MANUAL-TIMING-6 (§2.3): `pendingMarkCount`
+ * is the block total and `pendingMarksByParticipant` carries each tile's own
+ * share, both derived by the page from the device outbox. One permanently
+ * reserved single-line area of the header holds the only block-level cue:
+ * «Отметок не отправлено: N» while the total is positive, «Можно завершить»
+ * once a running block has every capture collected and nothing is unsent, and
+ * nothing otherwise. The cue uses the tiles' violet accent and states the count
+ * in words; its accessible description carries the long explanation that the
+ * block cannot be closed while marks are unsent. State tags, tiles, block order
+ * and the capture controls stay untouched.
  */
 export function TimingCategoryBlock({
   block,
@@ -208,6 +253,14 @@ export function TimingCategoryBlock({
   const isHeat = block.kind === 'HEAT';
   const unsentMarkTotal = pendingMarks(pendingMarkCount);
   const hasUnsentMarks = unsentMarkTotal > 0;
+  // One area, one cue, one precedence: unsent wins, readiness needs a running
+  // block with every capture collected, and a closed block is never ready
+  // (§2.3 rule 4, S-01, S-02, S-03).
+  const showsReadyCue =
+    !hasUnsentMarks &&
+    block.state === 'RUNNING' &&
+    block.capturesComplete === true &&
+    block.finished !== true;
   // Race-captured participants are timeable in their heat blocks, not in the
   // category attempt. Render them as one compact note instead of a wall of
   // EXCLUDED RACE_SECTION tiles (MANUAL-TIMING-2 UX fix).
@@ -236,31 +289,63 @@ export function TimingCategoryBlock({
       size="small"
       className={genderClassName(block.gender)}
       title={
-        <Space wrap size={6} align="baseline">
+        <Space
+          wrap={false}
+          size={6}
+          align="center"
+          style={{
+            width: '100%',
+            flexWrap: 'nowrap',
+            minWidth: 0,
+            alignItems: 'center',
+          }}
+        >
           <Button
             type="text"
             size="small"
+            style={HEADER_COLLAPSE_STYLE}
             aria-expanded={!collapsed}
             aria-label={collapsed ? 'Развернуть блок' : 'Свернуть блок'}
             title={collapsed ? 'Развернуть блок' : 'Свернуть блок'}
             icon={collapsed ? <RightOutlined /> : <DownOutlined />}
             onClick={() => setCollapsed((current) => !current)}
           />
-          {isHeat ? <Tag color="geekblue">Заезд</Tag> : null}
-          <Typography.Text strong>{title}</Typography.Text>
-          <Tag color={STATE_COLORS[block.state]}>{STATE_LABELS[block.state]}</Tag>
-          {hasUnsentMarks ? (
-            <Tag style={UNSENT_TAG_STYLE}>
-              {`Отметок не отправлено: ${unsentMarkTotal}`}
+          {isHeat ? (
+            <Tag color="geekblue" style={HEADER_ITEM_STYLE}>
+              Заезд
             </Tag>
           ) : null}
+          <Typography.Text strong style={HEADER_TITLE_STYLE}>
+            {title}
+          </Typography.Text>
+          <Tag color={STATE_COLORS[block.state]} style={HEADER_ITEM_STYLE}>
+            {STATE_LABELS[block.state]}
+          </Tag>
+          {/* One permanently reserved single-line status area: the unsent chip,
+              the ready chip or nothing, never both (U-01, U-02, §2.3 rule 4). */}
+          <span data-testid="timing-block-status" style={STATUS_AREA_STYLE}>
+            {hasUnsentMarks ? (
+              <Tag
+                style={{ ...UNSENT_TAG_STYLE, ...HEADER_ITEM_STYLE }}
+                title={unsentNotice(unsentMarkTotal)}
+                aria-label={unsentNotice(unsentMarkTotal)}
+              >
+                {`Отметок не отправлено: ${unsentMarkTotal}`}
+              </Tag>
+            ) : showsReadyCue ? (
+              <Tag color="green" style={HEADER_ITEM_STYLE}>
+                Можно завершить
+              </Tag>
+            ) : null}
+          </span>
         </Space>
       }
       extra={
-        <Space wrap size={8}>
+        <Space wrap size={8} align="center" style={HEADER_ACTIONS_STYLE}>
           {showsStart ? (
             <Button
               type="primary"
+              size="small"
               icon={<PlayCircleOutlined />}
               disabled={!canStart}
               onClick={onStart}
@@ -269,12 +354,12 @@ export function TimingCategoryBlock({
             </Button>
           ) : null}
           {showsRecord ? (
-            <Button icon={<FileTextOutlined />} onClick={onOpenRecord}>
+            <Button size="small" icon={<FileTextOutlined />} onClick={onOpenRecord}>
               Запись
             </Button>
           ) : null}
           {showsTakeCapture ? (
-            <Button icon={<UnlockOutlined />} onClick={onTakeCapture}>
+            <Button size="small" icon={<UnlockOutlined />} onClick={onTakeCapture}>
               Взять захват
             </Button>
           ) : null}
@@ -314,69 +399,59 @@ export function TimingCategoryBlock({
               </Typography.Text>
             )}
             <Typography.Text>Участники: {visibleParticipants.length}</Typography.Text>
-        </Space>
+          </Space>
 
-        {raceSectionExcluded.length > 0 ? (
-          <Typography.Text type="secondary">
-            В заездах гонки: {raceSectionExcluded.length}. Время фиксируется в
-            блоках заездов ниже.
-          </Typography.Text>
-        ) : null}
+          {raceSectionExcluded.length > 0 ? (
+            <Typography.Text type="secondary">
+              В заездах гонки: {raceSectionExcluded.length}. Время фиксируется в
+              блоках заездов ниже.
+            </Typography.Text>
+          ) : null}
 
-        {block.finished ? (
-          <Alert
-            type="success"
-            showIcon
-            message={block.blockReason ?? FINISHED_FALLBACK}
-          />
-        ) : block.capturesComplete ? (
-          hasUnsentMarks ? (
-            // The block cannot claim it may be closed while this device still
-            // holds marks the server has not answered (S-03, FR-10).
-            <div style={UNSENT_NOTICE_STYLE}>
-              {unsentNotice(unsentMarkTotal)}
-            </div>
-          ) : (
+          {/* The block body states only the accepted long-lived facts. The
+              unsent count and the ready prompt live in the header status area,
+              so neither a sentence nor an alert is inserted here by a capture
+              (U-05, F-09, §2.6). */}
+          {block.finished ? (
             <Alert
-              type="info"
+              type="success"
               showIcon
-              message={isHeat ? READY_MESSAGES.HEAT : READY_MESSAGES.CATEGORY}
+              message={block.blockReason ?? FINISHED_FALLBACK}
             />
-          )
-        ) : block.blockReason && !allInRaces ? (
-          <Alert type="warning" showIcon message={block.blockReason} />
-        ) : null}
+          ) : block.blockReason && !allInRaces ? (
+            <Alert type="warning" showIcon message={block.blockReason} />
+          ) : null}
 
-        {block.pendingFinishes.length > 0 ? (
-          <Tag color="orange">
-            Непривязанных финишей: {block.pendingFinishes.length}
-          </Tag>
-        ) : null}
+          {block.pendingFinishes.length > 0 ? (
+            <Tag color="orange">
+              Непривязанных финишей: {block.pendingFinishes.length}
+            </Tag>
+          ) : null}
 
-        {visibleParticipants.length === 0 ? (
-          <Typography.Text type="secondary">
-            {allInRaces
-              ? 'Все участники категории проводятся по заездам.'
-              : 'В категории нет участников для хронометража'}
-          </Typography.Text>
-        ) : (
-          <div className="timing-participant-grid">
-            {visibleParticipants.map((participant) => (
-              <ParticipantTile
-                key={participant.enrollmentId}
-                participant={participant}
-                pendingMarks={pendingMarks(
-                  pendingMarksByParticipant.get(participant.enrollmentId),
-                )}
-                onClick={
-                  onParticipantClick === undefined
-                    ? undefined
-                    : () => onParticipantClick(participant)
-                }
-              />
-            ))}
-          </div>
-        )}
+          {visibleParticipants.length === 0 ? (
+            <Typography.Text type="secondary">
+              {allInRaces
+                ? 'Все участники категории проводятся по заездам.'
+                : 'В категории нет участников для хронометража'}
+            </Typography.Text>
+          ) : (
+            <div className="timing-participant-grid">
+              {visibleParticipants.map((participant) => (
+                <ParticipantTile
+                  key={participant.enrollmentId}
+                  participant={participant}
+                  pendingMarks={pendingMarks(
+                    pendingMarksByParticipant.get(participant.enrollmentId),
+                  )}
+                  onClick={
+                    onParticipantClick === undefined
+                      ? undefined
+                      : () => onParticipantClick(participant)
+                  }
+                />
+              ))}
+            </div>
+          )}
         </Space>
       )}
     </Card>

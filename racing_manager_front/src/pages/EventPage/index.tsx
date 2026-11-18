@@ -113,17 +113,27 @@ function reachedStageLabel(stage: ClassCompetitionStage): string {
   return REACHED_STAGE_LABELS[stage.kind] ?? stage.label ?? stage.stageId;
 }
 
+type ReachedStage = {
+  label: string;
+  laps: EventParticipant['laps'];
+  lapSplits: ParticipantLapSplit[];
+};
+
 function lastReachedStage(
   competition: ClassCompetitionView,
   registrationId: string,
-): { label: string; laps: EventParticipant['laps'] } | null {
-  let reached: { label: string; laps: EventParticipant['laps'] } | null = null;
+): ReachedStage | null {
+  let reached: ReachedStage | null = null;
   for (const stage of competition.stages) {
     if (stage.status === 'PENDING') continue;
     for (const heat of stage.heats) {
       const slot = heat.slots.find((item) => item.registrationId === registrationId);
       if (!slot) continue;
-      reached = { label: reachedStageLabel(stage), laps: slot.laps };
+      reached = {
+        label: reachedStageLabel(stage),
+        laps: slot.laps,
+        lapSplits: slot.lapSplits ?? [],
+      };
     }
   }
   return reached;
@@ -277,6 +287,12 @@ function renderedProtocolBlockKeys(
 
 type ProtocolParticipant = EventParticipant & { reachedStage?: string | null };
 
+/**
+ * FR-44 in a multi-stage race: the protocol row shows the lap times and the
+ * splits of the last stage the participant took part in, exactly like the
+ * «Этап гонки» column names it. A participant eliminated in 1/4 therefore keeps
+ * the splits of that quarterfinal instead of the (absent) enrollment splits.
+ */
 function rowsWithClassification(
   rows: EventParticipant[],
   competition: ClassCompetitionView | null,
@@ -298,6 +314,7 @@ function rowsWithClassification(
             }
           : {}),
         laps: reached?.laps ?? [],
+        lapSplits: reached?.lapSplits ?? [],
         reachedStage: reached?.label ?? null,
       };
     })
@@ -345,8 +362,9 @@ function formatSplitTime(milliseconds: number): string {
 
 /**
  * AD-12/FR-44: timing-published splits render inside the participant's own row.
- * A row without `lapSplits` — a hand-entered total, a race row or a legacy
- * result — renders nothing here, and the legacy `laps` array is not read.
+ * A row without `lapSplits` — a hand-entered total or a legacy result — renders
+ * nothing here, and the legacy `laps` array is not read. A race row carries the
+ * splits of its last reached stage, resolved in `rowsWithClassification`.
  *
  * Each lap is a small grid: `N - lap time` on the first line and the cumulative
  * time directly under the lap time on the second. Laps sit side by side and

@@ -782,6 +782,7 @@ function slotView(
     timeMilliseconds: null,
     resultStatus: null,
     laps: [],
+    lapSplits: [],
     ...overrides,
   };
 }

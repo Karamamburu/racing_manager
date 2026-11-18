@@ -1,3 +1,5 @@
+import type { ParticipantLapSplit } from '../../shared/types/event';
+
 export type ClassCompetitionStatus = 'DRAFT' | 'IN_PROGRESS' | 'DONE';
 
 export type ClassStageStatus = 'PENDING' | 'SEEDED' | 'COMPLETED';
@@ -22,6 +24,8 @@ export type ClassHeatSlot = {
   timeMilliseconds: number | null;
   resultStatus: HeatResultStatus | null;
   laps: Array<{ lapNumber: number; timeMilliseconds: number }>;
+  /** Published splits of this heat time; empty when only a total was stored. */
+  lapSplits?: ParticipantLapSplit[];
 };
 
 export type ClassCompetitionStage = {

@@ -91,6 +91,34 @@ type StoredHeatTime = {
   }>;
 };
 
+/**
+ * One published split of a heat time: the lap time and the cumulative elapsed
+ * value of that lap. The heat stores one `ClassHeatLapTime` per lap only, so the
+ * cumulative value is the running sum in `lapNumber` order and the last split
+ * equals the heat total.
+ */
+type ClassHeatLapSplit = {
+  lapNumber: number;
+  lapTimeMs: number;
+  cumulativeMs: number;
+};
+
+export function heatLapSplits(
+  laps: StoredHeatTime['laps'],
+): ClassHeatLapSplit[] {
+  let cumulativeMs = 0;
+  return [...laps]
+    .sort((a, b) => a.eventLap.lapNumber - b.eventLap.lapNumber)
+    .map((lap) => {
+      cumulativeMs += lap.timeMilliseconds;
+      return {
+        lapNumber: lap.eventLap.lapNumber,
+        lapTimeMs: lap.timeMilliseconds,
+        cumulativeMs,
+      };
+    });
+}
+
 type StoredClassCompetition = {
   id: string;
   eventId: string;
@@ -191,6 +219,7 @@ export type ClassCompetitionView = {
         timeMilliseconds: number | null;
         resultStatus: string | null;
         laps: Array<{ lapNumber: number; timeMilliseconds: number }>;
+        lapSplits: ClassHeatLapSplit[];
       }>;
     }>;
     entries: Array<{
@@ -1558,6 +1587,7 @@ export class ClassCompetitionsService {
               lapNumber: lap.eventLap.lapNumber,
               timeMilliseconds: lap.timeMilliseconds,
             })),
+            lapSplits: heatLapSplits(stored?.laps ?? []),
           };
         }),
       })),

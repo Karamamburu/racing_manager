@@ -1,33 +1,111 @@
-import { SendOutlined } from '@ant-design/icons';
-import { Button, Card, Space, Tag, Typography } from 'antd';
+import { CloseOutlined, SendOutlined } from '@ant-design/icons';
+import { Button, Card, Tag, Typography } from 'antd';
 import type { CSSProperties } from 'react';
 import { formatTimingClock } from './ParticipantTile';
 import type { TimingOfflineEntryView } from './timingOffline';
 
 /**
- * The send queue of one device (FR-11, FR-12, FR-13).
+ * The send queue of one device, as the content of the unsent overlay
+ * (FR-09, FR-11, FR-12, FR-14, FR-24).
+ *
+ * The component is rendered inside the non-modal popover the page owns; it
+ * never renders in page flow and it never returns `null`. Its frame keeps its
+ * position and width while its rows change: the four unsent figures, the
+ * connection line, the row area and the action row are all permanently
+ * rendered at a fixed height, so a capture that queues, starts sending or
+ * drains cannot resize the overlay (S-05, S-07, F-05, F-08).
  *
  * A refusal is not a queue row: the hook reports the refusal once and removes
  * the entry. A capture already on its way is not a row either: the page states
- * it as a sending figure, so this component lists the waiting entries only, in
- * the capture order the derived view gives them, with a fixed area whose rows
- * scroll inside it so a capture or an empty queue never moves the number field
- * or a block (S-01, S-02, S-04, S-06).
+ * it as the «Отправляется: K» figure, so this component lists the waiting
+ * entries only, in the capture order the derived view gives them (E-06, F-05).
  *
- * While every unsent entry is sending there is nothing to manage, so the queue
- * is absent instead of an empty card that would flash on an ordinary press
- * (S-02). With nothing unsent at all it keeps its quiet «Всё отправлено» state
- * (MANUAL-TIMING-4, FR-12).
+ * While every unsent entry is sending there is no row to manage, but the frame
+ * stays and the send action stays available (S-05). With nothing unsent at all
+ * the row area states «Всё отправлено» and the action row keeps its height with
+ * no button in it (FR-25).
  */
 
-/** Minimum height of the entry area when its column has no spare height. */
-export const TIMING_SEND_QUEUE_AREA_HEIGHT = 104;
+/** Exact height of the waiting-row area; it never grows with its rows. */
+export const TIMING_SEND_QUEUE_AREA_HEIGHT = 260;
 
 const TITLE = 'Очередь отправки';
 const LIST_LABEL = 'Очередь отправки';
 const ALL_SENT_LABEL = 'Всё отправлено';
 const OFFLINE_LABEL = 'Нет связи с сервером';
 const UNSENT_LABEL = 'не отправлено';
+const FRAME_TEST_ID = 'timing-send-queue-frame';
+const FIGURES_TEST_ID = 'timing-send-queue-figures';
+const LIST_TEST_ID = 'timing-send-queue-list-area';
+
+/** Width of the overlay frame, never wider than the viewport allows. */
+export const TIMING_SEND_QUEUE_FRAME_WIDTH = 'min(480px, calc(100vw - 32px))';
+
+/** Two lines of 16 px: the figures never wrap and never move the frame. */
+const FIGURES_HEIGHT = 34;
+/** The connection line keeps its place with or without a message. */
+const OFFLINE_LINE_HEIGHT = 18;
+/** The action row keeps its height whether the button is offered or not. */
+const ACTION_ROW_HEIGHT = 40;
+
+const FRAME_STYLE: CSSProperties = {
+  width: TIMING_SEND_QUEUE_FRAME_WIDTH,
+};
+
+const BODY_STYLE: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+};
+
+const FIGURES_STYLE: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  height: FIGURES_HEIGHT,
+  overflow: 'hidden',
+};
+
+const FIGURE_LINE_STYLE: CSSProperties = {
+  fontSize: 16,
+  lineHeight: '16px',
+  height: 16,
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+};
+
+const OFFLINE_LINE_STYLE: CSSProperties = {
+  height: OFFLINE_LINE_HEIGHT,
+  lineHeight: `${OFFLINE_LINE_HEIGHT}px`,
+  fontSize: 12,
+  overflow: 'hidden',
+};
+
+const LIST_STYLE: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+  height: TIMING_SEND_QUEUE_AREA_HEIGHT,
+  overflowY: 'auto',
+  margin: 0,
+  padding: 0,
+  listStyle: 'none',
+};
+
+const ACTION_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  height: ACTION_ROW_HEIGHT,
+  flexShrink: 0,
+};
+
+const EMPTY_ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flex: '1 1 auto',
+  minHeight: 0,
+};
 
 const UNSENT_TAG_STYLE: CSSProperties = {
   backgroundColor: '#f9f0ff',
@@ -35,27 +113,6 @@ const UNSENT_TAG_STYLE: CSSProperties = {
   borderStyle: 'dashed',
   color: '#391085',
   marginInlineEnd: 0,
-};
-
-const LIST_STYLE: CSSProperties = {
-  flex: 1,
-  minHeight: TIMING_SEND_QUEUE_AREA_HEIGHT,
-  overflowY: 'auto',
-  margin: 0,
-  padding: 0,
-  listStyle: 'none',
-  display: 'grid',
-  gridTemplateColumns: 'minmax(0, 1fr)',
-  gridAutoRows: 'min-content',
-  alignContent: 'start',
-  gap: 6,
-};
-
-const EMPTY_ROW_STYLE: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  height: '100%',
 };
 
 const ROW_CARD_STYLE: CSSProperties = {
@@ -73,17 +130,36 @@ const ROW_CARD_STYLE: CSSProperties = {
 export interface TimingSendQueueProps {
   /**
    * Unsent entries of every kind, in the capture order of the outbox. An entry
-   * with `isSending` is a page figure, never a row (S-02).
+   * with `isSending` is a page figure, never a row (E-06, F-05).
    */
   entries: TimingOfflineEntryView[];
   /** Unsent entries of every kind; the page figure «Не отправлено: N». */
   unsentEntries: number;
+  /**
+   * Unsent entries whose delivery is already in flight; «Отправляется: K».
+   * The page derives it; the overlay only states it (FR-24).
+   *
+   * The four figure fields below read `0` when a caller omits them. That
+   * default exists only so the timing page, which still renders this content
+   * in page flow until Wave 3 owns the popover, keeps compiling; Wave 3 passes
+   * all of them from `deriveTimingOfflineView`.
+   */
+  sendingEntries?: number;
+  /** Unsent entries still waiting for a delivery; «Ожидают отправки: K». */
+  waitingEntries?: number;
+  /** Marks among the waiting entries; «из них отметок: M». */
+  pendingMarks?: number;
   /** False while the device has no server answer path (AS-4). */
   isOnline: boolean;
   /** True while the page sends the queue; the offer is busy and inert then. */
   isSending: boolean;
-  /** Asks the page to replay the queue now (FR-13). */
+  /** Asks the page to replay the queue now (FR-12). */
   onSendNow: () => Promise<void>;
+  /**
+   * Asks the page to close the overlay that owns this content (FR-14).
+   * The page wires the popover in Wave 3 of MANUAL-TIMING-6.
+   */
+  onClose?: () => void;
 }
 
 function wholeCount(value: number): number {
@@ -177,24 +253,81 @@ function EntryRow({ entry }: { entry: TimingOfflineEntryView }) {
 export function TimingSendQueue({
   entries,
   unsentEntries,
+  sendingEntries = 0,
+  waitingEntries = 0,
+  pendingMarks = 0,
   isOnline,
   isSending,
   onSendNow,
+  onClose = () => {},
 }: TimingSendQueueProps) {
-  const count = wholeCount(unsentEntries);
+  const unsentCount = wholeCount(unsentEntries);
+  const sendingCount = wholeCount(sendingEntries);
+  const waitingCount = wholeCount(waitingEntries);
+  const marksCount = wholeCount(pendingMarks);
   // The rows the referee can still manage: everything the server has not
-  // answered and the outbox is not already delivering (S-02).
-  const waitingEntries = entries.filter((entry) => !entry.isSending);
-  const hasUnanswered = count > 0 || entries.length > 0;
-  if (hasUnanswered && waitingEntries.length === 0) return null;
+  // answered and the outbox is not already delivering (E-06, F-05).
+  const waitingRows = entries.filter((entry) => !entry.isSending);
+  const everyCaptureSent = unsentCount === 0;
+
   return (
-    <Card size="small" type="inner" title={TITLE}>
-      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-        {count > 0 ? (
-          <Space wrap size={8} align="center">
-            <Tag color="purple" style={{ marginInlineEnd: 0 }}>
-              Не отправлено: {count}
-            </Tag>
+    <Card
+      size="small"
+      type="inner"
+      title={TITLE}
+      style={FRAME_STYLE}
+      data-testid={FRAME_TEST_ID}
+      extra={
+        <Button
+          type="text"
+          aria-label="Закрыть очередь отправки"
+          icon={<CloseOutlined />}
+          onClick={onClose}
+        />
+      }
+    >
+      <div style={BODY_STYLE}>
+        {/* The four page figures, always both lines at 16 px (FR-24). */}
+        <div data-testid={FIGURES_TEST_ID} style={FIGURES_STYLE}>
+          <div style={FIGURE_LINE_STYLE}>
+            {`Не отправлено: ${unsentCount} · Отправляется: ${sendingCount}`}
+          </div>
+          <div style={FIGURE_LINE_STYLE}>
+            {`Ожидают отправки: ${waitingCount} · из них отметок: ${marksCount}`}
+          </div>
+        </div>
+
+        {/* Reserved line: the connection hint appears without moving anything. */}
+        <div style={OFFLINE_LINE_STYLE}>
+          {!isOnline && waitingCount > 0 ? (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {OFFLINE_LABEL}
+            </Typography.Text>
+          ) : null}
+        </div>
+
+        {/* One fixed row area: it scrolls instead of resizing the frame (S-07). */}
+        <ul
+          aria-label={LIST_LABEL}
+          data-testid={LIST_TEST_ID}
+          style={LIST_STYLE}
+        >
+          {waitingRows.length === 0 ? (
+            everyCaptureSent ? (
+              <li role="status" style={EMPTY_ROW_STYLE}>
+                <Typography.Text type="secondary">
+                  {ALL_SENT_LABEL}
+                </Typography.Text>
+              </li>
+            ) : null
+          ) : (
+            waitingRows.map((entry) => <EntryRow key={entry.id} entry={entry} />)
+          )}
+        </ul>
+
+        {/* The action row never changes height, with or without the offer. */}
+        <div style={ACTION_ROW_STYLE}>
+          {everyCaptureSent ? null : (
             <Button
               size="small"
               icon={<SendOutlined />}
@@ -206,27 +339,9 @@ export function TimingSendQueue({
             >
               Отправить сейчас
             </Button>
-          </Space>
-        ) : null}
-
-        {!isOnline && waitingEntries.length > 0 ? (
-          <Typography.Text type="secondary">{OFFLINE_LABEL}</Typography.Text>
-        ) : null}
-
-        <ul aria-label={LIST_LABEL} style={LIST_STYLE}>
-          {waitingEntries.length === 0 ? (
-            <li style={EMPTY_ROW_STYLE}>
-              <Typography.Text type="secondary">
-                {ALL_SENT_LABEL}
-              </Typography.Text>
-            </li>
-          ) : (
-            waitingEntries.map((entry) => (
-              <EntryRow key={entry.id} entry={entry} />
-            ))
           )}
-        </ul>
-      </Space>
+        </div>
+      </div>
     </Card>
   );
 }

@@ -669,6 +669,176 @@ describe('EventPage protocol splits', () => {
   });
 });
 
+const raceCompetition: ClassCompetitionView = {
+  id: 'race-1',
+  eventId: 'event-1',
+  startId: 'start-a',
+  formatId: 1,
+  gender: 'M',
+  sectionId: 'CATEGORY_1',
+  sectionKind: 'CATEGORY',
+  title: 'Категория 1',
+  subtitle: null,
+  targetGroupIds: ['AGE_24_40'],
+  targetWholeCategory: false,
+  capturedEnrollmentIds: [],
+  youngestBound: 24,
+  status: 'DONE',
+  stages: [],
+  classification: [],
+};
+
+/**
+ * A participant knocked out in 1/4 keeps the quarterfinal as «Этап гонки», so
+ * the «Отсечки» column must read that same stage's splits, not the absent
+ * enrollment splits.
+ */
+const reachedStageRows: EventParticipant[] = [
+  participant({
+    id: 'race-quarter-row',
+    enrollmentId: 'race-quarter-enrollment',
+    fullName: 'Иван Четвертьфиналов',
+    raceId: 'race-reached',
+    sectionId: 'CATEGORY_1',
+    startNumber: 1,
+  }),
+  participant({
+    id: 'race-manual-row',
+    enrollmentId: 'race-manual-enrollment',
+    fullName: 'Пётр Ручной Этап',
+    raceId: 'race-reached',
+    sectionId: 'CATEGORY_1',
+    startNumber: 2,
+  }),
+];
+
+const reachedStageCompetition: ClassCompetitionView = {
+  ...raceCompetition,
+  id: 'race-reached',
+  stages: [
+    {
+      stageId: 'stage-quarter',
+      kind: 'QUARTERFINAL',
+      label: '1/4',
+      status: 'COMPLETED',
+      sourceStageId: null,
+      qualifierStatus: null,
+      heats: [
+        {
+          heatNumber: 1,
+          slots: [
+            {
+              position: 1,
+              registrationId: 'race-quarter-row',
+              firstName: 'Иван',
+              lastName: 'Четвертьфиналов',
+              startNumber: 1,
+              registrationStatus: 'REGISTERED',
+              timeMilliseconds: 22_000,
+              resultStatus: 'OK',
+              laps: [
+                { lapNumber: 1, timeMilliseconds: 10_000 },
+                { lapNumber: 2, timeMilliseconds: 12_000 },
+              ],
+              lapSplits: [
+                { lapNumber: 1, lapTimeMs: 10_000, cumulativeMs: 10_000 },
+                { lapNumber: 2, lapTimeMs: 12_000, cumulativeMs: 22_000 },
+              ],
+            },
+            {
+              position: 2,
+              registrationId: 'race-manual-row',
+              firstName: 'Пётр',
+              lastName: 'Ручной Этап',
+              startNumber: 2,
+              registrationStatus: 'REGISTERED',
+              timeMilliseconds: 30_000,
+              resultStatus: 'OK',
+              laps: [{ lapNumber: 1, timeMilliseconds: 30_000 }],
+              lapSplits: [],
+            },
+          ],
+        },
+      ],
+      entries: [],
+    },
+    {
+      stageId: 'stage-semi',
+      kind: 'SEMIFINAL',
+      label: '1/2',
+      status: 'COMPLETED',
+      sourceStageId: 'stage-quarter',
+      qualifierStatus: 'QQ',
+      heats: [
+        {
+          heatNumber: 1,
+          slots: [
+            {
+              position: 1,
+              registrationId: 'someone-else',
+              firstName: 'Семён',
+              lastName: 'Финалист',
+              startNumber: 3,
+              registrationStatus: 'REGISTERED',
+              timeMilliseconds: 20_000,
+              resultStatus: 'OK',
+              laps: [{ lapNumber: 1, timeMilliseconds: 20_000 }],
+              lapSplits: [
+                { lapNumber: 1, lapTimeMs: 20_000, cumulativeMs: 20_000 },
+              ],
+            },
+          ],
+        },
+      ],
+      entries: [],
+    },
+  ],
+  classification: [
+    { registrationId: 'race-quarter-row', place: 2, timeMilliseconds: 22_000 },
+    { registrationId: 'race-manual-row', place: 3, timeMilliseconds: 30_000 },
+  ],
+};
+
+describe('EventPage multi-stage protocol splits', () => {
+  function renderReachedStage() {
+    mockSession(reader);
+    mockEvent(reachedStageRows);
+    mockCompetitions([reachedStageCompetition]);
+    renderEventPage();
+  }
+
+  it('shows the splits of the last stage the participant reached', () => {
+    renderReachedStage();
+
+    const row = protocolRow('Иван Четвертьфиналов');
+
+    expect(within(row).getByText('1/4')).not.toBeNull();
+
+    const first = within(row).getByLabelText(
+      'Круг 1 из 2: круг 00:00:10.000, итог 00:00:10.000',
+    );
+    expect(within(first).getByText('1 -')).not.toBeNull();
+    expect(within(first).getAllByText('00:00:10.000')).toHaveLength(2);
+
+    const second = within(row).getByLabelText(
+      'Круг 2 из 2: круг 00:00:12.000, итог 00:00:22.000',
+    );
+    expect(within(second).getByText('2 -')).not.toBeNull();
+    expect(within(second).getByText('00:00:12.000')).not.toBeNull();
+    expect(within(second).getByText('00:00:22.000')).not.toBeNull();
+  });
+
+  it('shows no split for a reached stage that stored only lap times', () => {
+    renderReachedStage();
+
+    const row = protocolRow('Пётр Ручной Этап');
+
+    expect(within(row).getByText('1/4')).not.toBeNull();
+    expect(within(row).queryByLabelText(/^Круг \d/)).toBeNull();
+    expect(within(row).queryByText(/^1 -$/)).toBeNull();
+  });
+});
+
 const administrator = {
   authenticated: true,
   userId: 'admin-1',
@@ -704,24 +874,6 @@ const siblingRows: EventParticipant[] = [
   }),
 ];
 
-const raceCompetition: ClassCompetitionView = {
-  id: 'race-1',
-  eventId: 'event-1',
-  startId: 'start-a',
-  formatId: 1,
-  gender: 'M',
-  sectionId: 'CATEGORY_1',
-  sectionKind: 'CATEGORY',
-  title: 'Категория 1',
-  subtitle: null,
-  targetGroupIds: ['AGE_24_40'],
-  targetWholeCategory: false,
-  capturedEnrollmentIds: [],
-  youngestBound: 24,
-  status: 'DONE',
-  stages: [],
-  classification: [],
-};
 
 const raceRows: EventParticipant[] = [
   participant({

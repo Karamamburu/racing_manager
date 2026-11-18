@@ -10,6 +10,7 @@ import {
 import type { ComponentProps } from 'react';
 import {
   TIMING_SEND_QUEUE_AREA_HEIGHT,
+  TIMING_SEND_QUEUE_FRAME_WIDTH,
   TimingSendQueue,
 } from './TimingSendQueue';
 import {
@@ -20,20 +21,22 @@ import {
 } from './timingOffline';
 
 /**
- * MANUAL-TIMING-4, Wave 6: the send queue of the timing page.
+ * MANUAL-TIMING-6, Wave 2: the content of the on-demand unsent overlay.
  *
- * The queue lists only entries the device recorded and the server has not
- * answered (FR-12). A refusal is reported once and removed by the hook, so it
- * never becomes a queue row. The figures come from the page ("Не отправлено: N"
- * counts entries, never marks).
+ * The overlay lists only entries the device recorded and the server has not
+ * answered, and only the ones still waiting (FR-09, FR-11). A refusal is
+ * reported once and removed by the hook, so it never becomes a row. A capture
+ * whose delivery is in flight is a page figure — «Отправляется: K» — and never
+ * a row (E-06, F-05).
+ *
+ * The frame never disappears and never resizes: the four figures, the
+ * connection line, the row area and the action row are permanently rendered at
+ * a fixed height, so opening the overlay, queueing a capture, starting its
+ * delivery or draining the queue changes no geometry (S-05, S-07, F-08).
  *
  * Every state word the referee reads is present in text, so no cue depends on
  * colour (U-04, FR-09): the unsent row says «не отправлено», and an empty queue
  * says «Всё отправлено».
- *
- * MANUAL-TIMING-5, Wave 7: the queue lists waiting entries only. A capture the
- * outbox is already delivering is a page figure, not a row, and while every
- * unsent entry is sending the queue is absent (S-01, S-02).
  */
 
 /** A local-wall-clock instant, so the rendered `HH:mm:ss.SSS` is timezone-safe. */
@@ -129,16 +132,82 @@ function props(
   return {
     entries: [],
     unsentEntries: 0,
+    sendingEntries: 0,
+    waitingEntries: 0,
+    pendingMarks: 0,
     isOnline: true,
     isSending: false,
     onSendNow: vi.fn(() => Promise.resolve()),
+    onClose: vi.fn(),
     ...overrides,
   };
 }
 
+/** The fixed-width overlay frame the page's popover owns. */
+function frame(): HTMLElement {
+  return screen.getByTestId('timing-send-queue-frame');
+}
 
+/** The permanently rendered figure block: two 16 px lines, never taller. */
+function figures(): HTMLElement {
+  return screen.getByTestId('timing-send-queue-figures');
+}
+
+/** The waiting-row area: one fixed height across every state (S-07). */
 function queueArea(): HTMLElement {
   return screen.getByRole('list', { name: 'Очередь отправки' });
+}
+
+function rows(): HTMLElement[] {
+  return within(queueArea()).queryAllByRole('listitem');
+}
+
+interface FigureText {
+  unsent: number;
+  sending: number;
+  waiting: number;
+  marks: number;
+}
+
+/** Asserts the two figure lines exactly, wording and order included (FR-24). */
+function expectFigures({
+  unsent,
+  sending,
+  waiting,
+  marks,
+}: FigureText): void {
+  const lines = Array.from(figures().children);
+  expect(lines).toHaveLength(2);
+  expect(lines[0].textContent).toBe(
+    `Не отправлено: ${unsent} · Отправляется: ${sending}`,
+  );
+  expect(lines[1].textContent).toBe(
+    `Ожидают отправки: ${waiting} · из них отметок: ${marks}`,
+  );
+}
+
+/** The frame and the row area keep one geometry whatever the rows do. */
+function expectStableFrame(): void {
+  expectOverlayWidth();
+  expect(figures().style.height).toBe('34px');
+  const area = queueArea();
+  expect(area.tagName).toBe('UL');
+  expect(screen.getByTestId('timing-send-queue-list-area')).toBe(area);
+  expect(area.style.height).toBe('260px');
+  expect(area.style.height).toBe(`${TIMING_SEND_QUEUE_AREA_HEIGHT}px`);
+  expect(area.style.overflowY).toBe('auto');
+}
+
+/**
+ * jsdom re-serialises the `calc()` arithmetic of the frame width, so the DOM
+ * assertion states the two constraints the width combines (S-07).
+ */
+function expectOverlayWidth(): void {
+  expect(TIMING_SEND_QUEUE_FRAME_WIDTH).toBe('min(480px, calc(100vw - 32px))');
+  const width = frame().style.width;
+  expect(width.startsWith('min(480px,')).toBe(true);
+  expect(width).toContain('100vw');
+  expect(width).toContain('-32px');
 }
 
 /**
@@ -152,10 +221,6 @@ function colour(value: string): string {
     hex[3],
     16,
   )})`;
-}
-
-function rows(): HTMLElement[] {
-  return within(queueArea()).getAllByRole('listitem');
 }
 
 beforeAll(() => {
@@ -176,6 +241,142 @@ beforeAll(() => {
 
 afterEach(cleanup);
 
+describe('TimingSendQueue frame', () => {
+  it('keeps one frame and one fixed row area with nothing unsent', () => {
+    render(<TimingSendQueue {...props()} />);
+
+    expect(screen.getByText('Очередь отправки')).not.toBeNull();
+    expect(frame()).not.toBeNull();
+    expectStableFrame();
+    expectFigures({ unsent: 0, sending: 0, waiting: 0, marks: 0 });
+    expect(screen.getByText('Всё отправлено')).not.toBeNull();
+    expect(rows()).toHaveLength(0);
+  });
+
+  it('keeps the frame while every unsent capture is in flight', () => {
+    render(
+      <TimingSendQueue
+        {...props({
+          entries: [sendingEntry({ id: 'sent-14' })],
+          unsentEntries: 1,
+          sendingEntries: 1,
+          waitingEntries: 0,
+        })}
+      />,
+    );
+
+    // No card disappears and no row flashes for a capture already on its way
+    // (S-05, F-05): the frame, its figures and its send action stay.
+    expectStableFrame();
+    expectFigures({ unsent: 1, sending: 1, waiting: 0, marks: 0 });
+    expect(rows()).toHaveLength(0);
+    expect(screen.queryByText('Всё отправлено')).toBeNull();
+  });
+
+  it('keeps the frame and the fixed row area with forty waiting rows', () => {
+    const many = Array.from({ length: 40 }, (_, index) =>
+      entry({ id: `entry-${index}`, startNumber: index + 1 }),
+    );
+    render(
+      <TimingSendQueue
+        {...props({
+          entries: many,
+          unsentEntries: 40,
+          waitingEntries: 40,
+          pendingMarks: 40,
+        })}
+      />,
+    );
+
+    // A long queue scrolls inside the same 260 px area, so the overlay never
+    // grows on the page (S-07, F-08).
+    expectStableFrame();
+    expectFigures({ unsent: 40, sending: 0, waiting: 40, marks: 40 });
+    expect(rows()).toHaveLength(40);
+  });
+
+  it('keeps the frame geometry identical across empty, in-flight and full states', () => {
+    const { rerender } = render(<TimingSendQueue {...props()} />);
+    const emptyWidth = frame().style.width;
+    const emptyHeight = queueArea().style.height;
+    expectStableFrame();
+
+    rerender(
+      <TimingSendQueue
+        {...props({
+          entries: [sendingEntry()],
+          unsentEntries: 1,
+          sendingEntries: 1,
+        })}
+      />,
+    );
+    expect(frame().style.width).toBe(emptyWidth);
+    expect(queueArea().style.height).toBe(emptyHeight);
+    expectStableFrame();
+
+    rerender(
+      <TimingSendQueue
+        {...props({
+          entries: [entry(), anonymousSplit()],
+          unsentEntries: 2,
+          waitingEntries: 2,
+          pendingMarks: 1,
+        })}
+      />,
+    );
+    expect(frame().style.width).toBe(emptyWidth);
+    expect(queueArea().style.height).toBe(emptyHeight);
+    expectStableFrame();
+  });
+
+  it('closes the overlay from its own close control', () => {
+    const onClose = vi.fn();
+    render(<TimingSendQueue {...props({ onClose })} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Закрыть очередь отправки' }),
+    );
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('TimingSendQueue figures', () => {
+  it('states the four page figures exactly', () => {
+    render(
+      <TimingSendQueue
+        {...props({
+          entries: [entry(), anonymousSplit()],
+          unsentEntries: 5,
+          sendingEntries: 2,
+          waitingEntries: 3,
+          pendingMarks: 2,
+        })}
+      />,
+    );
+
+    expectFigures({ unsent: 5, sending: 2, waiting: 3, marks: 2 });
+  });
+
+  it('states the sending figure while no waiting row exists', () => {
+    render(
+      <TimingSendQueue
+        {...props({
+          entries: [sendingEntry({ id: 'sent-14' }), sendingEntry({ id: 'sent-21' })],
+          unsentEntries: 2,
+          sendingEntries: 2,
+          waitingEntries: 0,
+        })}
+      />,
+    );
+
+    // The page can read «Отправляется: 2» with «Ожидают отправки: 0» and no
+    // row at all, and never reads «Всё отправлено» there (S-05, FR-26).
+    expectFigures({ unsent: 2, sending: 2, waiting: 0, marks: 0 });
+    expect(rows()).toHaveLength(0);
+    expect(screen.queryByText('Всё отправлено')).toBeNull();
+  });
+});
+
 describe('TimingSendQueue unsent entries', () => {
   it('lists the unsent entries with the count and sends them on demand', async () => {
     const onSendNow = vi.fn(() => Promise.resolve());
@@ -184,17 +385,19 @@ describe('TimingSendQueue unsent entries', () => {
         {...props({
           entries: [entry(), anonymousSplit()],
           unsentEntries: 2,
+          waitingEntries: 2,
+          pendingMarks: 1,
           onSendNow,
         })}
       />,
     );
 
     expect(screen.getByText('Очередь отправки')).not.toBeNull();
-    expect(screen.getByText('Не отправлено: 2')).not.toBeNull();
+    expectFigures({ unsent: 2, sending: 0, waiting: 2, marks: 1 });
     expect(rows()).toHaveLength(2);
 
     // One press of «Отправить сейчас» asks the page to send the queue once
-    // (S-07, FR-13); the pending-figure words never turn into a failure.
+    // (S-07, FR-12); the pending-figure words never turn into a failure.
     fireEvent.click(screen.getByRole('button', { name: /Отправить сейчас/ }));
     await waitFor(() => expect(onSendNow).toHaveBeenCalledTimes(1));
   });
@@ -203,7 +406,13 @@ describe('TimingSendQueue unsent entries', () => {
     const onSendNow = vi.fn(() => Promise.resolve());
     const { rerender } = render(
       <TimingSendQueue
-        {...props({ entries: [entry()], unsentEntries: 1, isSending: true })}
+        {...props({
+          entries: [entry()],
+          unsentEntries: 1,
+          waitingEntries: 1,
+          pendingMarks: 1,
+          isSending: true,
+        })}
       />,
     );
 
@@ -217,7 +426,13 @@ describe('TimingSendQueue unsent entries', () => {
 
     rerender(
       <TimingSendQueue
-        {...props({ entries: [entry()], unsentEntries: 1, onSendNow })}
+        {...props({
+          entries: [entry()],
+          unsentEntries: 1,
+          waitingEntries: 1,
+          pendingMarks: 1,
+          onSendNow,
+        })}
       />,
     );
     const ready = screen.getByRole('button', {
@@ -226,6 +441,31 @@ describe('TimingSendQueue unsent entries', () => {
     expect(ready.disabled).toBe(false);
     fireEvent.click(ready);
     await waitFor(() => expect(onSendNow).toHaveBeenCalledTimes(1));
+  });
+
+  it('offers the send action while an unsent capture is in flight', () => {
+    const onSendNow = vi.fn(() => Promise.resolve());
+    render(
+      <TimingSendQueue
+        {...props({
+          entries: [sendingEntry()],
+          unsentEntries: 1,
+          sendingEntries: 1,
+          onSendNow,
+        })}
+      />,
+    );
+
+    // Every unsent capture is already on its way, so no row and no
+    // everything-sent statement, but the action stays available (S-05).
+    expect(rows()).toHaveLength(0);
+    expect(screen.queryByText('Всё отправлено')).toBeNull();
+    const send = screen.getByRole('button', {
+      name: /Отправить сейчас/,
+    }) as HTMLButtonElement;
+    expect(send.disabled).toBe(false);
+    fireEvent.click(send);
+    expect(onSendNow).toHaveBeenCalledTimes(1);
   });
 
   it('does not offer the send control when nothing is unsent', () => {
@@ -245,30 +485,71 @@ describe('TimingSendQueue empty and connection states', () => {
     expect(
       screen.queryByRole('button', { name: /Отправить сейчас/ }),
     ).toBeNull();
-    expect(screen.queryByText('Не отправлено: 0')).toBeNull();
+    // The zero figure is still stated, never hidden (FR-25).
+    expectFigures({ unsent: 0, sending: 0, waiting: 0, marks: 0 });
     // An empty queue is a quiet fact, never an error state.
     expect(screen.queryByRole('alert')).toBeNull();
     expect(document.querySelector('.ant-alert')).toBeNull();
   });
 
+  it('says everything is sent only when nothing is unsent', () => {
+    const { rerender } = render(<TimingSendQueue {...props()} />);
+    expect(screen.getByText('Всё отправлено')).not.toBeNull();
+
+    rerender(
+      <TimingSendQueue
+        {...props({
+          entries: [entry()],
+          unsentEntries: 1,
+          waitingEntries: 1,
+          pendingMarks: 1,
+        })}
+      />,
+    );
+    expect(screen.queryByText('Всё отправлено')).toBeNull();
+
+    rerender(
+      <TimingSendQueue
+        {...props({
+          entries: [sendingEntry()],
+          unsentEntries: 1,
+          sendingEntries: 1,
+        })}
+      />,
+    );
+    expect(screen.queryByText('Всё отправлено')).toBeNull();
+  });
+
   it('states the lost connection while entries wait, without an error state', () => {
     const { rerender } = render(
       <TimingSendQueue
-        {...props({ entries: [entry()], unsentEntries: 1, isOnline: false })}
+        {...props({
+          entries: [entry()],
+          unsentEntries: 1,
+          waitingEntries: 1,
+          pendingMarks: 1,
+          isOnline: false,
+        })}
       />,
     );
 
     expect(screen.getByText('Нет связи с сервером')).not.toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
     expect(document.querySelector('.ant-alert')).toBeNull();
-    // The rows and the count stay visible while the connection is gone
+    // The rows and the figures stay visible while the connection is gone
     // (S-04, FR-11).
-    expect(screen.getByText('Не отправлено: 1')).not.toBeNull();
+    expectFigures({ unsent: 1, sending: 0, waiting: 1, marks: 1 });
     expect(rows()).toHaveLength(1);
+    expectStableFrame();
 
     rerender(
       <TimingSendQueue
-        {...props({ entries: [entry()], unsentEntries: 1 })}
+        {...props({
+          entries: [entry()],
+          unsentEntries: 1,
+          waitingEntries: 1,
+          pendingMarks: 1,
+        })}
       />,
     );
     expect(screen.queryByText('Нет связи с сервером')).toBeNull();
@@ -278,6 +559,64 @@ describe('TimingSendQueue empty and connection states', () => {
     rerender(<TimingSendQueue {...props({ isOnline: false })} />);
     expect(screen.queryByText('Нет связи с сервером')).toBeNull();
     expect(screen.getByText('Всё отправлено')).not.toBeNull();
+  });
+
+  it('reserves the connection line so its appearance moves nothing', () => {
+    const { rerender } = render(
+      <TimingSendQueue
+        {...props({
+          entries: [entry()],
+          unsentEntries: 1,
+          waitingEntries: 1,
+          pendingMarks: 1,
+        })}
+      />,
+    );
+
+    // The line is rendered whether or not it carries the hint, at one height.
+    const offlineLine = screen
+      .getByText('Очередь отправки')
+      .closest('.ant-card')
+      ?.querySelector('[data-testid="timing-send-queue-figures"]')
+      ?.nextElementSibling as HTMLElement;
+    expect(offlineLine.style.height).toBe('18px');
+    expect(offlineLine.textContent).toBe('');
+    expectStableFrame();
+
+    rerender(
+      <TimingSendQueue
+        {...props({
+          entries: [entry()],
+          unsentEntries: 1,
+          waitingEntries: 1,
+          pendingMarks: 1,
+          isOnline: false,
+        })}
+      />,
+    );
+    const offlineAgain = screen
+      .getByText('Очередь отправки')
+      .closest('.ant-card')
+      ?.querySelector('[data-testid="timing-send-queue-figures"]')
+      ?.nextElementSibling as HTMLElement;
+    expect(offlineAgain).toBe(offlineLine);
+    expect(offlineAgain.style.height).toBe('18px');
+    expect(offlineAgain.textContent).toBe('Нет связи с сервером');
+    expectStableFrame();
+
+    // Without waiting rows the line goes quiet again at the same height.
+    rerender(
+      <TimingSendQueue
+        {...props({
+          entries: [sendingEntry()],
+          unsentEntries: 1,
+          sendingEntries: 1,
+          isOnline: false,
+        })}
+      />,
+    );
+    expect(offlineAgain.textContent).toBe('');
+    expect(offlineAgain.style.height).toBe('18px');
   });
 });
 
@@ -299,6 +638,8 @@ describe('TimingSendQueue rows', () => {
             anonymousSplit(),
           ],
           unsentEntries: 3,
+          waitingEntries: 3,
+          pendingMarks: 2,
         })}
       />,
     );
@@ -333,6 +674,8 @@ describe('TimingSendQueue rows', () => {
             entry({ id: `entry-${index}`, kind }),
           ),
           unsentEntries: kinds.length,
+          waitingEntries: kinds.length,
+          pendingMarks: kinds.length,
         })}
       />,
     );
@@ -363,6 +706,7 @@ describe('TimingSendQueue rows', () => {
             }),
           ],
           unsentEntries: 1,
+          waitingEntries: 1,
         })}
       />,
     );
@@ -377,8 +721,15 @@ describe('TimingSendQueue rows', () => {
 describe('TimingSendQueue waiting rows only', () => {
   it('renders one row for a waiting capture and no row for the same capture on its way', () => {
     const waiting = entry({ id: 'capture-14' });
-    const { container, rerender } = render(
-      <TimingSendQueue {...props({ entries: [waiting], unsentEntries: 1 })} />,
+    const { rerender } = render(
+      <TimingSendQueue
+        {...props({
+          entries: [waiting],
+          unsentEntries: 1,
+          waitingEntries: 1,
+          pendingMarks: 1,
+        })}
+      />,
     );
 
     expect(rows()).toHaveLength(1);
@@ -386,20 +737,25 @@ describe('TimingSendQueue waiting rows only', () => {
     expect(rows()[0].textContent).toContain('№ 14');
     expect(rows()[0].textContent).toContain('Отметка: 09:01:00.250');
 
-    // The same capture, now with its delivery in flight: a figure on the page,
-    // never a row the referee must manage (S-01, S-02).
+    // The same capture, now with its delivery in flight: a figure in the
+    // frame, never a row the referee must manage (S-05, E-06, F-05).
     rerender(
       <TimingSendQueue
         {...props({
           entries: [{ ...waiting, status: 'SENT', isSending: true }],
           unsentEntries: 1,
+          sendingEntries: 1,
+          waitingEntries: 0,
         })}
       />,
     );
 
-    expect(screen.queryByRole('list', { name: 'Очередь отправки' })).toBeNull();
+    expect(rows()).toHaveLength(0);
     expect(screen.queryByText('Всё отправлено')).toBeNull();
-    expect(container.childElementCount).toBe(0);
+    expectFigures({ unsent: 1, sending: 1, waiting: 0, marks: 0 });
+    expectStableFrame();
+    // The frame survives the drain, so the overlay keeps its position (E-06).
+    expect(frame()).not.toBeNull();
   });
 
   it('lists only the waiting captures of a mixed queue, in capture order', () => {
@@ -433,6 +789,9 @@ describe('TimingSendQueue waiting rows only', () => {
             }),
           ],
           unsentEntries: 4,
+          sendingEntries: 2,
+          waitingEntries: 2,
+          pendingMarks: 2,
         })}
       />,
     );
@@ -448,9 +807,9 @@ describe('TimingSendQueue waiting rows only', () => {
     expect(screen.queryByText('№ 14')).toBeNull();
     expect(screen.queryByText('№ 30')).toBeNull();
 
-    // The figure still counts every unsent entry, sending or waiting, so the
-    // queue and the page totals can never disagree (S-01, S-04).
-    expect(screen.getByText('Не отправлено: 4')).not.toBeNull();
+    // The figures still count every unsent entry, sending or waiting, so the
+    // overlay and the page totals can never disagree (S-01, S-05).
+    expectFigures({ unsent: 4, sending: 2, waiting: 2, marks: 2 });
   });
 
   it('lists a waiting withdrawal without its sending capture and still names that capture', () => {
@@ -476,12 +835,14 @@ describe('TimingSendQueue waiting rows only', () => {
             }),
           ],
           unsentEntries: 2,
+          sendingEntries: 1,
+          waitingEntries: 1,
         })}
       />,
     );
 
     // The capture is on its way, so only its withdrawal waits; the withdrawal
-    // still names the capture it retires (FR-39, S-02).
+    // still names the capture it retires (FR-39, E-06).
     expect(screen.queryByText('Отметка по номеру')).toBeNull();
     const rendered = rows();
     expect(rendered).toHaveLength(1);
@@ -490,44 +851,58 @@ describe('TimingSendQueue waiting rows only', () => {
       'Отменяет отметку: № 14 Иванов Иван',
     );
     expect(within(rendered[0]).getByText('не отправлено')).not.toBeNull();
-    expect(screen.getByText('Не отправлено: 2')).not.toBeNull();
+    expectFigures({ unsent: 2, sending: 1, waiting: 1, marks: 0 });
   });
 
-  it('keeps the queue area unchanged when every unsent capture is on its way', () => {
+  it('keeps the row area unchanged when every unsent capture is on its way', () => {
     const waiting = entry();
     const sending = sendingEntry({ id: 'entry-2', startNumber: 21 });
-    const { container, rerender } = render(
+    const { rerender } = render(
       <TimingSendQueue
-        {...props({ entries: [waiting, sending], unsentEntries: 2 })}
+        {...props({
+          entries: [waiting, sending],
+          unsentEntries: 2,
+          sendingEntries: 1,
+          waitingEntries: 1,
+          pendingMarks: 1,
+        })}
       />,
     );
 
-    // The area that holds the waiting rows keeps the height and the scrolling
-    // the accepted layout asserts, whatever else is sending (S-04).
-    expect(queueArea().style.minHeight).toBe(
-      `${TIMING_SEND_QUEUE_AREA_HEIGHT}px`,
-    );
-    expect(queueArea().style.overflowY).toBe('auto');
+    // The area that holds the waiting rows keeps its exact height and the
+    // scrolling the overlay asserts, whatever else is sending (S-07).
+    expectStableFrame();
     expect(rows()).toHaveLength(1);
 
     rerender(
-      <TimingSendQueue {...props({ entries: [sending], unsentEntries: 1 })} />,
+      <TimingSendQueue
+        {...props({
+          entries: [sending],
+          unsentEntries: 1,
+          sendingEntries: 1,
+        })}
+      />,
     );
-    // Every unsent capture is on its way: no card, so no empty-looking block
-    // flashes on an ordinary press (S-02).
-    expect(container.childElementCount).toBe(0);
-    expect(screen.queryByRole('list', { name: 'Очередь отправки' })).toBeNull();
+    // Every unsent capture is on its way: no row, but the frame and its row
+    // area stay exactly where they were (S-05, E-06).
+    expect(rows()).toHaveLength(0);
+    expectStableFrame();
+    expectFigures({ unsent: 1, sending: 1, waiting: 0, marks: 0 });
 
-    // The absence costs the layout nothing: the area returns at the same fixed
-    // height and still scrolls inside it (S-04, S-06).
+    // The area returns with the same geometry when a capture waits again.
     rerender(
-      <TimingSendQueue {...props({ entries: [waiting], unsentEntries: 1 })} />,
+      <TimingSendQueue
+        {...props({
+          entries: [waiting],
+          unsentEntries: 1,
+          waitingEntries: 1,
+          pendingMarks: 1,
+        })}
+      />,
     );
-    expect(queueArea().style.minHeight).toBe(
-      `${TIMING_SEND_QUEUE_AREA_HEIGHT}px`,
-    );
-    expect(queueArea().style.overflowY).toBe('auto');
+    expectStableFrame();
     expect(rows()).toHaveLength(1);
+    expectFigures({ unsent: 1, sending: 0, waiting: 1, marks: 1 });
   });
 });
 
@@ -535,31 +910,37 @@ describe('TimingSendQueue layout', () => {
   it('keeps the entry area stable and scrollable across states', () => {
     const { rerender } = render(<TimingSendQueue {...props()} />);
 
-    expect(queueArea().style.minHeight).toBe(
-      `${TIMING_SEND_QUEUE_AREA_HEIGHT}px`,
-    );
-    expect(queueArea().style.overflowY).toBe('auto');
-    const emptyHeight = queueArea().style.minHeight;
+    expectStableFrame();
+    const emptyHeight = queueArea().style.height;
+    expect(emptyHeight).toBe('260px');
 
     rerender(
       <TimingSendQueue
-        {...props({ entries: [entry(), anonymousSplit()], unsentEntries: 2 })}
+        {...props({
+          entries: [entry(), anonymousSplit()],
+          unsentEntries: 2,
+          waitingEntries: 2,
+          pendingMarks: 1,
+        })}
       />,
     );
 
-    // A growing queue scrolls inside the same area, so the field and the
-    // blocks around it never move (S-04, S-06).
-    expect(queueArea().style.minHeight).toBe(emptyHeight);
+    // A growing queue scrolls inside the same area, so nothing behind the
+    // overlay moves (S-07, F-08).
+    expect(queueArea().style.height).toBe(emptyHeight);
     expect(queueArea().style.overflowY).toBe('auto');
-    expect(queueArea().style.minHeight).toBe(
-      `${TIMING_SEND_QUEUE_AREA_HEIGHT}px`,
-    );
+    expectStableFrame();
   });
 
   it('marks the unsent state in words and with the violet accent, not the exclusion red', () => {
     render(
       <TimingSendQueue
-        {...props({ entries: [entry()], unsentEntries: 1 })}
+        {...props({
+          entries: [entry()],
+          unsentEntries: 1,
+          waitingEntries: 1,
+          pendingMarks: 1,
+        })}
       />,
     );
 
