@@ -1,5 +1,12 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react';
 import { TimingCategoryBlock, formatElapsed } from './TimingCategoryBlock';
 import { TimingHeatBlock } from './TimingHeatBlock';
 import type {
@@ -394,7 +401,7 @@ describe('TimingCategoryBlock', () => {
     expect(screen.getByText('Непривязанных финишей: 2')).not.toBeNull();
   });
 
-  it('prompts to complete a running category once every capture is collected', () => {
+  it('shows the ready chip once every capture of a running block is collected', () => {
     render(
       <TimingCategoryBlock
         block={block({
@@ -411,12 +418,13 @@ describe('TimingCategoryBlock', () => {
       />,
     );
 
-    const message = screen.getByText(
-      'Все отсечки в гонке данной категории получены, её можно завершить',
-    );
-    const alert = message.closest('.ant-alert');
-    expect(alert).not.toBeNull();
-    expect(alert?.className).toContain('ant-alert-info');
+    // Readiness is one short chip in the reserved header area; the accepted
+    // ready sentence leaves the page body (U-01, U-02, E-02, F-09).
+    const status = screen.getByTestId('timing-block-status');
+    expect(status.closest('.ant-card-head')).not.toBeNull();
+    expect(within(status).getByText(READY_CHIP)).not.toBeNull();
+    expect(screen.queryByText(READY_CATEGORY)).toBeNull();
+    expect(document.querySelector('.ant-alert-info')).toBeNull();
   });
 
   it('paints the finished-category plate green', () => {
@@ -716,17 +724,36 @@ const STATE_FILLS = ['#f0f0f0', '#1677ff', '#389e0d', '#d46b08', '#cf1322'];
 const UNSENT_BADGE_BACKGROUND = '#f9f0ff';
 const UNSENT_BADGE_TEXT = '#391085';
 
+/** The two accepted header cues and the reserved width sized for both (U-03). */
+const UNSENT_CHIP = 'Отметок не отправлено';
+const READY_CHIP = 'Можно завершить';
+const STATUS_MIN_WIDTH = '190px';
+
+/**
+ * The accepted ready sentences. They are no longer rendered: the tests assert
+ * their absence from the body (U-05, F-09).
+ */
 const READY_CATEGORY =
   'Все отсечки в гонке данной категории получены, её можно завершить';
 const READY_HEAT = 'Все отсечки в заезде получены, его можно завершить';
 
-/** The body sentences that stand in for the ready prompt, one per plural form. */
+/**
+ * The long unsent sentence, one per plural form. It is the unsent chip's
+ * accessible description and never its visible text (U-06, F-09).
+ */
 const UNSENT_NOTICE_1 =
   '1 отметка записана на устройстве и ещё не отправлена. Завершить можно после отправки.';
 const UNSENT_NOTICE_2 =
   '2 отметки записаны на устройстве и ещё не отправлены. Завершить можно после отправки.';
 const UNSENT_NOTICE_5 =
   '5 отметок записаны на устройстве и ещё не отправлены. Завершить можно после отправки.';
+const UNSENT_NOTICE_1234 =
+  '1234 отметки записаны на устройстве и ещё не отправлены. Завершить можно после отправки.';
+
+/** The one reserved status area of a block header (U-01, U-03). */
+function statusArea(): HTMLElement {
+  return screen.getByTestId('timing-block-status');
+}
 
 /**
  * One colour in the notation jsdom reports, so a comparison never depends on
@@ -750,8 +777,8 @@ const RUNNING: Partial<TimingCategoryBlockView> = {
   startControlEnabled: false,
 };
 
-describe('block unsent marks', () => {
-  it('shows each tile its own unsent count and the block total in the header tag', () => {
+describe('block header status area', () => {
+  it('shows each tile its own unsent count and the block total in one header chip', () => {
     const first = participant({
       enrollmentId: 'e-1',
       passCount: 1,
@@ -789,18 +816,83 @@ describe('block unsent marks', () => {
     expect(screen.queryByText('2+2/5')).toBeNull();
     expect(screen.getAllByText('не отправлено: 1')).toHaveLength(2);
 
-    const tag = screen.getByText('Отметок не отправлено: 2');
-    expect(tag.closest('.ant-card-head')).not.toBeNull();
-    expect(tag.textContent).toBe('Отметок не отправлено: 2');
-    // The header tag carries the same violet accent as the tiles (S-02, U-04).
-    expect(colour(tag.style.backgroundColor)).toBe(
+    // One chip, in the header, with the accepted wording and figure (U-01).
+    const chip = screen.getByText('Отметок не отправлено: 2');
+    expect(chip.textContent).toBe('Отметок не отправлено: 2');
+    expect(chip.closest('.ant-card-head')).not.toBeNull();
+    expect(chip.closest('[data-testid="timing-block-status"]')).not.toBeNull();
+    // The long explanation is the chip's accessible description, never its
+    // visible text (U-06, §2.3 rule 8).
+    expect(chip.getAttribute('aria-label')).toBe(UNSENT_NOTICE_2);
+    expect(chip.getAttribute('title')).toBe(UNSENT_NOTICE_2);
+    expect(screen.queryByText(UNSENT_NOTICE_2)).toBeNull();
+
+    // The chip carries the same violet accent as the tiles (S-02, U-04).
+    expect(colour(chip.style.backgroundColor)).toBe(
       colour(UNSENT_BADGE_BACKGROUND),
     );
-    expect(colour(tag.style.color)).toBe(colour(UNSENT_BADGE_TEXT));
-    expect(tag.style.borderStyle).toBe('dashed');
+    expect(colour(chip.style.color)).toBe(colour(UNSENT_BADGE_TEXT));
+    expect(chip.style.borderStyle).toBe('dashed');
+    expect(colour(chip.style.borderColor)).not.toBe(colour(EXCLUSION_RED));
+    expect(STATE_FILLS.map(colour)).not.toContain(
+      colour(chip.style.backgroundColor),
+    );
+    expect(STATE_FILLS.map(colour)).not.toContain(colour(chip.style.color));
   });
 
-  it('replaces the ready prompt with a violet notice while marks are unsent', () => {
+  it('keeps one reserved status area through 0, 2 and 0 unsent marks', () => {
+    const { rerender } = render(
+      <TimingCategoryBlock
+        block={block({ ...RUNNING })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+        pendingMarkCount={0}
+      />,
+    );
+
+    const reserved = statusArea();
+    expect(reserved.tagName).toBe('SPAN');
+    expect(reserved.style.minWidth).toBe(STATUS_MIN_WIDTH);
+    expect(reserved.style.whiteSpace).toBe('nowrap');
+    // `flex: none`: the area never grows and never shrinks (U-03, U-04).
+    expect(reserved.style.flexGrow).toBe('0');
+    expect(reserved.style.flexShrink).toBe('0');
+    // The area is present and empty, never absent (S-04, E-03).
+    expect(reserved.textContent).toBe('');
+    expect(screen.getAllByTestId('timing-block-status')).toHaveLength(1);
+
+    rerender(
+      <TimingCategoryBlock
+        block={block({ ...RUNNING })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+        pendingMarkCount={2}
+      />,
+    );
+
+    // The same node gains the chip, so the header keeps its height (E-01).
+    expect(statusArea()).toBe(reserved);
+    expect(within(reserved).getByText('Отметок не отправлено: 2')).not.toBeNull();
+
+    rerender(
+      <TimingCategoryBlock
+        block={block({ ...RUNNING })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+        pendingMarkCount={0}
+      />,
+    );
+
+    // The chip clears and the reserved space stays (E-03, S-04).
+    expect(statusArea()).toBe(reserved);
+    expect(screen.getAllByTestId('timing-block-status')).toHaveLength(1);
+    expect(reserved.textContent).toBe('');
+  });
+
+  it('shows the unsent chip, never the ready cue, while marks are unsent', () => {
     render(
       <TimingCategoryBlock
         block={block({
@@ -819,29 +911,118 @@ describe('block unsent marks', () => {
     );
 
     expect(screen.getByText('1+2/2')).not.toBeNull();
-    expect(screen.getByText('Отметок не отправлено: 2')).not.toBeNull();
+    expect(
+      within(statusArea()).getByText('Отметок не отправлено: 2'),
+    ).not.toBeNull();
 
-    // The ready-to-finish prompt is gone and the unsent sentence takes its
-    // place, so a block never claims it can be closed (S-03, FR-10).
+    // The area never shows both cues, so a block never claims it can be closed
+    // while this device still holds marks (S-01, S-02).
+    expect(screen.queryByText(READY_CHIP)).toBeNull();
     expect(screen.queryByText(READY_CATEGORY)).toBeNull();
-    const notice = screen.getByText(UNSENT_NOTICE_2);
-    expect(notice.textContent).toBe(UNSENT_NOTICE_2);
-
-    // The cue is the violet accent already used by the tiles, never the
-    // exclusion red or a participant state colour (U-04, FR-09).
-    expect(colour(notice.style.backgroundColor)).toBe(
-      colour(UNSENT_BADGE_BACKGROUND),
-    );
-    expect(colour(notice.style.color)).toBe(colour(UNSENT_BADGE_TEXT));
-    expect(notice.style.borderStyle).toBe('dashed');
-    expect(colour(notice.style.borderColor)).not.toBe(colour(EXCLUSION_RED));
-    expect(STATE_FILLS.map(colour)).not.toContain(
-      colour(notice.style.backgroundColor),
-    );
-    expect(STATE_FILLS.map(colour)).not.toContain(colour(notice.style.color));
+    expect(screen.queryByText(UNSENT_NOTICE_2)).toBeNull();
+    expect(document.querySelector('.ant-alert')).toBeNull();
   });
 
-  it('keeps the ready prompt and no unsent cue while nothing is pending', () => {
+  it('shows no ready chip before every capture is collected', () => {
+    const { rerender } = render(
+      <TimingCategoryBlock
+        block={block({ ...RUNNING, capturesComplete: false })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(READY_CHIP)).toBeNull();
+    expect(statusArea().textContent).toBe('');
+
+    rerender(
+      <TimingCategoryBlock
+        block={block({
+          ...RUNNING,
+          state: 'NOT_STARTED',
+          officialStartedAt: null,
+          elapsedMs: null,
+          capturesComplete: true,
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    // Readiness exists only for a running block (S-03).
+    expect(screen.queryByText(READY_CHIP)).toBeNull();
+    expect(statusArea().textContent).toBe('');
+  });
+
+  it('never shows the ready chip on a closed block', () => {
+    const finishedReason =
+      'Гонка в этой категории завершена. Результаты менять нельзя.';
+    const { rerender } = render(
+      <TimingCategoryBlock
+        block={block({ ...RUNNING, state: 'COMPLETED', capturesComplete: true })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Завершён')).not.toBeNull();
+    expect(screen.queryByText(READY_CHIP)).toBeNull();
+    expect(screen.queryByText(READY_CATEGORY)).toBeNull();
+
+    rerender(
+      <TimingCategoryBlock
+        block={block({
+          ...RUNNING,
+          state: 'INCOMPLETE',
+          capturesComplete: true,
+          finished: true,
+          blockReason: finishedReason,
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    // A finished block keeps its accepted message and never claims readiness
+    // (S-03, F-07).
+    expect(screen.getByText(finishedReason)).not.toBeNull();
+    expect(screen.queryByText(READY_CHIP)).toBeNull();
+    expect(screen.queryByText(READY_CATEGORY)).toBeNull();
+    expect(statusArea().textContent).toBe('');
+  });
+
+  it('keeps a four-digit count whole on one line', () => {
+    render(
+      <TimingCategoryBlock
+        block={block({
+          ...RUNNING,
+          capturesComplete: true,
+          participants: [participant({ passCount: 0, requiredLaps: 2000 })],
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+        pendingMarksByParticipant={new Map([['enrollment-1', 1234]])}
+        pendingMarkCount={1234}
+      />,
+    );
+
+    const chip = screen.getByText('Отметок не отправлено: 1234');
+    expect(chip.textContent).toBe('Отметок не отправлено: 1234');
+    expect(chip.getAttribute('aria-label')).toBe(UNSENT_NOTICE_1234);
+    // The reserved width does not clamp the figure and the header stays on one
+    // line; the title yields instead (S-10).
+    expect(statusArea().style.minWidth).toBe(STATUS_MIN_WIDTH);
+    expect(statusArea().style.whiteSpace).toBe('nowrap');
+    expect(screen.getByText('0+1234/2000')).not.toBeNull();
+    expect(screen.queryByText(READY_CHIP)).toBeNull();
+  });
+
+  it('keeps the status area to the ready chip alone while nothing is unsent', () => {
     render(
       <TimingCategoryBlock
         block={block({ ...RUNNING, capturesComplete: true })}
@@ -851,13 +1032,13 @@ describe('block unsent marks', () => {
       />,
     );
 
-    const message = screen.getByText(READY_CATEGORY);
-    expect(message.closest('.ant-alert')?.className).toContain(
-      'ant-alert-info',
-    );
+    const status = statusArea();
+    expect(status.textContent).toBe(READY_CHIP);
+    expect(within(status).getAllByText(READY_CHIP)).toHaveLength(1);
     expect(screen.queryByText(/Отметок не отправлено/)).toBeNull();
     expect(screen.queryByText(/записаны на устройстве/)).toBeNull();
     expect(screen.queryByText(/не отправлено:/)).toBeNull();
+    expect(document.querySelector('.ant-alert')).toBeNull();
   });
 
   it('does not invent a pending count for an excluded participant', () => {
@@ -886,6 +1067,7 @@ describe('block unsent marks', () => {
     expect(screen.getByText('0/5')).not.toBeNull();
     expect(screen.queryByText(/не отправлено:/)).toBeNull();
     expect(screen.queryByText(/Отметок не отправлено/)).toBeNull();
+    expect(statusArea().textContent).toBe('');
   });
 
   it('passes the block marks through a heat block', () => {
@@ -915,12 +1097,18 @@ describe('block unsent marks', () => {
     );
 
     expect(screen.getByText('1+1/2')).not.toBeNull();
-    expect(screen.getByText('Отметок не отправлено: 1')).not.toBeNull();
-    expect(screen.getByText(UNSENT_NOTICE_1)).not.toBeNull();
+    const chip = screen.getByText('Отметок не отправлено: 1');
+    expect(chip.closest('.ant-card-head')).not.toBeNull();
+    expect(
+      within(statusArea()).getByText('Отметок не отправлено: 1'),
+    ).not.toBeNull();
+    expect(screen.queryByText(UNSENT_NOTICE_1)).toBeNull();
     expect(screen.queryByText(READY_HEAT)).toBeNull();
+    expect(screen.queryByText(READY_CHIP)).toBeNull();
+    expect(statusArea().style.minWidth).toBe(STATUS_MIN_WIDTH);
   });
 
-  it('agrees the unsent sentence with the mark count', () => {
+  it('agrees the unsent chip with the mark count', () => {
     const cases: ReadonlyArray<readonly [number, string, string]> = [
       [1, '0+1/5', UNSENT_NOTICE_1],
       [2, '0+2/5', UNSENT_NOTICE_2],
@@ -944,9 +1132,136 @@ describe('block unsent marks', () => {
       );
 
       expect(screen.getByText(lapLine)).not.toBeNull();
-      expect(screen.getByText(`Отметок не отправлено: ${count}`)).not.toBeNull();
-      expect(screen.getByText(sentence).textContent).toBe(sentence);
+      const chip = within(statusArea()).getByText(
+        `${UNSENT_CHIP}: ${count}`,
+      );
+      expect(chip.textContent).toBe(`${UNSENT_CHIP}: ${count}`);
+      // The count agrees with the accessible description and never shows the
+      // long sentence in place (U-06, F-09).
+      expect(chip.getAttribute('aria-label')).toBe(sentence);
+      expect(chip.getAttribute('title')).toBe(sentence);
+      expect(screen.queryByText(sentence)).toBeNull();
       rendered.unmount();
     });
+  });
+
+  it('keeps the header on one line and yields the title before the other header items', () => {
+    render(
+      <TimingCategoryBlock
+        block={block({
+          kind: 'HEAT',
+          stageLabel: 'Квалификация',
+          stageState: 'SEEDED',
+          heatLabel: 'Заезд 1',
+        })}
+        title="Очень длинное название заезда, которое обязано уступить место"
+        isCaptureHolder
+        onStart={vi.fn()}
+        pendingMarkCount={3}
+      />,
+    );
+
+    const collapse = screen.getByRole('button', { name: 'Свернуть блок' });
+    const row = collapse.closest('.ant-space');
+    expect(row).not.toBeNull();
+    // The header row never wraps (U-02, F-01, S-10).
+    expect((row as HTMLElement).style.flexWrap).toBe('nowrap');
+    expect((row as HTMLElement).style.width).toBe('100%');
+    expect((row as HTMLElement).style.minWidth).toBe('0px');
+
+    // The title is the only element that shortens (U-04, S-10).
+    const title = screen
+      .getByText('Очень длинное название заезда, которое обязано уступить место')
+      .closest('.ant-typography') as HTMLElement;
+    expect(title).not.toBeNull();
+    expect(title.style.display).toBe('inline-block');
+    expect(title.style.flexGrow).toBe('0');
+    expect(title.style.flexShrink).toBe('1');
+    expect(title.style.flexBasis).toBe('auto');
+    expect(title.style.minWidth).toBe('0px');
+    expect(title.style.overflow).toBe('hidden');
+    expect(title.style.textOverflow).toBe('ellipsis');
+    expect(title.style.whiteSpace).toBe('nowrap');
+
+    // Every other header item keeps its width (U-04, S-10).
+    expect((collapse as HTMLElement).style.flexShrink).toBe('0');
+    expect(screen.getByText('Заезд').style.flexShrink).toBe('0');
+    expect(screen.getByText('Не начат').style.flexShrink).toBe('0');
+    expect(statusArea().style.flexShrink).toBe('0');
+    expect(
+      within(statusArea()).getByText('Отметок не отправлено: 3'),
+    ).not.toBeNull();
+  });
+
+  it('keeps the long unsent sentence and the ready alert out of the body', () => {
+    const { container } = render(
+      <TimingCategoryBlock
+        block={block({
+          ...RUNNING,
+          capturesComplete: true,
+          participants: [participant({ passCount: 0, requiredLaps: 5 })],
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+        pendingMarksByParticipant={new Map([['enrollment-1', 5]])}
+        pendingMarkCount={5}
+      />,
+    );
+
+    expect(
+      within(statusArea()).getByText('Отметок не отправлено: 5'),
+    ).not.toBeNull();
+    // Neither the explanatory sentence nor a ready alert occupies page flow
+    // (U-05, F-09); the sentence survives only as the chip's description.
+    expect(screen.queryByText(UNSENT_NOTICE_5)).toBeNull();
+    expect(screen.queryByText(/Завершить можно после отправки/)).toBeNull();
+    expect(screen.queryByText(READY_CATEGORY)).toBeNull();
+    expect(screen.queryByText(READY_CHIP)).toBeNull();
+    expect(container.querySelector('.ant-alert')).toBeNull();
+    // The tiles still state their own unsent mark (FR-19, U-13).
+    expect(screen.getByText('0+5/5')).not.toBeNull();
+    expect(screen.getByText('не отправлено: 5')).not.toBeNull();
+  });
+
+  it('keeps the finished message, the blocked-reason warning and the pending-finishes tag in the body', () => {
+    const finishedReason =
+      'Гонка в этой категории завершена. Результаты менять нельзя.';
+    const { rerender } = render(
+      <TimingCategoryBlock
+        block={block({
+          finished: true,
+          state: 'COMPLETED',
+          blockReason: finishedReason,
+          pendingFinishes: [pendingFinish()],
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(finishedReason).closest('.ant-alert')?.className,
+    ).toContain('ant-alert-success');
+    expect(screen.getByText('Непривязанных финишей: 1')).not.toBeNull();
+
+    const blockedReason = 'Категория завершена в протоколе';
+    rerender(
+      <TimingCategoryBlock
+        block={block({
+          blockReason: blockedReason,
+          pendingFinishes: [pendingFinish()],
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(blockedReason).closest('.ant-alert')?.className,
+    ).toContain('ant-alert-warning');
+    expect(screen.getByText('Непривязанных финишей: 1')).not.toBeNull();
   });
 });
