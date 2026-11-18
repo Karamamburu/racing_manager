@@ -1399,3 +1399,46 @@ describe('block header status area', () => {
     expect(screen.getByText('Непривязанных финишей: 1')).not.toBeNull();
   });
 });
+
+describe('local attempt status area', () => {
+  const LOCAL = {
+    ...RUNNING,
+    attemptId: 'local-attempt',
+    local: true,
+    localAttemptId: 'local-attempt',
+    localClockEpochId: 'local-epoch',
+    capturesComplete: false,
+  } satisfies Partial<TimingCategoryBlockView>;
+
+  it('states completion after the connection and hides the record', () => {
+    render(
+      <TimingCategoryBlock
+        block={block(LOCAL)}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+        onOpenRecord={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Завершение после связи')).not.toBeNull();
+    expect(screen.queryByText(READY_CHIP)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Запись' })).toBeNull();
+  });
+
+  it('keeps the unsent chip ahead of the completion note', () => {
+    render(
+      <TimingCategoryBlock
+        block={block(LOCAL)}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+        onOpenRecord={vi.fn()}
+        pendingMarkCount={2}
+      />,
+    );
+
+    expect(screen.getByText('Отметок не отправлено: 2')).not.toBeNull();
+    expect(screen.queryByText('Завершение после связи')).toBeNull();
+  });
+});
