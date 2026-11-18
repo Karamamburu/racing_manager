@@ -18,6 +18,7 @@ import {
   NumberCaptureField,
   type NumberCaptureCandidate,
 } from './NumberCaptureField';
+import type { TimingCaptureOutcomeEvent } from './types';
 import type { TimingCaptureOutcome } from './useTimingCapture';
 
 function candidate(
@@ -40,6 +41,19 @@ function deferredOutcome() {
   return { promise, resolve };
 }
 
+/** One answer of the page's outcome feed (AD-7). */
+function outcomeEvent(
+  overrides: Partial<TimingCaptureOutcomeEvent> = {},
+): TimingCaptureOutcomeEvent {
+  return {
+    id: 'capture-1',
+    subject: '№ 17',
+    tone: 'confirmed',
+    at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
 function numberInput(): HTMLInputElement {
   return screen.getByLabelText('Номер участника') as HTMLInputElement;
 }
@@ -47,6 +61,16 @@ function numberInput(): HTMLInputElement {
 /** The outcome line the field shows after a press; never a validation alert. */
 function statusText(): string {
   return screen.getByRole('status').textContent ?? '';
+}
+
+/** The press region of the fixed-height slot: the newest press only. */
+function pressRegion(): HTMLElement {
+  return screen.getByTestId('timing-field-press');
+}
+
+function pressNumber(value: string) {
+  fireEvent.change(numberInput(), { target: { value } });
+  fireEvent.keyDown(numberInput(), { key: 'Enter' });
 }
 
 beforeAll(() => {
@@ -71,7 +95,7 @@ afterEach(() => {
 });
 
 describe('NumberCaptureField', () => {
-  it('commits a typed number with Enter and clears it after the promise resolves', async () => {
+  it('commits a typed number with Enter and clears the field at the press', async () => {
     const gate = deferredOutcome();
     const onCommit = vi.fn(() => gate.promise);
     render(
@@ -91,33 +115,72 @@ describe('NumberCaptureField', () => {
       capturedAt: expect.any(String),
       monotonicMs: expect.any(Number),
     });
-    expect(numberInput().value).toBe('17');
-    expect(screen.getByText('Отправляем отметку…')).not.toBeNull();
+
+    // Accepted at the press: empty and focused before the page answers.
+    expect(numberInput().value).toBe('');
+    expect(document.activeElement).toBe(numberInput());
+    expect(pressRegion().textContent).toContain('№ 17');
+    expect(screen.queryByText('Отправляем отметку…')).toBeNull();
+    expect(screen.queryByText('Отправляем отсечку…')).toBeNull();
+    expect(screen.queryByText('Назначаем отсечку…')).toBeNull();
 
     gate.resolve({ status: 'CONFIRMED' });
-    await waitFor(() => expect(numberInput().value).toBe(''));
-    expect(screen.queryByText('Отправляем отметку…')).toBeNull();
+    await waitFor(() =>
+      expect(statusText()).toBe('№ 17 — сервер подтвердил отметку'),
+    );
+    expect(numberInput().value).toBe('');
   });
 
-  it('keeps one fixed feedback slot across idle, busy and status states', async () => {
-    const gate = deferredOutcome();
-    const onCommit = vi.fn(() => gate.promise);
-    render(
-      <NumberCaptureField
-        resolve={() => [candidate()]}
-        onCommit={onCommit}
-      />,
+  it('keeps one fixed feedback slot across idle, accepted, answered and refused states', async () => {
+    const onCommit = vi.fn().mockResolvedValue({ status: 'ACCEPTED' });
+    const confirmed = outcomeEvent({ id: 'capture-21', subject: '№ 21' });
+    const refused = outcomeEvent({
+      id: 'capture-17',
+      subject: '№ 17',
+      tone: 'refused',
+      reason: 'Попытка уже закрыта',
+    });
+    const { rerender } = render(
+      <NumberCaptureField resolve={() => [candidate()]} onCommit={onCommit} />,
     );
 
     const slot = screen.getByTestId('timing-field-feedback');
     expect(slot.style.height).toBe('44px');
+    expect(slot.style.overflowY).toBe('auto');
 
-    fireEvent.change(numberInput(), { target: { value: '17' } });
-    fireEvent.keyDown(numberInput(), { key: 'Enter' });
-    await waitFor(() => expect(slot.textContent).toContain('Отправляем'));
+    pressNumber('17');
+    await waitFor(() => expect(pressRegion().textContent).toContain('принято'));
+    expect(slot.style.height).toBe('44px');
 
-    gate.resolve({ status: 'UNSENT' });
-    await waitFor(() => expect(slot.textContent).toContain('не отправлено'));
+    pressNumber('21');
+    await waitFor(() => expect(pressRegion().textContent).toContain('№ 21'));
+    expect(slot.style.height).toBe('44px');
+
+    rerender(
+      <NumberCaptureField
+        resolve={() => [candidate()]}
+        onCommit={onCommit}
+        outcomes={[confirmed]}
+      />,
+    );
+    await waitFor(() =>
+      expect(statusText()).toBe('№ 21 — сервер подтвердил отметку'),
+    );
+    expect(slot.style.height).toBe('44px');
+
+    rerender(
+      <NumberCaptureField
+        resolve={() => [candidate()]}
+        onCommit={onCommit}
+        outcomes={[confirmed, refused]}
+      />,
+    );
+    await waitFor(() =>
+      expect(statusText()).toBe('Отклонено: № 17 — Попытка уже закрыта'),
+    );
+
+    // The same wrapper, at the same height, whatever the slot states.
+    expect(screen.getByTestId('timing-field-feedback')).toBe(slot);
     expect(slot.style.height).toBe('44px');
   });
 
@@ -232,7 +295,34 @@ describe('NumberCaptureField', () => {
     await waitFor(() => expect(numberInput().value).toBe(''));
   });
 
-  it('does not submit twice while the first commit is pending', async () => {
+  it('accepts a press while an earlier commit is still unresolved', async () => {
+    const gate = deferredOutcome();
+    const onCommit = vi.fn(() => gate.promise);
+    render(
+      <NumberCaptureField resolve={() => [candidate()]} onCommit={onCommit} />,
+    );
+
+    pressNumber('17');
+    await waitFor(() => expect(onCommit).toHaveBeenCalledTimes(1));
+
+    // The first delivery is still open, yet the field is free and silent.
+    expect(numberInput().value).toBe('');
+    expect(document.activeElement).toBe(numberInput());
+    expect(screen.queryByText('Отправляем отметку…')).toBeNull();
+
+    // The next press is accepted in the same tick, before any answer.
+    pressNumber('21');
+    await waitFor(() => expect(onCommit).toHaveBeenCalledTimes(2));
+    expect(onCommit).toHaveBeenLastCalledWith(
+      expect.objectContaining({ startNumber: 21 }),
+    );
+    expect(numberInput().value).toBe('');
+    expect(document.activeElement).toBe(numberInput());
+    expect(screen.queryByText('Отправляем отметку…')).toBeNull();
+    expect(pressRegion().textContent).toContain('№ 21');
+  });
+
+  it('does not commit twice for one press when the key repeats on the emptied field', async () => {
     const gate = deferredOutcome();
     const onCommit = vi.fn(() => gate.promise);
     render(
@@ -244,11 +334,15 @@ describe('NumberCaptureField', () => {
     fireEvent.keyDown(numberInput(), { key: 'Enter' });
 
     await waitFor(() => expect(onCommit).toHaveBeenCalledTimes(1));
-    fireEvent.keyDown(numberInput(), { key: 'Enter' });
-    expect(onCommit).toHaveBeenCalledTimes(1);
+    // The repeated key met an empty field, so it created no second capture.
+    expect(screen.getByRole('alert').textContent).toBe(
+      'Введите номер участника цифрами',
+    );
 
     gate.resolve({ status: 'CONFIRMED' });
-    await waitFor(() => expect(numberInput().value).toBe(''));
+    await waitFor(() =>
+      expect(statusText()).toBe('№ 17 — сервер подтвердил отметку'),
+    );
   });
 
   it('does nothing while disabled', () => {
@@ -414,19 +508,201 @@ describe('NumberCaptureField', () => {
     expect(numberInput().value).toBe('');
   });
 
-  it('clears the field, keeps focus and names the number on a confirmed capture', async () => {
+  it('clears the field at the press, keeps focus and names the number on a confirmed capture', async () => {
     const onCommit = vi.fn().mockResolvedValue({ status: 'CONFIRMED' });
     render(
       <NumberCaptureField resolve={() => [candidate()]} onCommit={onCommit} />,
     );
 
-    fireEvent.change(numberInput(), { target: { value: '17' } });
-    fireEvent.keyDown(numberInput(), { key: 'Enter' });
+    pressNumber('17');
 
-    await waitFor(() => expect(numberInput().value).toBe(''));
+    await waitFor(() =>
+      expect(statusText()).toBe('№ 17 — сервер подтвердил отметку'),
+    );
+    expect(numberInput().value).toBe('');
     expect(document.activeElement).toBe(numberInput());
-    expect(statusText()).toBe('№ 17 — сервер подтвердил отметку');
+    expect(pressRegion().textContent).toContain('№ 17');
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('states the newest press as accepted and does not claim confirmation', async () => {
+    const onCommit = vi.fn().mockResolvedValue({ status: 'ACCEPTED' });
+    render(
+      <NumberCaptureField resolve={() => [candidate()]} onCommit={onCommit} />,
+    );
+
+    pressNumber('17');
+
+    await waitFor(() =>
+      expect(pressRegion().textContent).toContain('№ 17'),
+    );
+    expect(pressRegion().textContent).toContain('принято');
+    expect(pressRegion().textContent).toContain('ожидает подтверждения');
+    expect(pressRegion().textContent).not.toContain('сервер подтвердил');
+    // No answer has arrived, so the outcome region states nothing.
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(numberInput().value).toBe('');
+    expect(document.activeElement).toBe(numberInput());
+  });
+
+  it('does not let a confirmed outcome for an earlier press replace the newer press statement', async () => {
+    const onCommit = vi.fn().mockResolvedValue({ status: 'ACCEPTED' });
+    const confirmedEarlier = outcomeEvent({
+      id: 'capture-17',
+      subject: '№ 17',
+      tone: 'confirmed',
+    });
+    const { rerender } = render(
+      <NumberCaptureField resolve={() => [candidate()]} onCommit={onCommit} />,
+    );
+
+    pressNumber('17');
+    pressNumber('21');
+    await waitFor(() => expect(pressRegion().textContent).toContain('№ 21'));
+
+    rerender(
+      <NumberCaptureField
+        resolve={() => [candidate()]}
+        onCommit={onCommit}
+        outcomes={[confirmedEarlier]}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(statusText()).toBe('№ 17 — сервер подтвердил отметку'),
+    );
+    expect(pressRegion().textContent).toContain('№ 21');
+    expect(pressRegion().textContent).toContain('принято');
+    expect(pressRegion().textContent).not.toContain('№ 17');
+  });
+
+  it('keeps a refused outcome visible through later presses and a later confirmation', async () => {
+    const onCommit = vi.fn().mockResolvedValue({ status: 'ACCEPTED' });
+    const refused = outcomeEvent({
+      id: 'capture-17',
+      subject: '№ 17',
+      tone: 'refused',
+      reason: 'Попытка уже закрыта',
+    });
+    const confirmed = outcomeEvent({
+      id: 'capture-21',
+      subject: '№ 21',
+      tone: 'confirmed',
+    });
+    const { rerender } = render(
+      <NumberCaptureField
+        resolve={() => [candidate()]}
+        onCommit={onCommit}
+        outcomes={[refused]}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(statusText()).toBe('Отклонено: № 17 — Попытка уже закрыта'),
+    );
+    expect(screen.getByText('Не закрыто отказов: 1')).not.toBeNull();
+
+    pressNumber('31');
+    pressNumber('32');
+    pressNumber('33');
+    await waitFor(() => expect(onCommit).toHaveBeenCalledTimes(3));
+    expect(statusText()).toBe('Отклонено: № 17 — Попытка уже закрыта');
+
+    rerender(
+      <NumberCaptureField
+        resolve={() => [candidate()]}
+        onCommit={onCommit}
+        outcomes={[refused, confirmed]}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(pressRegion().textContent).toContain('№ 33'),
+    );
+    expect(statusText()).toBe('Отклонено: № 17 — Попытка уже закрыта');
+    expect(screen.getByText('Не закрыто отказов: 1')).not.toBeNull();
+  });
+
+  it('dismisses the visible refusal without touching the typed text or a count', async () => {
+    const onCommit = vi.fn().mockResolvedValue({ status: 'ACCEPTED' });
+    const refused = outcomeEvent({
+      id: 'capture-17',
+      subject: '№ 17',
+      tone: 'refused',
+      reason: 'Попытка уже закрыта',
+    });
+    render(
+      <NumberCaptureField
+        resolve={() => [candidate()]}
+        onCommit={onCommit}
+        outcomes={[refused]}
+        pendingCount={4}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(statusText()).toBe('Отклонено: № 17 — Попытка уже закрыта'),
+    );
+
+    pressNumber('21');
+    await waitFor(() => expect(onCommit).toHaveBeenCalledTimes(1));
+    // A number typed after the refusal is never taken away by it.
+    fireEvent.change(numberInput(), { target: { value: '42' } });
+    const commitsBeforeDismissal = onCommit.mock.calls.length;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Скрыть отказ' }));
+
+    expect(numberInput().value).toBe('42');
+    expect(numberInput().value).not.toBe('17');
+    expect(screen.queryByRole('button', { name: 'Скрыть отказ' })).toBeNull();
+    expect(screen.queryByText(/Не закрыто отказов/)).toBeNull();
+    expect(onCommit).toHaveBeenCalledTimes(commitsBeforeDismissal);
+    expect(pressRegion().textContent).toContain('№ 21');
+  });
+
+  it('adds a second refusal to the count instead of replacing the visible one', async () => {
+    const onCommit = vi.fn().mockResolvedValue({ status: 'ACCEPTED' });
+    const first = outcomeEvent({
+      id: 'capture-17',
+      subject: '№ 17',
+      tone: 'refused',
+      reason: 'Попытка уже закрыта',
+    });
+    const second = outcomeEvent({
+      id: 'capture-21',
+      subject: '№ 21',
+      tone: 'refused',
+      reason: 'Нет такой попытки',
+    });
+    const { rerender } = render(
+      <NumberCaptureField
+        resolve={() => [candidate()]}
+        onCommit={onCommit}
+        outcomes={[first]}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(statusText()).toBe('Отклонено: № 17 — Попытка уже закрыта'),
+    );
+
+    rerender(
+      <NumberCaptureField
+        resolve={() => [candidate()]}
+        onCommit={onCommit}
+        outcomes={[first, second]}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText('Не закрыто отказов: 2')).not.toBeNull(),
+    );
+    // The visible refusal is the oldest one, never silently replaced.
+    expect(statusText()).toBe('Отклонено: № 17 — Попытка уже закрыта');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Скрыть отказ' }));
+    expect(statusText()).toBe('Отклонено: № 21 — Нет такой попытки');
+    expect(screen.getByText('Не закрыто отказов: 1')).not.toBeNull();
   });
 
   it('clears the field on an unsent capture and reports it as unsent, not as a failure', async () => {
@@ -441,14 +717,15 @@ describe('NumberCaptureField', () => {
       />,
     );
 
-    fireEvent.change(numberInput(), { target: { value: '17' } });
-    fireEvent.keyDown(numberInput(), { key: 'Enter' });
+    pressNumber('17');
 
-    await waitFor(() => expect(numberInput().value).toBe(''));
-    expect(document.activeElement).toBe(numberInput());
-    expect(statusText()).toBe(
-      '№ 17 — отметка сохранена на устройстве, не отправлено: 2',
+    await waitFor(() =>
+      expect(statusText()).toBe(
+        '№ 17 — отметка сохранена на устройстве, не отправлено: 2',
+      ),
     );
+    expect(numberInput().value).toBe('');
+    expect(document.activeElement).toBe(numberInput());
     expect(screen.queryByRole('alert')).toBeNull();
     expect(onError).not.toHaveBeenCalled();
   });
@@ -463,8 +740,7 @@ describe('NumberCaptureField', () => {
       />,
     );
 
-    fireEvent.change(numberInput(), { target: { value: '17' } });
-    fireEvent.keyDown(numberInput(), { key: 'Enter' });
+    pressNumber('17');
 
     await waitFor(() => expect(statusText()).toContain('не отправлено: 0'));
 
@@ -493,8 +769,7 @@ describe('NumberCaptureField', () => {
       />,
     );
 
-    fireEvent.change(numberInput(), { target: { value: '17' } });
-    fireEvent.keyDown(numberInput(), { key: 'Enter' });
+    pressNumber('17');
     await waitFor(() => expect(onCommit).toHaveBeenCalledTimes(1));
 
     // The referee starts the next number while the first press is unanswered.
@@ -520,8 +795,7 @@ describe('NumberCaptureField', () => {
       <NumberCaptureField resolve={() => [candidate()]} onCommit={onCommit} />,
     );
 
-    fireEvent.change(numberInput(), { target: { value: '17' } });
-    fireEvent.keyDown(numberInput(), { key: 'Enter' });
+    pressNumber('17');
     await waitFor(() => expect(onCommit).toHaveBeenCalledTimes(1));
 
     fireEvent.change(numberInput(), { target: { value: '' } });
@@ -531,6 +805,25 @@ describe('NumberCaptureField', () => {
       expect(statusText()).toBe('Отклонено: № 17 — Нет такой попытки'),
     );
     expect(numberInput().value).toBe('');
+  });
+
+  it('refuses invalid input locally and creates no press statement', () => {
+    const onCommit = vi.fn();
+    render(<NumberCaptureField resolve={() => [candidate()]} onCommit={onCommit} />);
+
+    fireEvent.keyDown(numberInput(), { key: 'Enter' });
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toBe(
+      'Введите номер участника цифрами',
+    );
+    expect(pressRegion().textContent).not.toContain('принято');
+    expect(screen.queryByRole('status')).toBeNull();
+
+    fireEvent.change(numberInput(), { target: { value: '0' } });
+    fireEvent.keyDown(numberInput(), { key: 'Enter' });
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(numberInput().value).toBe('0');
+    expect(pressRegion().textContent).not.toContain('принято');
   });
 
   it('keeps the typed text and shows no outcome line on a local refusal', () => {
@@ -644,7 +937,10 @@ describe('NumberCaptureField', () => {
     fireEvent.keyDown(numberInput(), { key: 'Enter' });
 
     await waitFor(() => expect(numberInput().value).toBe(''));
-    expect(statusText()).toBe('№ 42 — сервер подтвердил отметку');
+    await waitFor(() =>
+      expect(statusText()).toBe('№ 42 — сервер подтвердил отметку'),
+    );
+    expect(pressRegion().textContent).toContain('№ 42');
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
@@ -664,10 +960,12 @@ describe('NumberCaptureField', () => {
     fireEvent.change(numberInput(), { target: { value: '42' } });
     fireEvent.keyDown(numberInput(), { key: 'Enter' });
 
-    await waitFor(() => expect(numberInput().value).toBe(''));
-    expect(statusText()).toBe(
-      '№ 42 — отметка сохранена на устройстве, не отправлено: 2',
+    await waitFor(() =>
+      expect(statusText()).toBe(
+        '№ 42 — отметка сохранена на устройстве, не отправлено: 2',
+      ),
     );
+    expect(numberInput().value).toBe('');
     expect(onCommit).not.toHaveBeenCalled();
     expect(screen.queryByRole('alert')).toBeNull();
 
@@ -679,7 +977,7 @@ describe('NumberCaptureField', () => {
     );
   });
 
-  it('keeps the typed text on a refused assignment and shows the server reason', async () => {
+  it('keeps a refused assignment out of the field and shows the server reason', async () => {
     const onAssign = vi
       .fn()
       .mockResolvedValue({ status: 'REJECTED', reason: 'Отсечка уже присвоена' });
@@ -698,7 +996,8 @@ describe('NumberCaptureField', () => {
     await waitFor(() =>
       expect(statusText()).toBe('Отклонено: № 42 — Отсечка уже присвоена'),
     );
-    expect(numberInput().value).toBe('42');
+    // The refused number is never written back into the field.
+    expect(numberInput().value).toBe('');
     expect(screen.queryByRole('alert')).toBeNull();
   });
 });
