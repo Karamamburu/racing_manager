@@ -221,6 +221,7 @@ function heatView(
         timeMilliseconds: null,
         resultStatus: null,
         laps: [],
+        lapSplits: [],
       },
       {
         position: 2,
@@ -232,6 +233,7 @@ function heatView(
         timeMilliseconds: null,
         resultStatus: null,
         laps: [],
+        lapSplits: [],
       },
     ],
   };

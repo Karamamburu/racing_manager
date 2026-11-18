@@ -1,6 +1,6 @@
 ---
 type: domain
-updated: 2026-11-14
+updated: 2026-11-18
 ---
 
 # Domain: cms (class competitions)
@@ -28,10 +28,13 @@ Façade from main API to competition engine; plan/start-lists/heats/qualificatio
 - «Завершить гонку» remains one action per start × format × gender, is rejected while any race of the category is not `DONE`, and treats a `DONE` race as satisfying completeness for its captured field. Simple-section snapshots stay per section and enrollment.
 - Existing races are backfilled to the event's single/first start and `CATEGORY`; the migration is idempotent and reports anomalies. The competition service exposes `DELETE /v1/competitions/:id` for creation compensation; it adds no product race-deletion action.
 
+- A finished multi-stage protocol reads each row from its last reached stage: «Этап гонки» names it (`PROLOGUE`, `EIGHTHFINAL`, `QUARTERFINAL`, `SEMIFINAL`, `FINAL`, `FINAL_A/B`) and «Отсечки» renders that stage's heat `lapSplits`. A participant eliminated in 1/4 therefore shows the quarterfinal splits, not the absent enrollment splits and not the `laps[]` array. A reached stage that stored only a total renders no split. See [events](events.md).
+
 ## Timing heat attempts (MANUAL-TIMING-2)
 
 - A timing attempt may target one heat of one stage of a multi-stage race (event + race + stage + heat number). The heat roster is the heat start list resolved to race-start enrollments; N is the race start lap count.
 - A closed heat publishes `ClassHeatTime` rows: `OK` + total for every participant at N, `DNS` when no capture exists and `DNF` when captures exist but fewer than N; an `OK` row also gets one `ClassHeatLapTime` per event lap from the attempt's splits. It writes no ordinary result, event split, place or qualification change and no CMS write. A total or a DNS/DNF status is a complete slot for stage commitment; the stage panel shows the timing total beside the lap rows, and «Зафиксировать этап» is available without per-lap rows. Stage commitment remains a separate CMS-panel action.
+- Each heat slot of the API view exposes additive `lapSplits[]` (`lapNumber`, `lapTimeMs`, `cumulativeMs`) derived from its `ClassHeatLapTime` rows in lap order; the cumulative value is the running sum, so the last split equals the heat total. A heat time without lap rows exposes an empty array, and the legacy `laps[]` keeps its shape.
 - The manual heat-time form and stage seeding/reassignment/removal/commit keep `ORGANIZER`/`ADMINISTRATOR` access. A running heat attempt refuses a manual write for that heat; stage commitment and structural stage changes are refused while any heat attempt of the stage runs.
 - «Завершить гонку» is refused while any category or heat attempt of the protocol category runs. See [timing](timing.md).
 
