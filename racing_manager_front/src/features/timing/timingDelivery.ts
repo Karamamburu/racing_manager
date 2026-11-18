@@ -274,6 +274,20 @@ function hasStartPredecessor(
       return true;
     }
   }
+  if (item.operation === 'ANONYMOUS_ASSIGN') {
+    // An assignment recorded after an offline Start waits for it: the server
+    // must have the attempt before it can receive this participant's pass.
+    const request = asRecord(payloadOf(item).request);
+    const chosen = request === null ? null : readString(request, 'chosenAttemptId');
+    if (chosen !== null && starts.some((start) => start.attemptId === chosen)) {
+      return true;
+    }
+    if (item.eventId === undefined) return false;
+    return starts.some(
+      (start) =>
+        start.eventId === item.eventId && start.createdAt <= item.createdAt,
+    );
+  }
   if (item.operation !== 'PASS') return false;
   if (readCaptureKind(payloadOf(item)) !== 'ANONYMOUS_SPLIT') {
     return item.localAnchorAttemptId !== undefined &&

@@ -851,3 +851,79 @@ describe('refused offline Start', () => {
     expect(blockedReasons(decision)['split-1']).toBeUndefined();
   });
 });
+
+describe('offline Start and assignments', () => {
+  const LOCAL = 'local-attempt';
+  const EVENT = 'event-1';
+
+  function startItem(status: TimingQueueItem['status'] = 'PENDING'): TimingQueueItem {
+    return queueItem('start-1', {
+      attemptId: LOCAL,
+      operation: 'START',
+      deviceSequence: 1,
+      createdAt: pressTime(1),
+      eventId: EVENT,
+      status,
+      payload: {
+        localAttemptId: LOCAL,
+        localClockEpochId: 'local-epoch',
+        officialStartedAt: pressTime(1),
+      },
+    });
+  }
+
+  function assignment(
+    id: string,
+    createdAt: string,
+    chosenAttemptId?: string,
+  ): TimingQueueItem {
+    return queueItem(id, {
+      attemptId: EVENT_SCOPE,
+      operation: 'ANONYMOUS_ASSIGN',
+      deviceSequence: 2,
+      createdAt,
+      eventId: EVENT,
+      payload: {
+        captureDeviceSequence: 5,
+        request: {
+          startNumber: 10,
+          workstationInstanceId: WORKSTATION,
+          deviceSequence: 2,
+          ...(chosenAttemptId === undefined ? {} : { chosenAttemptId }),
+        },
+      },
+    });
+  }
+
+  it('holds a later assignment behind the local Start', () => {
+    const decision = decide([
+      startItem(),
+      assignment('assign-after', pressTime(3)),
+    ]);
+
+    expect(startedIds(decision)).toEqual(['start-1']);
+    expect(blockedReasons(decision)).toMatchObject({
+      'assign-after': 'start',
+    });
+  });
+
+  it('holds an assignment that names the local attempt even before the Start row', () => {
+    const decision = decide([
+      startItem(),
+      assignment('assign-chosen', pressTime(2), LOCAL),
+    ]);
+
+    expect(blockedReasons(decision)).toMatchObject({
+      'assign-chosen': 'start',
+    });
+  });
+
+  it('lets an assignment captured before the Start go ahead', () => {
+    const decision = decide([
+      startItem(),
+      assignment('assign-before', pressTime(0)),
+    ]);
+
+    expect(startedIds(decision)).toEqual(['start-1', 'assign-before']);
+  });
+});
