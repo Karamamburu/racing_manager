@@ -306,6 +306,46 @@ describe('TimingCategoryBlock', () => {
     expect(onStart).toHaveBeenCalledTimes(1);
   });
 
+  it('aligns the header name, state, status and actions on one 24 px row', () => {
+    render(
+      <TimingCategoryBlock
+        block={block()}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    const row = screen
+      .getByText('5 км · Мужчины')
+      .closest('.ant-space') as HTMLElement;
+    expect(row.style.alignItems).toBe('center');
+    expect(row.style.flexWrap).toBe('nowrap');
+
+    const title = screen.getByText('5 км · Мужчины')
+      .parentElement as HTMLElement;
+    expect(title.style.height).toBe('24px');
+    expect(title.style.lineHeight).toBe('24px');
+
+    const state = screen.getByText('Не начат');
+    expect(state.style.height).toBe('24px');
+    expect(state.style.display).toBe('inline-flex');
+    expect(state.style.alignItems).toBe('center');
+
+    const collapse = screen.getByRole('button', { name: 'Свернуть блок' });
+    expect(collapse.style.width).toBe('24px');
+    expect(collapse.style.height).toBe('24px');
+
+    const status = screen.getByTestId('timing-block-status');
+    expect(status.style.height).toBe('24px');
+    expect(status.style.alignItems).toBe('center');
+
+    // Every header action is the same small 24 px control as the row.
+    expect(
+      screen.getByRole('button', { name: /Старт/ }).className,
+    ).toContain('ant-btn-sm');
+  });
+
   it('hides the Start control once the category has started', () => {
     const { rerender } = render(
       <TimingCategoryBlock

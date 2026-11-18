@@ -32,6 +32,9 @@ const STATE_COLORS: Record<TimingCategoryState, string> = {
   CANCELLED: 'red',
 };
 
+/** One shared header row height, so name, status and buttons line up (U-04). */
+const HEADER_HEIGHT = 24;
+
 /**
  * The one reserved header status area of a block (U-01, U-02, U-03).
  *
@@ -41,21 +44,44 @@ const STATE_COLORS: Record<TimingCategoryState, string> = {
  * and the title yields instead (S-10).
  */
 const STATUS_AREA_STYLE: CSSProperties = {
-  display: 'inline-block',
+  display: 'inline-flex',
+  alignItems: 'center',
   flex: 'none',
+  height: HEADER_HEIGHT,
   minWidth: 190,
   whiteSpace: 'nowrap',
   overflow: 'visible',
 };
 
 /** A header item that keeps its width while the title yields space. */
-const HEADER_ITEM_STYLE: CSSProperties = { flex: 'none' };
+const HEADER_ITEM_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  flex: 'none',
+  height: HEADER_HEIGHT,
+};
+
+/** The collapse control keeps the same square box as the header row. */
+const HEADER_COLLAPSE_STYLE: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flex: 'none',
+  width: HEADER_HEIGHT,
+  height: HEADER_HEIGHT,
+  padding: 0,
+};
+
+/** The action cluster keeps its width and centers its buttons on the row. */
+const HEADER_ACTIONS_STYLE: CSSProperties = { flex: 'none' };
 
 /** The only shrinkable header item: the block title (U-04). */
 const HEADER_TITLE_STYLE: CSSProperties = {
   display: 'inline-block',
   flex: '0 1 auto',
   minWidth: 0,
+  height: HEADER_HEIGHT,
+  lineHeight: `${HEADER_HEIGHT}px`,
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
@@ -266,18 +292,18 @@ export function TimingCategoryBlock({
         <Space
           wrap={false}
           size={6}
-          align="baseline"
+          align="center"
           style={{
             width: '100%',
             flexWrap: 'nowrap',
             minWidth: 0,
-            alignItems: 'baseline',
+            alignItems: 'center',
           }}
         >
           <Button
             type="text"
             size="small"
-            style={HEADER_ITEM_STYLE}
+            style={HEADER_COLLAPSE_STYLE}
             aria-expanded={!collapsed}
             aria-label={collapsed ? 'Развернуть блок' : 'Свернуть блок'}
             title={collapsed ? 'Развернуть блок' : 'Свернуть блок'}
@@ -300,7 +326,7 @@ export function TimingCategoryBlock({
           <span data-testid="timing-block-status" style={STATUS_AREA_STYLE}>
             {hasUnsentMarks ? (
               <Tag
-                style={{ ...UNSENT_TAG_STYLE, flex: 'none' }}
+                style={{ ...UNSENT_TAG_STYLE, ...HEADER_ITEM_STYLE }}
                 title={unsentNotice(unsentMarkTotal)}
                 aria-label={unsentNotice(unsentMarkTotal)}
               >
@@ -315,10 +341,11 @@ export function TimingCategoryBlock({
         </Space>
       }
       extra={
-        <Space wrap size={8} style={HEADER_ITEM_STYLE}>
+        <Space wrap size={8} align="center" style={HEADER_ACTIONS_STYLE}>
           {showsStart ? (
             <Button
               type="primary"
+              size="small"
               icon={<PlayCircleOutlined />}
               disabled={!canStart}
               onClick={onStart}
@@ -327,12 +354,12 @@ export function TimingCategoryBlock({
             </Button>
           ) : null}
           {showsRecord ? (
-            <Button icon={<FileTextOutlined />} onClick={onOpenRecord}>
+            <Button size="small" icon={<FileTextOutlined />} onClick={onOpenRecord}>
               Запись
             </Button>
           ) : null}
           {showsTakeCapture ? (
-            <Button icon={<UnlockOutlined />} onClick={onTakeCapture}>
+            <Button size="small" icon={<UnlockOutlined />} onClick={onTakeCapture}>
               Взять захват
             </Button>
           ) : null}
