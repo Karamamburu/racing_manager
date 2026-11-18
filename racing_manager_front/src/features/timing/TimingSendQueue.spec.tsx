@@ -75,6 +75,7 @@ function entry(
     status,
     unsent: status === 'PENDING' || status === 'SENT',
     rejected: status === 'REJECTED',
+    isSending: status === 'SENT',
     pressTime: localIso(9, 1, 0, 250),
     attemptId: 'attempt-a',
     blockKey: 'block-a',

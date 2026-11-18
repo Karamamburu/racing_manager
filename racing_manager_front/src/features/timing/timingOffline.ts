@@ -9,7 +9,8 @@
  * - the send-queue rows of the unsent and the rejected entries (FR-12);
  * - the pending marks of each participant tile and each block (FR-07, FR-10,
  *   FR-37);
- * - the page totals «Не отправлено: N» and «из них отметок: K» (FR-11, FR-46).
+ * - the page totals «Не отправлено: N», «Отправляется: K», «Ожидают отправки: K»
+ *   and «из них отметок: K» (FR-11, FR-32, FR-46).
  *
  * Rules the derivation keeps, all of them accepted product facts:
  *
@@ -26,10 +27,15 @@
  *   confirmed lap. It is reported as a separate derived fact and never as a
  *   lowered confirmed count, because the tile shows the server's count (FR-41).
  * - A rejected entry is listed with its server reason and is never unsent.
+ * - An unsent entry whose delivery is in flight is marked `SENT` and reported as
+ *   sending; the entries still waiting as recorded are `PENDING`. The two
+ *   figures are counted from the same rows as the entry list, so a row and the
+ *   page total can never disagree (S-01, S-04).
  *
  * The page figure «из них отметок» is the sum of the tile marks, so the two can
  * never disagree (U-08). Everything here is display-only: nothing is written
- * back to the surface, a pass, a split or a result.
+ * back to the surface, a pass, a split or a result. The figures count entries,
+ * never marks.
  *
  * The function is pure and framework-free. It never fetches, never reads
  * storage and never sorts its input in place.
@@ -113,6 +119,8 @@ export interface TimingOfflineEntryView {
   unsent: boolean;
   /** The server refused this entry; `reason` carries its message. */
   rejected: boolean;
+  /** The outbox holds an in-flight delivery for this entry (status `SENT`). */
+  isSending: boolean;
   /**
    * The press instant, ISO-8601. An assignment shows the instant of the split it
    * binds; a withdrawal or a bind carries no press of its own and falls back to
@@ -166,6 +174,13 @@ export interface TimingOfflineBlockMarksView {
 export interface TimingOfflineTotalsView {
   /** One per unsent entry of every kind («Не отправлено: N»). */
   unsentEntries: number;
+  /**
+   * The unsent entries with an outstanding delivery («Отправляется: K»). A
+   * sending entry is a figure, not a send-queue row (S-01, S-02).
+   */
+  sendingEntries: number;
+  /** The unsent entries still waiting as recorded («Ожидают отправки: K»). */
+  waitingEntries: number;
   unsentByKind: Record<TimingOfflineEntryKind, number>;
   /** The sum of the tile marks, so the page and the tiles agree (U-08). */
   pendingMarks: number;
@@ -380,6 +395,8 @@ export function deriveTimingOfflineView(
   const tiles = new Map<string, TileTotal>();
   const blockTotals = new Map<string, BlockTotal>();
   let unsentEntries = 0;
+  let sendingEntries = 0;
+  let waitingEntries = 0;
   let rejectedEntries = 0;
   let pendingMarks = 0;
   let unattributedPendingMarks = 0;
@@ -391,6 +408,13 @@ export function deriveTimingOfflineView(
     } else {
       unsentEntries += 1;
       unsentByKind[row.record.kind] += 1;
+      // One figure per unsent entry, from the status that also marks its row,
+      // so `sendingEntries + waitingEntries` is always `unsentEntries`.
+      if (row.status === 'SENT') {
+        sendingEntries += 1;
+      } else {
+        waitingEntries += 1;
+      }
     }
 
     const { pendingMarks: marks, confirmedLapsRetired } = row.effect;
@@ -444,6 +468,8 @@ export function deriveTimingOfflineView(
     blockMarks,
     totals: {
       unsentEntries,
+      sendingEntries,
+      waitingEntries,
       unsentByKind,
       pendingMarks,
       unattributedPendingMarks,
@@ -817,6 +843,7 @@ function toEntryView(
     status: row.status,
     unsent: isUnsentStatus(row.status),
     rejected: row.status === 'REJECTED',
+    isSending: row.status === 'SENT',
     pressTime: record.pressTime,
     attemptId: record.attemptId,
     blockKey: record.blockKey,

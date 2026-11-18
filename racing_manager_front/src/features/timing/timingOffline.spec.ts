@@ -14,6 +14,8 @@ import type {
 /**
  * MANUAL-TIMING-4 turns the device outbox into the views the timing page shows:
  * the send-queue rows, the tile and block pending marks, and the page totals.
+ * MANUAL-TIMING-5 (Wave 6) splits the unsent total into the captures being sent
+ * and the captures still waiting, from the same snapshot as the rows.
  * Nothing here touches the DOM or the network; the surface and the outbox are
  * plain fixtures.
  *
@@ -306,6 +308,7 @@ describe('deriveTimingOfflineView: one number press', () => {
         status: 'PENDING',
         unsent: true,
         rejected: false,
+        isSending: false,
         pressTime: '2026-11-16T10:00:01.123Z',
         attemptId: ATTEMPT_A,
         blockKey: 'block-a',
@@ -346,6 +349,8 @@ describe('deriveTimingOfflineView: one number press', () => {
     ]);
     expect(view.totals).toEqual({
       unsentEntries: 1,
+      sendingEntries: 0,
+      waitingEntries: 1,
       unsentByKind: {
         NUMBER: 1,
         TILE: 0,
@@ -421,6 +426,7 @@ describe('deriveTimingOfflineView: entries without a participant', () => {
         status: 'PENDING',
         unsent: true,
         rejected: false,
+        isSending: false,
         pressTime: '2026-11-16T10:05:00.900Z',
         attemptId: null,
         blockKey: null,
@@ -440,6 +446,8 @@ describe('deriveTimingOfflineView: entries without a participant', () => {
     expect(view.blockMarks).toEqual([]);
     expect(view.totals).toMatchObject({
       unsentEntries: 1,
+      sendingEntries: 0,
+      waitingEntries: 1,
       unsentByKind: { ANONYMOUS_SPLIT: 1 },
       pendingMarks: 0,
       unattributedPendingMarks: 0,
@@ -553,6 +561,7 @@ describe('deriveTimingOfflineView: refusals', () => {
         status: 'REJECTED',
         unsent: false,
         rejected: true,
+        isSending: false,
         pressTime: '2026-11-16T10:00:01.000Z',
         attemptId: ATTEMPT_A,
         blockKey: 'block-a',
@@ -574,6 +583,8 @@ describe('deriveTimingOfflineView: refusals', () => {
     expect(view.blockMarks).toEqual([]);
     expect(view.totals).toMatchObject({
       unsentEntries: 0,
+      sendingEntries: 0,
+      waitingEntries: 0,
       pendingMarks: 0,
       rejectedEntries: 1,
       hasUnsent: false,
@@ -594,6 +605,8 @@ describe('deriveTimingOfflineView: refusals', () => {
     expect(view.blockMarks).toEqual([]);
     expect(view.totals).toMatchObject({
       unsentEntries: 0,
+      sendingEntries: 0,
+      waitingEntries: 0,
       pendingMarks: 0,
       rejectedEntries: 0,
       hasUnsent: false,
@@ -661,6 +674,8 @@ describe('deriveTimingOfflineView: capture and withdrawal', () => {
       },
     ]);
     expect(view.totals.unsentEntries).toBe(3);
+    expect(view.totals.sendingEntries).toBe(0);
+    expect(view.totals.waitingEntries).toBe(3);
     expect(view.totals.unsentByKind).toMatchObject({ NUMBER: 2, UNDO: 1 });
     expect(view.totals.pendingMarks).toBe(1);
   });
@@ -730,6 +745,8 @@ describe('deriveTimingOfflineView: capture and withdrawal', () => {
     ]);
     expect(view.totals).toMatchObject({
       unsentEntries: 1,
+      sendingEntries: 0,
+      waitingEntries: 1,
       pendingMarks: 0,
       confirmedLapsRetiring: 1,
       rejectedEntries: 0,
@@ -768,10 +785,202 @@ describe('deriveTimingOfflineView: capture and withdrawal', () => {
     expect(view.blockMarks).toEqual([]);
     expect(view.totals).toMatchObject({
       unsentEntries: 1,
+      sendingEntries: 0,
+      waitingEntries: 1,
       rejectedEntries: 1,
       pendingMarks: 0,
       confirmedLapsRetiring: 0,
     });
+  });
+});
+
+describe('deriveTimingOfflineView: sending and waiting figures', () => {
+  it('splits five unsent entries into two sending and three waiting', () => {
+    const view = derive([
+      numberPass('key-sending-1', 1, 14, '2026-11-16T10:00:01.000Z', {
+        status: 'SENT',
+      }),
+      numberPass('key-sending-2', 2, 17, '2026-11-16T10:00:02.000Z', {
+        status: 'SENT',
+      }),
+      numberPass('key-waiting-3', 3, 14, '2026-11-16T10:00:03.000Z'),
+      tilePass('key-waiting-4', 4, 'enr-17', '2026-11-16T10:00:04.000Z'),
+      anonymousSplitPass('key-waiting-5', 5, '2026-11-16T10:00:05.000Z'),
+    ]);
+
+    expect(view.totals.sendingEntries).toBe(2);
+    expect(view.totals.waitingEntries).toBe(3);
+    expect(view.totals.unsentEntries).toBe(5);
+    expect(view.totals.unsentEntries).toBe(
+      view.totals.sendingEntries + view.totals.waitingEntries,
+    );
+    expect(view.entries).toHaveLength(5);
+    expect(
+      view.entries
+        .filter((entry) => entry.isSending)
+        .map((entry) => entry.id),
+    ).toEqual(['key-sending-1', 'key-sending-2']);
+    expect(
+      view.entries.filter((entry) => entry.unsent && !entry.isSending),
+    ).toHaveLength(3);
+    expect(view.unsentEntries).toHaveLength(5);
+  });
+
+  it('reports a lone sending entry with no waiting row', () => {
+    const view = derive([
+      numberPass('key-lone-sending', 1, 14, '2026-11-16T10:00:01.000Z', {
+        status: 'SENT',
+      }),
+    ]);
+
+    expect(view.totals.sendingEntries).toBe(1);
+    expect(view.totals.waitingEntries).toBe(0);
+    expect(view.totals.unsentEntries).toBe(1);
+    expect(view.entries[0]).toMatchObject({
+      status: 'SENT',
+      unsent: true,
+      rejected: false,
+      isSending: true,
+    });
+  });
+
+  it('keeps a pair adjacent when its capture sends and its withdrawal waits', () => {
+    const view = derive([
+      numberPass('key-split-capture', 1, 14, '2026-11-16T10:00:01.000Z', {
+        status: 'SENT',
+      }),
+      undoItem('key-split-undo', 2, '2026-11-16T10:00:03.000Z'),
+    ]);
+
+    expect(view.entries.map((entry) => entry.id)).toEqual([
+      'key-split-capture',
+      'key-split-undo',
+    ]);
+    expect(view.entries[0]).toMatchObject({
+      status: 'SENT',
+      unsent: true,
+      isSending: true,
+      pendingMarks: 0,
+      pairRole: 'CAPTURE',
+      pairId: 'key-split-capture',
+    });
+    expect(view.entries[1]).toMatchObject({
+      status: 'PENDING',
+      unsent: true,
+      isSending: false,
+      pendingMarks: 0,
+      pairRole: 'WITHDRAWAL',
+      pairId: 'key-split-capture',
+    });
+    expect(view.totals).toMatchObject({
+      unsentEntries: 2,
+      sendingEntries: 1,
+      waitingEntries: 1,
+      pendingMarks: 0,
+      confirmedLapsRetiring: 0,
+    });
+    expect(view.totals.unsentEntries).toBe(
+      view.totals.sendingEntries + view.totals.waitingEntries,
+    );
+    expect(view.participantMarks).toEqual([]);
+  });
+
+  it('counts an applied or a rejected entry in none of the three figures', () => {
+    const view = derive([
+      numberPass('key-figure-applied', 1, 14, '2026-11-16T10:00:01.000Z', {
+        status: 'APPLIED',
+      }),
+      numberPass('key-figure-rejected', 2, 17, '2026-11-16T10:00:02.000Z', {
+        status: 'REJECTED',
+        error: 'Участник уже финишировал',
+      }),
+      numberPass('key-figure-waiting', 3, 14, '2026-11-16T10:00:03.000Z'),
+    ]);
+
+    expect(view.entries.map((entry) => entry.id)).toEqual([
+      'key-figure-rejected',
+      'key-figure-waiting',
+    ]);
+    expect(view.entries[0]).toMatchObject({
+      status: 'REJECTED',
+      unsent: false,
+      rejected: true,
+      isSending: false,
+    });
+    expect(view.totals).toMatchObject({
+      unsentEntries: 1,
+      sendingEntries: 0,
+      waitingEntries: 1,
+      rejectedEntries: 1,
+    });
+    expect(view.unsentEntries.map((entry) => entry.id)).toEqual([
+      'key-figure-waiting',
+    ]);
+    expect(view.rejectedEntries.map((entry) => entry.id)).toEqual([
+      'key-figure-rejected',
+    ]);
+  });
+
+  it('counts a withdrawal-only unsent entry once, in exactly one figure', () => {
+    const view = derive([
+      numberPass('key-retired-capture', 1, 14, '2026-11-16T10:00:01.000Z', {
+        status: 'APPLIED',
+      }),
+      undoItem('key-lone-withdrawal', 2, '2026-11-16T10:00:04.000Z', {
+        status: 'SENT',
+      }),
+    ]);
+
+    expect(view.entries.map((entry) => entry.id)).toEqual([
+      'key-lone-withdrawal',
+    ]);
+    expect(view.entries[0]).toMatchObject({
+      kind: 'UNDO',
+      status: 'SENT',
+      unsent: true,
+      isSending: true,
+      confirmedLapsRetired: 1,
+    });
+    expect(view.totals.unsentEntries).toBe(1);
+    expect(view.totals.sendingEntries).toBe(1);
+    expect(view.totals.waitingEntries).toBe(0);
+    expect(view.totals.unsentEntries).toBe(
+      view.totals.sendingEntries + view.totals.waitingEntries,
+    );
+    expect(view.totals.unsentByKind.UNDO).toBe(1);
+  });
+
+  it('leaves the mark totals unchanged by the two figures', () => {
+    const view = derive([
+      numberPass('key-marks-sending', 1, 14, '2026-11-16T10:00:01.000Z', {
+        status: 'SENT',
+      }),
+      numberPass('key-marks-waiting', 2, 17, '2026-11-16T10:00:02.000Z'),
+      pendingFinishPass('key-marks-finish', 3, '2026-11-16T10:00:03.000Z', {
+        status: 'SENT',
+      }),
+      anonymousSplitPass('key-marks-split', 4, '2026-11-16T10:00:04.000Z'),
+      numberPass('key-marks-unknown', 5, 99, '2026-11-16T10:00:05.000Z', {
+        status: 'SENT',
+      }),
+    ]);
+
+    expect(view.totals).toMatchObject({
+      unsentEntries: 5,
+      sendingEntries: 3,
+      waitingEntries: 2,
+      pendingMarks: 2,
+      unattributedPendingMarks: 1,
+    });
+    expect(view.totals.unsentEntries).toBe(
+      view.totals.sendingEntries + view.totals.waitingEntries,
+    );
+    expect(
+      view.participantMarks.reduce(
+        (sum, marks) => sum + marks.pendingMarks,
+        0,
+      ),
+    ).toBe(view.totals.pendingMarks);
   });
 });
 
