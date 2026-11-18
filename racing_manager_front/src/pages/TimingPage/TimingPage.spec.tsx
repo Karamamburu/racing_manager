@@ -1598,11 +1598,9 @@ describe('TimingPage', () => {
     expect(await screen.findByText('5 км · Мужчины')).not.toBeNull();
     expect(screen.getByText('Категория завершена в протоколе')).not.toBeNull();
     expect(screen.queryByText('Заезд')).toBeNull();
-    // A category keeps its disabled Start, unlike a closed-stage heat.
-    expect(
-      (screen.getByRole('button', { name: /Старт/ }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
+    // A category whose start has been given hides the Start control; the
+    // reason and the closed state stay, and nothing is started.
+    expect(screen.queryByRole('button', { name: /Старт/ })).toBeNull();
     expect(capture.startAttempt).not.toHaveBeenCalled();
   });
 

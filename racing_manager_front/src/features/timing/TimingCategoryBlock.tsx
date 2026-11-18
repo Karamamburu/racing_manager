@@ -146,12 +146,18 @@ export function formatElapsed(elapsedMs: number): string {
 /**
  * Whether the block renders its Start control at all.
  *
- * A heat of a stage whose heats are not formed, or of a closed stage, offers no
- * Start: the block reason states why and the press is not available (F-12,
- * S-07). A category keeps its disabled Start, so a reader still sees the
- * control and the reason beside it.
+ * A block whose start has already been given has no Start to press, so a
+ * running or closed block hides the control instead of keeping it disabled. An
+ * unstarted block, and a block whose attempt was cancelled (the accepted
+ * re-time), keep it. A heat of a stage whose heats are not formed, or of a
+ * closed stage, offers no Start: the block reason states why and the press is
+ * not available (F-12, S-07). An unstarted category keeps its disabled Start,
+ * so a reader still sees the control and the reason beside it.
  */
 function showsStartControl(block: TimingCategoryBlockView): boolean {
+  if (block.state !== 'NOT_STARTED' && block.state !== 'CANCELLED') {
+    return false;
+  }
   if (block.kind !== 'HEAT') return true;
   return block.stageState === undefined || block.stageState === 'SEEDED';
 }

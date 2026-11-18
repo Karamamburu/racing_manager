@@ -306,6 +306,100 @@ describe('TimingCategoryBlock', () => {
     expect(onStart).toHaveBeenCalledTimes(1);
   });
 
+  it('hides the Start control once the category has started', () => {
+    const { rerender } = render(
+      <TimingCategoryBlock
+        block={block()}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    // An unstarted block still offers the press.
+    expect(screen.getByRole('button', { name: /Старт/ })).not.toBeNull();
+
+    for (const state of ['RUNNING', 'COMPLETED', 'INCOMPLETE'] as const) {
+      rerender(
+        <TimingCategoryBlock
+          block={block({
+            state,
+            attemptId: 'attempt-1',
+            officialStartedAt: RUNNING_START,
+            // Even a stale enabled flag never brings the control back.
+            startControlEnabled: true,
+          })}
+          title="5 км · Мужчины"
+          isCaptureHolder
+          onStart={vi.fn()}
+        />,
+      );
+      expect(screen.queryByRole('button', { name: /Старт/ })).toBeNull();
+    }
+  });
+
+  it('keeps the Start control after a cancelled attempt for the accepted re-time', () => {
+    const onStart = vi.fn();
+    render(
+      <TimingCategoryBlock
+        block={block({
+          state: 'CANCELLED',
+          attemptId: 'attempt-1',
+          officialStartedAt: RUNNING_START,
+          startControlEnabled: true,
+        })}
+        title="5 км · Мужчины"
+        isCaptureHolder
+        onStart={onStart}
+      />,
+    );
+
+    const start = screen.getByRole('button', {
+      name: /Старт/,
+    }) as HTMLButtonElement;
+    expect(start.disabled).toBe(false);
+    fireEvent.click(start);
+    expect(onStart).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the Start of a running heat and keeps it after cancellation', () => {
+    const { rerender } = render(
+      <TimingCategoryBlock
+        block={block({
+          kind: 'HEAT',
+          stageState: 'SEEDED',
+          state: 'RUNNING',
+          attemptId: 'attempt-heat',
+          officialStartedAt: RUNNING_START,
+          startControlEnabled: true,
+        })}
+        title="Заезд 1"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /Старт/ })).toBeNull();
+
+    rerender(
+      <TimingCategoryBlock
+        block={block({
+          kind: 'HEAT',
+          stageState: 'SEEDED',
+          state: 'CANCELLED',
+          attemptId: 'attempt-heat',
+          officialStartedAt: RUNNING_START,
+          startControlEnabled: true,
+        })}
+        title="Заезд 1"
+        isCaptureHolder
+        onStart={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /Старт/ })).not.toBeNull();
+  });
+
   it('offers capture to a workstation when nobody holds it', () => {
     const onTakeCapture = vi.fn();
     const { rerender } = render(
