@@ -261,3 +261,7 @@ The timing page no longer moves under the referee's pointer while captures are u
 ## 2026-11-18 — Start control hidden after the start
 
 A category or heat block no longer keeps the disabled «Старт» button after its start has been given: a running or closed block hides it, while an unstarted block and a block whose attempt was cancelled (the accepted re-time) keep it. An unstarted block that cannot start still shows the disabled control with the reason, and a heat still hides it while its stage is not seeded or is closed. Front only; no API, schema or stored value changed. Updated `domains/timing.md`.
+
+## 2026-11-18 — aligned timing header and a correct category total
+
+The category and heat header now keeps the block name, the kind and state tags, the unsent/ready chip and the actions on one vertically centered 24 px line; the header actions use the small control size. «Ход хронометража» now counts a category as finished when its timing is closed — a `COMPLETED` attempt for a category without races, a done race plus a closed category block for a category with races — as well as when the protocol category is finished. A category whose both attempts are `COMPLETED` no longer reads «0 из N завершено» merely because the event has no protocol category finish. `INCOMPLETE` and `CANCELLED` do not count. Front only; no API, schema or stored value changed. Updated `domains/timing.md`.

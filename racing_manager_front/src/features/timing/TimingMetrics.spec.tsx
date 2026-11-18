@@ -158,6 +158,107 @@ describe('computeTimingMetrics', () => {
     });
   });
 
+  it('counts a category whose timing attempt is completed without a protocol finish', () => {
+    const view = surface({
+      categories: [
+        block({ state: 'COMPLETED', finished: false }),
+        block({
+          startId: 'start-b',
+          formatId: 2,
+          state: 'COMPLETED',
+          finished: false,
+        }),
+      ],
+    });
+
+    const metrics = computeTimingMetrics(view);
+
+    expect(metrics.categoriesTotal).toBe(2);
+    expect(metrics.categoriesFinished).toBe(2);
+  });
+
+  it('does not count a running, incomplete or cancelled category as finished', () => {
+    for (const state of ['RUNNING', 'INCOMPLETE', 'CANCELLED'] as const) {
+      const view = surface({
+        categories: [block({ state, finished: false })],
+      });
+
+      expect(computeTimingMetrics(view).categoriesFinished).toBe(0);
+    }
+  });
+
+  it('counts a protocol-finished category without a timing attempt', () => {
+    const view = surface({
+      categories: [block({ state: 'NOT_STARTED', finished: true })],
+    });
+
+    expect(computeTimingMetrics(view).categoriesFinished).toBe(1);
+  });
+
+  it('does not finish a race category from a closed heat alone', () => {
+    const view = surface({
+      categories: [
+        block({
+          startId: 'start-race',
+          kind: 'HEAT',
+          state: 'COMPLETED',
+          finished: false,
+        }),
+      ],
+    });
+
+    expect(computeTimingMetrics(view).categoriesFinished).toBe(0);
+  });
+
+  it('finishes a race category when the race is done and its category timing is closed', () => {
+    const view = surface({
+      categories: [
+        block({
+          startId: 'start-race',
+          state: 'COMPLETED',
+          finished: false,
+          participants: [
+            participant({
+              enrollmentId: 'enrollment-race',
+              excludedReason: 'RACE_SECTION',
+            }),
+          ],
+        }),
+        block({
+          startId: 'start-race',
+          kind: 'HEAT',
+          state: 'COMPLETED',
+          finished: true,
+        }),
+      ],
+    });
+
+    const metrics = computeTimingMetrics(view);
+
+    expect(metrics.categoriesTotal).toBe(1);
+    expect(metrics.categoriesFinished).toBe(1);
+  });
+
+  it('does not finish a mixed category while its category attempt still runs', () => {
+    const view = surface({
+      categories: [
+        block({
+          startId: 'start-race',
+          state: 'RUNNING',
+          finished: false,
+        }),
+        block({
+          startId: 'start-race',
+          kind: 'HEAT',
+          state: 'COMPLETED',
+          finished: true,
+        }),
+      ],
+    });
+
+    expect(computeTimingMetrics(view).categoriesFinished).toBe(0);
+  });
+
   it('keeps race-section and excluded rows out of the participant denominator', () => {
     const view = surface({
       categories: [
