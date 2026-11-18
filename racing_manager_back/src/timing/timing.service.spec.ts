@@ -21,6 +21,7 @@ import type {
   QuickUndoTimingPassDto,
   RebindTimingPassDto,
   StartHeatAttemptDto,
+  StartOfflineTimingAttemptDto,
   TakeCaptureDto,
   TransferCaptureDto,
 } from './timing.dto';
@@ -108,6 +109,9 @@ function createRepositoryFake() {
     listEnrollmentRows: jest.fn(
       (): Promise<TimingEnrollmentRow[]> => Promise.resolve([]),
     ),
+    listEnrollmentRowsByIds: jest.fn(
+      (): Promise<TimingEnrollmentRow[]> => Promise.resolve([]),
+    ),
     listAgeCategories: jest.fn(
       (): Promise<TimingAgeCategoryRow[]> => Promise.resolve([]),
     ),
@@ -145,7 +149,9 @@ function createRepositoryFake() {
     listQueuedEventSplits: jest.fn(
       (): Promise<TimingEventSplitRow[]> => Promise.resolve([]),
     ),
-    findEventSplit: jest.fn((): Promise<TimingEventSplitRow | null> => Promise.resolve(null)),
+    findEventSplit: jest.fn(
+      (): Promise<TimingEventSplitRow | null> => Promise.resolve(null),
+    ),
     listBlockingEventSplitsForAttempt: jest.fn(
       (): Promise<TimingEventSplitRow[]> => Promise.resolve([]),
     ),
@@ -193,7 +199,10 @@ function createRepositoryFake() {
     replaceResultSplits: jest.fn(),
     createHeatTime: jest.fn(),
     createHeatLapTime: jest.fn(),
-    listEventLaps: jest.fn((): Promise<Array<{ eventLapId: string; lapNumber: number }>> => Promise.resolve([])),
+    listEventLaps: jest.fn(
+      (): Promise<Array<{ eventLapId: string; lapNumber: number }>> =>
+        Promise.resolve([]),
+    ),
     updateAttemptStatus: jest.fn(),
     listEnrollmentStatuses: jest.fn(
       (
@@ -2006,6 +2015,234 @@ describe('TimingService', () => {
         service.startAttempt(USER_ID, EVENT_ID, startPress),
       ).rejects.toMatchObject({ code: TimingErrorCode.ATTEMPT_RUNNING });
       expect(repository.lockCategory).toHaveBeenCalled();
+      expect(repository.createAttempt).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('startOfflineAttempt', () => {
+    const pressInstant = new Date(NOW.getTime() - 90_000);
+
+    function offlineStartDto(
+      overrides: Partial<StartOfflineTimingAttemptDto> = {},
+    ): StartOfflineTimingAttemptDto {
+      return {
+        startId: START_A,
+        formatId: 1,
+        gender: 'M',
+        workstationInstanceId: WORKSTATION,
+        officialStartedAt: pressInstant.toISOString(),
+        roster: [
+          {
+            enrollmentId: 'enrollment-a',
+            registrationId: 'registration-enrollment-a',
+            startNumber: 10,
+            sectionId: 'CATEGORY',
+            requiredLaps: 3,
+            excludedReason: null,
+          },
+          {
+            enrollmentId: 'enrollment-withdrawn',
+            registrationId: 'registration-enrollment-withdrawn',
+            startNumber: 11,
+            sectionId: 'CATEGORY',
+            requiredLaps: 3,
+            excludedReason: null,
+          },
+        ],
+        localAttemptId: 'local-attempt',
+        localClockEpochId: 'local-epoch',
+        deviceSequence: 1,
+        ...overrides,
+      };
+    }
+
+    function arrangeOfflineStart(
+      overrides: {
+        snapshotRows?: TimingEnrollmentRow[];
+        attempts?: TimingAttemptRow[];
+        lock?: TimingCaptureLockRow | null;
+        categoryFinished?: boolean;
+      } = {},
+    ): void {
+      arrangeStarts(
+        [startRow({ id: START_A, lapCount: 3 })],
+        [formatRow(1, 1)],
+      );
+      repository.listEnrollmentRows.mockResolvedValue([
+        enrollmentRow({ enrollmentId: 'enrollment-a', startNumber: 10 }),
+      ]);
+      repository.listEnrollmentRowsByIds.mockResolvedValue(
+        overrides.snapshotRows ?? [
+          enrollmentRow({ enrollmentId: 'enrollment-a', startNumber: 10 }),
+          enrollmentRow({
+            enrollmentId: 'enrollment-withdrawn',
+            startNumber: 11,
+            enrollmentStatus: 'WITHDRAWN',
+          }),
+        ],
+      );
+      repository.findAttemptsForCategory.mockResolvedValue(
+        overrides.attempts ?? [],
+      );
+      repository.isCategoryFinished.mockResolvedValue(
+        overrides.categoryFinished ?? false,
+      );
+      repository.getCaptureLock.mockResolvedValue(
+        overrides.lock === undefined ? lockRow() : overrides.lock,
+      );
+      repository.findLatestAttemptNumber.mockResolvedValue(0);
+      repository.createAttempt.mockImplementation(
+        (_tx: unknown, input: CreateAttemptInput) =>
+          attemptRow({
+            id: 'attempt-offline',
+            attemptNumber: input.attemptNumber,
+            officialStartedAt: input.officialStartedAt,
+            status: 'RUNNING',
+          }),
+      );
+      repository.createClockEpoch.mockImplementation(
+        (_tx: unknown, input: CreateClockEpochInput) =>
+          clockEpochRow({
+            id: 'epoch-offline',
+            attemptId: input.attemptId,
+            officialElapsedAnchorMs: input.officialElapsedAnchorMs,
+            openedAt: input.openedAt,
+          }),
+      );
+      repository.insertAudit.mockImplementation(
+        (_tx: unknown, input: InsertAuditInput) => ({
+          auditId: 'audit-1',
+          actorUserId: input.actorUserId,
+          action: input.action,
+          targetType: input.targetType,
+          targetId: input.targetId,
+          oldValues: null,
+          newValues: null,
+          reason: null,
+          createdAt: NOW,
+        }),
+      );
+      repository.listParticipantRoster.mockResolvedValue([
+        rosterRow({
+          enrollmentId: 'enrollment-a',
+          startNumber: 10,
+          requiredLaps: 3,
+        }),
+        rosterRow({
+          enrollmentId: 'enrollment-withdrawn',
+          startNumber: 11,
+          requiredLaps: 3,
+        }),
+      ]);
+      repository.listMarks.mockResolvedValue([]);
+      repository.listPendingFinishes.mockResolvedValue([]);
+    }
+
+    it('creates the attempt at the press instant from the snapshot, including a later-withdrawn row', async () => {
+      arrangeOfflineStart();
+
+      const result = await service.startOfflineAttempt(
+        USER_ID,
+        EVENT_ID,
+        offlineStartDto(),
+      );
+
+      const [, attemptInput] = callArguments<[unknown, CreateAttemptInput]>(
+        repository.createAttempt,
+      );
+      expect(attemptInput).toMatchObject({
+        eventId: EVENT_ID,
+        startId: START_A,
+        formatId: 1,
+        gender: 'M',
+        attemptNumber: 1,
+        officialStartedAt: pressInstant,
+        clientStartedAt: pressInstant,
+        startedByUserId: USER_ID,
+      });
+      expect(attemptInput.participants).toEqual([
+        {
+          enrollmentId: 'enrollment-a',
+          registrationId: 'registration-enrollment-a',
+          startNumber: 10,
+          sectionId: 'CATEGORY',
+          requiredLaps: 3,
+          initialOutcome: null,
+          excludedReason: null,
+        },
+        {
+          enrollmentId: 'enrollment-withdrawn',
+          registrationId: 'registration-enrollment-withdrawn',
+          startNumber: 11,
+          sectionId: 'CATEGORY',
+          requiredLaps: 3,
+          initialOutcome: null,
+          excludedReason: null,
+        },
+      ]);
+      const [, epochInput] = callArguments<[unknown, CreateClockEpochInput]>(
+        repository.createClockEpoch,
+      );
+      expect(epochInput).toMatchObject({
+        attemptId: 'attempt-offline',
+        workstationInstanceId: WORKSTATION,
+        officialElapsedAnchorMs: 0,
+        openedAt: pressInstant,
+      });
+      const [, auditInput] = callArguments<[unknown, InsertAuditInput]>(
+        repository.insertAudit,
+      );
+      expect(auditInput).toMatchObject({
+        attemptId: 'attempt-offline',
+        action: 'START_OFFLINE',
+        targetType: 'ATTEMPT',
+      });
+      expect(auditInput.newValues).toMatchObject({
+        localAttemptId: 'local-attempt',
+        localClockEpochId: 'local-epoch',
+        deviceSequence: 1,
+      });
+      expect(result.attempt).toMatchObject({
+        state: 'RUNNING',
+        attemptId: 'attempt-offline',
+      });
+      expect(result.epoch.attemptId).toBe('attempt-offline');
+    });
+
+    it('refuses an instant before the event day and creates nothing', async () => {
+      arrangeOfflineStart();
+
+      await expect(
+        service.startOfflineAttempt(
+          USER_ID,
+          EVENT_ID,
+          offlineStartDto({
+            officialStartedAt: '2026-05-01T10:00:00.000Z',
+          }),
+        ),
+      ).rejects.toMatchObject({ code: TimingErrorCode.INVALID_STATE });
+      expect(repository.createAttempt).not.toHaveBeenCalled();
+    });
+
+    it('refuses a snapshot row outside the category and creates nothing', async () => {
+      arrangeOfflineStart({
+        snapshotRows: [
+          enrollmentRow({ enrollmentId: 'enrollment-a', startNumber: 10 }),
+        ],
+      });
+
+      await expect(
+        service.startOfflineAttempt(USER_ID, EVENT_ID, offlineStartDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.NOT_FOUND });
+      expect(repository.createAttempt).not.toHaveBeenCalled();
+    });
+
+    it('refuses a lost capture lock and creates nothing', async () => {
+      arrangeOfflineStart({ lock: null });
+
+      await expect(
+        service.startOfflineAttempt(USER_ID, EVENT_ID, offlineStartDto()),
+      ).rejects.toMatchObject({ code: TimingErrorCode.CAPTURE_NOT_HELD });
       expect(repository.createAttempt).not.toHaveBeenCalled();
     });
   });
@@ -5750,9 +5987,11 @@ describe('TimingService', () => {
       );
 
       expect(record.state).toBe('COMPLETED');
-      const published = repository.publishResult.mock.calls.map(
-        (call) => call[1] as PublishResultInput,
-      );
+      const published = (
+        repository.publishResult.mock.calls as unknown as Array<
+          [unknown, PublishResultInput]
+        >
+      ).map((call) => call[1]);
       expect(published).toEqual([
         expect.objectContaining({
           enrollmentId: 'enrollment-a',

@@ -2191,7 +2191,7 @@ describe('TimingPage', () => {
     );
   });
 
-  it('refuses a Start without connection and writes nothing', async () => {
+  it('delegates a Start without connection to the capture hook', async () => {
     sessionStorage.setItem('timing-workstation-instance', 'ws-1');
     mockSession(['REFEREE']);
     mockEvent();
@@ -2205,11 +2205,12 @@ describe('TimingPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Старт/ }));
 
     await waitFor(() => {
-      // The controls state their own transfer reason, and the page states its
-      // refusal of the Start beside them (U-07, F-04).
-      expect(screen.getAllByText('Нужна связь с сервером.')).toHaveLength(2);
+      expect(capture.startAttempt).toHaveBeenCalledTimes(1);
     });
-    expect(capture.startAttempt).not.toHaveBeenCalled();
+    // The page no longer refuses the press itself: the hook creates the local
+    // attempt offline. The capture controls still state their own transfer
+    // reason.
+    expect(screen.getAllByText('Нужна связь с сервером.')).toHaveLength(1);
   });
 
   it('states the volatile loss risk and asks before leaving while entries are unsent', async () => {
@@ -2522,5 +2523,155 @@ describe('TimingPage', () => {
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(false);
+  });
+});
+
+describe('TimingPage local splits', () => {
+  function localSplit(
+    overrides: Partial<TimingAnonymousSplitView> = {},
+  ): TimingAnonymousSplitView {
+    return anonymousSplit({
+      splitId: 'local-split-1',
+      localSplitId: 'local-split-1',
+      unsent: true,
+      sending: false,
+      assigned: false,
+      captureDeviceSequence: 3,
+      ...overrides,
+    });
+  }
+
+  it('shows an unsent local split and deletes it on the device only', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({ captureWorkstationInstanceId: 'ws-1' }),
+    );
+    const capture = mockCapture({
+      mergedSurface: surface({
+        captureWorkstationInstanceId: 'ws-1',
+        anonymousSplits: [localSplit()],
+      }),
+      deleteLocalSplit: vi.fn(() => Promise.resolve()),
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('не отправлена')).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Удалить отсечку 1' }),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Удалить' }));
+
+    await waitFor(() =>
+      expect(capture.deleteLocalSplit).toHaveBeenCalledWith('local-split-1'),
+    );
+    expect(capture.cancelAnonymousSplit).not.toHaveBeenCalled();
+  });
+
+  it('asks for the attempt when a local split has several candidates', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({ captureWorkstationInstanceId: 'ws-1' }),
+    );
+    const capture = mockCapture({
+      mergedSurface: surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+        ],
+        anonymousSplits: [
+          localSplit({
+            candidates: [
+              {
+                attemptId: 'attempt-local',
+                blockKey: 'local:attempt-local',
+                attemptLabel: '1 · M',
+                officialElapsedMs: 5000,
+              },
+              {
+                attemptId: 'attempt-2',
+                blockKey: 'start-b:1:M',
+                attemptLabel: '2 · M',
+                officialElapsedMs: 6000,
+              },
+            ],
+          }),
+        ],
+      }),
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Отсечка 1:/ }));
+    const field = screen.getByLabelText('Номер участника');
+    fireEvent.change(field, { target: { value: '17' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+
+    expect(await screen.findByText('Выберите попытку')).toBeTruthy();
+    expect(capture.assignAnonymousSplit).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '1 · M' }));
+
+    await waitFor(() =>
+      expect(capture.assignAnonymousSplit).toHaveBeenCalledWith(
+        'local-split-1',
+        17,
+        'attempt-local',
+      ),
+    );
+  });
+});
+
+describe('TimingPage assigned local splits', () => {
+  it('states the assigned number on a local row and the pending assignment on a server row', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({ captureWorkstationInstanceId: 'ws-1' }),
+    );
+    mockCapture({
+      mergedSurface: surface({
+        captureWorkstationInstanceId: 'ws-1',
+        anonymousSplits: [
+          anonymousSplit({
+            splitId: 'local-split-1',
+            localSplitId: 'local-split-1',
+            unsent: true,
+            sending: false,
+            assigned: true,
+            assignedNumber: 17,
+            captureDeviceSequence: 3,
+          }),
+          anonymousSplit({
+            splitId: 'server-split-2',
+            assigned: true,
+            assignedNumber: 21,
+            captureDeviceSequence: 4,
+          }),
+        ],
+      }),
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('назначена № 17 · не отправлена')).toBeTruthy();
+    expect(screen.getByText('назначение не отправлено')).toBeTruthy();
+    // An assigned row is no longer offered for a second assignment.
+    expect(
+      screen
+        .getByRole('button', { name: /^Отсечка 1:/ })
+        .getAttribute('disabled'),
+    ).not.toBeNull();
   });
 });

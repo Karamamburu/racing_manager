@@ -52,7 +52,9 @@ export type TimingDeliveryBlockReason =
   /** An earlier capture of the same participant has no final answer yet. */
   | 'participant'
   /** Its pair predecessor is still waiting or still sending. */
-  | 'pair';
+  | 'pair'
+  /** Its offline Start, or a local attempt it names, has no final answer yet. */
+  | 'start';
 
 /** One capture this decision does not start, with the rule that holds it. */
 export interface TimingDeliveryBlocked {
@@ -207,6 +209,107 @@ function hasSplitPredecessor(
 }
 
 /**
+ * Whether the item belongs to a local attempt whose Start the server refused
+ * (AD-10). Such an attempt does not exist on the server and its clock epoch
+ * never will: a pass or undo of it is invalid, and an event-scoped split whose
+ * clock it anchored cannot be delivered. The split stays recorded so the
+ * device can still show and delete it.
+ */
+function hasRefusedStartPredecessor(
+  item: TimingQueueItem,
+  items: readonly TimingQueueItem[],
+): boolean {
+  if (item.operation === 'START') return false;
+  const refused = items.filter(
+    (other) => other.operation === 'START' && other.status === 'REJECTED',
+  );
+  if (refused.length === 0) return false;
+  if (refused.some((start) => start.attemptId === item.attemptId)) {
+    return true;
+  }
+  if (item.operation !== 'PASS') return false;
+  const payload = payloadOf(item);
+  if (readCaptureKind(payload) !== 'ANONYMOUS_SPLIT') return false;
+  const epochId = readString(payload, 'clockEpochId');
+  return refused.some(
+    (start) =>
+      start.attemptId === item.localAnchorAttemptId ||
+      (epochId !== null &&
+        readString(payloadOf(start), 'localClockEpochId') === epochId),
+  );
+}
+
+/**
+ * Whether the item depends on a Start that the server has not answered (AD-7).
+ *
+ * - A pass or quick undo of a local attempt waits for its `START` item.
+ * - An event-scoped anonymous split waits for every local Start created at or
+ *   before it, so the server's candidate freeze sees the created attempts; a
+ *   split anchored to the local attempt waits for that Start even when the
+ *   event fields are absent.
+ *
+ * An applied Start holds nothing: the mapping has already rewritten its
+ * dependents. A refused Start holds its dependents for deletion, never for
+ * delivery (AD-10).
+ */
+function hasStartPredecessor(
+  item: TimingQueueItem,
+  items: readonly TimingQueueItem[],
+): boolean {
+  if (item.operation === 'START') return false;
+  if (hasRefusedStartPredecessor(item, items)) return true;
+  const starts = items.filter(
+    (other) =>
+      other.id !== item.id &&
+      other.operation === 'START' &&
+      isCandidate(other),
+  );
+  if (starts.length === 0) return false;
+  if (
+    item.operation === 'PASS' ||
+    item.operation === 'UNDO' ||
+    item.operation === 'BIND'
+  ) {
+    if (starts.some((start) => start.attemptId === item.attemptId)) {
+      return true;
+    }
+  }
+  if (item.operation === 'ANONYMOUS_ASSIGN') {
+    // An assignment recorded after an offline Start waits for it: the server
+    // must have the attempt before it can receive this participant's pass.
+    const request = asRecord(payloadOf(item).request);
+    const chosen = request === null ? null : readString(request, 'chosenAttemptId');
+    if (chosen !== null && starts.some((start) => start.attemptId === chosen)) {
+      return true;
+    }
+    if (item.eventId === undefined) return false;
+    return starts.some(
+      (start) =>
+        start.eventId === item.eventId && start.createdAt <= item.createdAt,
+    );
+  }
+  if (item.operation !== 'PASS') return false;
+  if (readCaptureKind(payloadOf(item)) !== 'ANONYMOUS_SPLIT') {
+    return item.localAnchorAttemptId !== undefined &&
+      item.localAnchorAttemptId !== null &&
+      starts.some((start) => start.attemptId === item.localAnchorAttemptId);
+  }
+  if (
+    item.localAnchorAttemptId !== undefined &&
+    item.localAnchorAttemptId !== null &&
+    starts.some((start) => start.attemptId === item.localAnchorAttemptId)
+  ) {
+    return true;
+  }
+  if (item.eventId === undefined) return false;
+  return starts.some(
+    (start) =>
+      start.eventId === item.eventId &&
+      start.createdAt <= item.createdAt,
+  );
+}
+
+/**
  * Plans one pump pass over the whole outbox.
  *
  * `items` is the outbox in capture order, as `TimingQueue.list()` returns it.
@@ -283,6 +386,8 @@ export function decideDeliveries(input: {
       hasSplitPredecessor(item, input.items)
     ) {
       blocked.push({ item, reason: 'pair' });
+    } else if (hasStartPredecessor(item, input.items)) {
+      blocked.push({ item, reason: 'start' });
     } else {
       start.push(item);
     }

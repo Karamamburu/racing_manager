@@ -176,6 +176,13 @@ export interface TimingCategoryBlockView {
   heatNumber?: number;
   /** Human-readable heat name. */
   heatLabel?: string;
+  /**
+   * Device-local derivation only: a local attempt is not in the server read
+   * model. It carries its local attempt/epoch identities for the capture hook.
+   */
+  local?: boolean;
+  localAttemptId?: string;
+  localClockEpochId?: string;
 }
 
 /** One stage header grouping the heat blocks of a multi-stage race. */
@@ -222,6 +229,16 @@ export interface TimingAnonymousSplitView {
   candidates?: TimingAnonymousSplitCandidateView[];
   /** The event sequence of the capture, used by the event-scoped undo. */
   captureDeviceSequence?: number | null;
+  /** Device-local derivation only: this split is not yet on the server. */
+  unsent?: boolean;
+  /** Device-local derivation only: the split's capture is in flight. */
+  sending?: boolean;
+  /** Device-local derivation only: the split's local identity in the outbox. */
+  localSplitId?: string;
+  /** Device-local derivation only: a queued assignment already names this split. */
+  assigned?: boolean;
+  /** The number a queued assignment targets, for the queue's own label. */
+  assignedNumber?: number;
 }
 
 /** The whole surface of one event: every protocol category plus the lock holder. */
@@ -233,6 +250,21 @@ export interface TimingSurfaceView {
   stageGroups?: TimingStageGroupView[];
   /** The anonymous split queue; absent on a surface read that predates it. */
   anonymousSplits?: TimingAnonymousSplitView[];
+}
+
+/** The device-local attempt created by an offline Start, before the mapping. */
+export interface TimingLocalAttemptView {
+  localAttemptId: string;
+  localClockEpochId: string;
+  startId: string;
+  formatId: number;
+  gender: TimingGender;
+  /** The offline press instant, the attempt's official start. */
+  officialStartedAt: string;
+  lapCount: number;
+  roster: OfflineRosterEntryRequest[];
+  /** The Start's own event sequence. */
+  deviceSequence: number;
 }
 
 /** One participant tile: the frozen roster facts and the live capture state. */
@@ -349,6 +381,36 @@ export interface StartTimingAttemptRequest {
   clientStartedAt: string;
 }
 
+/** One frozen roster row of an offline Start snapshot. */
+export interface OfflineRosterEntryRequest {
+  enrollmentId: string;
+  registrationId: string;
+  /** The event-unique number at the press; absent for an excluded row. */
+  startNumber?: number | null;
+  sectionId: string;
+  requiredLaps: number;
+  /** The press-time exclusion, for example `EXISTING_OUTCOME`. */
+  excludedReason?: string | null;
+  initialOutcome?: 'FINISHED' | 'DNS' | 'DNF' | 'DSQ' | null;
+}
+
+/** `POST /events/:eventId/timing/attempts/offline-start` — a local Start. */
+export interface StartOfflineTimingAttemptRequest {
+  startId: string;
+  formatId: number;
+  gender: TimingGender;
+  /** The workstation that pressed Start and must hold the capture lock. */
+  workstationInstanceId: string;
+  /** The offline press instant, used as the attempt's official start. */
+  officialStartedAt: string;
+  /** The frozen roster as the device saw it at the press. */
+  roster: OfflineRosterEntryRequest[];
+  localAttemptId: string;
+  localClockEpochId: string;
+  /** The Start's place in the device's press order. */
+  deviceSequence: number;
+}
+
 /** `POST /events/:eventId/timing/heat-attempts` — the Start press of one heat. */
 export interface StartHeatAttemptRequest {
   /** The multi-stage race whose stage heat is timed. */
@@ -415,6 +477,13 @@ export interface AssignAnonymousSplitRequest {
   /** One qualifying attempt confirmed after an ambiguous number. */
   chosenAttemptId?: string;
   deviceSequence: number;
+}
+
+/** `POST /events/:eventId/timing/splits/assign-by-capture` — a local split. */
+export interface AssignAnonymousSplitByCaptureRequest
+  extends AssignAnonymousSplitRequest {
+  /** The split's event capture sequence. */
+  captureDeviceSequence: number;
 }
 
 /** `POST /events/:eventId/timing/splits/:splitId/cancel`. */

@@ -248,7 +248,10 @@ export function TimingCategoryBlock({
   const showsTakeCapture = !isCaptureHolder && onTakeCapture !== undefined;
   // An attempt exists only once the category has started, so a category that
   // never ran offers no record to read (U-29).
-  const showsRecord = block.attemptId !== null && onOpenRecord !== undefined;
+  const showsRecord =
+    block.attemptId !== null &&
+    block.local !== true &&
+    onOpenRecord !== undefined;
   const showsStart = showsStartControl(block);
   const isHeat = block.kind === 'HEAT';
   const unsentMarkTotal = pendingMarks(pendingMarkCount);
@@ -331,6 +334,10 @@ export function TimingCategoryBlock({
                 aria-label={unsentNotice(unsentMarkTotal)}
               >
                 {`Отметок не отправлено: ${unsentMarkTotal}`}
+              </Tag>
+            ) : block.local === true ? (
+              <Tag color="default" style={HEADER_ITEM_STYLE}>
+                Завершение после связи
               </Tag>
             ) : showsReadyCue ? (
               <Tag color="green" style={HEADER_ITEM_STYLE}>

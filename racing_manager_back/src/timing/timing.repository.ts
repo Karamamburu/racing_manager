@@ -1650,6 +1650,25 @@ export class TimingRepository {
    * a slot with no row here has no enrollment in the race's start and is
    * excluded by the service.
    */
+  /**
+   * The enrollments an offline Start snapshot names, including a row that has
+   * been withdrawn since the press. The snapshot is the frozen field, so the
+   * check must not depend on the current active status; the caller validates the
+   * event, start, format, gender, registration and required laps.
+   */
+  async listEnrollmentRowsByIds(
+    eventId: string,
+    enrollmentIds: readonly string[],
+    tx?: TimingTx,
+  ): Promise<TimingEnrollmentRow[]> {
+    if (enrollmentIds.length === 0) return [];
+    const rows = await this.db(tx).enrollment.findMany({
+      where: { eventId, id: { in: [...enrollmentIds] } },
+      select: ENROLLMENT_SELECT,
+    });
+    return rows.map(toEnrollmentRow);
+  }
+
   /** Every registration of the event carrying the committed number. */
   async findRegistrationsByStartNumber(
     eventId: string,
@@ -2415,6 +2434,25 @@ export class TimingRepository {
     deviceSequence: number,
   ): Promise<TimingEventReceiptRow | null> {
     const row = await tx.timingEventCaptureReceipt.findUnique({
+      where: {
+        eventId_workstationInstanceId_deviceSequence: {
+          eventId,
+          workstationInstanceId,
+          deviceSequence,
+        },
+      },
+      select: EVENT_RECEIPT_SELECT,
+    });
+    return row === null ? null : toEventReceiptRow(row);
+  }
+
+  /** The event capture receipt of one workstation sequence, without a transaction. */
+  async findEventReceiptForDevice(
+    eventId: string,
+    workstationInstanceId: string,
+    deviceSequence: number,
+  ): Promise<TimingEventReceiptRow | null> {
+    const row = await this.db().timingEventCaptureReceipt.findUnique({
       where: {
         eventId_workstationInstanceId_deviceSequence: {
           eventId,

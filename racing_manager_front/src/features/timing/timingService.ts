@@ -1,5 +1,6 @@
 import { apiClient } from '../../shared/api/ApiClient';
 import type {
+  AssignAnonymousSplitByCaptureRequest,
   AssignAnonymousSplitRequest,
   QuickUndoTimingSplitRequest,
   BindPendingFinishRequest,
@@ -16,6 +17,7 @@ import type {
   QuickUndoTimingPassRequest,
   RebindTimingPassRequest,
   StartHeatAttemptRequest,
+  StartOfflineTimingAttemptRequest,
   StartTimingAttemptRequest,
   StartTimingAttemptResult,
   TakeCaptureRequest,
@@ -103,6 +105,23 @@ export class TimingService {
   }
 
   /**
+   * The category Start recorded on the device while the page had no connection.
+   * The server creates the attempt from the frozen snapshot at the press
+   * instant; a repeated key returns the same attempt and epoch.
+   */
+  public async startOfflineAttempt(
+    eventId: string,
+    payload: StartOfflineTimingAttemptRequest,
+    idempotencyKey?: string,
+  ): Promise<StartTimingAttemptResult> {
+    return this.post<StartTimingAttemptResult>(
+      `${this.base(eventId)}/attempts/offline-start`,
+      payload,
+      idempotencyKey,
+    );
+  }
+
+  /**
    * Queues one anonymous split. It shares the capture route with a number and a
    * tile; only `kind` differs, and the API leaves it unbound until assignment.
    */
@@ -127,6 +146,23 @@ export class TimingService {
   ): Promise<TimingPassView> {
     return this.post<TimingPassView>(
       `${this.base(eventId)}/splits/${splitId}/assign`,
+      payload,
+      idempotencyKey,
+    );
+  }
+
+  /**
+   * Binds a split that was local when the assignment was recorded. The server
+   * resolves it from the applied event capture receipt, then applies the
+   * accepted assignment.
+   */
+  public async assignAnonymousSplitByCapture(
+    eventId: string,
+    payload: AssignAnonymousSplitByCaptureRequest,
+    idempotencyKey: string,
+  ): Promise<TimingPassView> {
+    return this.post<TimingPassView>(
+      `${this.base(eventId)}/splits/assign-by-capture`,
       payload,
       idempotencyKey,
     );

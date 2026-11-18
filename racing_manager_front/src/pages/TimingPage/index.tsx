@@ -497,11 +497,11 @@ export function TimingPage() {
   // number field in normal capture mode without a local click (E-09, F-05).
   useEffect(() => {
     if (selectedSplitId === null) return;
-    const splits = surfaceQuery.data?.anonymousSplits;
+    const splits = (capture.mergedSurface ?? surfaceQuery.data)?.anonymousSplits;
     if (splits === undefined) return;
     if (splits.some((entry) => entry.splitId === selectedSplitId)) return;
     setSelectedSplitId(null);
-  }, [selectedSplitId, surfaceQuery.data]);
+  }, [selectedSplitId, surfaceQuery.data, capture.mergedSurface]);
 
   /** Opens the record of the attempt the block currently shows (U-29). */
   const openRecord = (block: TimingCategoryBlockView) => {
@@ -665,28 +665,33 @@ export function TimingPage() {
     );
   }
 
+  // The hook merges the device-local attempt(s) and splits into the server
+  // surface; the page renders that merged view. The server read stays the only
+  // server fact (AD-8).
+  const surfaceView = capture.mergedSurface ?? surface;
+
   // The surface exposes the holder instance only, so the lock view carries the
   // fields it knows and leaves the user id and moment absent. A free lock is
   // `null`, the value the capture controls read as free (AD-5).
   const captureView: TimingCaptureView | null =
-    surface.captureWorkstationInstanceId === null
+    surfaceView.captureWorkstationInstanceId === null
       ? null
       : {
-          eventId: surface.eventId,
-          workstationInstanceId: surface.captureWorkstationInstanceId,
+          eventId: surfaceView.eventId,
+          workstationInstanceId: surfaceView.captureWorkstationInstanceId,
           heldByUserId: null,
           heldAt: null,
         };
 
   const isCaptureHolder =
-    surface.captureWorkstationInstanceId !== null &&
-    surface.captureWorkstationInstanceId === workstationInstanceId;
+    surfaceView.captureWorkstationInstanceId !== null &&
+    surfaceView.captureWorkstationInstanceId === workstationInstanceId;
   const holderLabel = isCaptureHolder
     ? 'это устройство'
-    : surface.captureWorkstationInstanceId === null
+    : surfaceView.captureWorkstationInstanceId === null
       ? 'свободен'
-      : `устройство ${surface.captureWorkstationInstanceId}`;
-  const hasRunningBlock = surface.categories.some(
+      : `устройство ${surfaceView.captureWorkstationInstanceId}`;
+  const hasRunningBlock = surfaceView.categories.some(
     (block) => block.state === 'RUNNING',
   );
 
@@ -705,15 +710,27 @@ export function TimingPage() {
       blockMarks.pendingMarks,
     ]),
   );
+  // A local block already carries its unsent passes in the participant counts
+  // (FR-42); only an unsent split assignment adds a separate pending mark
+  // (FR-31), so its tiles read this narrower map.
+  const assignmentMarksByBlock = new Map<string, Map<string, number>>();
+  for (const tile of offlineView.participantMarks) {
+    if (tile.assignmentMarks === 0) continue;
+    const perParticipant =
+      assignmentMarksByBlock.get(tile.blockKey) ?? new Map<string, number>();
+    perParticipant.set(tile.enrollmentId, tile.assignmentMarks);
+    assignmentMarksByBlock.set(tile.blockKey, perParticipant);
+  }
+
 
   const anonymousSplits: TimingAnonymousSplitView[] =
-    surface.anonymousSplits ?? [];
+    surfaceView.anonymousSplits ?? [];
   const selectedSplit =
     anonymousSplits.find((entry) => entry.splitId === selectedSplitId) ?? null;
 
   // The stage headers group the heat blocks; a heat block's race comes from its
   // own fields, so a surface without headers still renders every heat (U-12).
-  const stageGroups = surface.stageGroups ?? [];
+  const stageGroups = surfaceView.stageGroups ?? [];
   const stageGroupsByRace = new Map<string, TimingStageGroupView[]>();
   const heatBlocksByKey = new Map<string, TimingCategoryBlockView>();
   for (const group of stageGroups) {
@@ -721,7 +738,7 @@ export function TimingPage() {
     groups.push(group);
     stageGroupsByRace.set(group.raceId, groups);
   }
-  for (const block of surface.categories) {
+  for (const block of surfaceView.categories) {
     if (block.kind !== 'HEAT') continue;
     heatBlocksByKey.set(blockIdentity(block), block);
   }
@@ -743,9 +760,9 @@ export function TimingPage() {
 
   /** The Start press of one block; a refusal leaves capture state untouched. */
   const startBlock = (block: TimingCategoryBlockView) => {
-    // A start writes on the server and is never queued, so it waits for a
-    // connection instead of pretending to be an offline capture (U-07, F-04).
-    if (!requireConnection()) return;
+    // The hook chooses the accepted online route when the page has a connection
+    // and a device-local attempt when it does not (MANUAL-TIMING-7); the online
+    // route keeps its own capture-lock and state refusals.
     void capture.startAttempt(block).then(
       () => {
         setAnonymousNotice(null);
@@ -779,6 +796,24 @@ export function TimingPage() {
     const split = selectedSplit;
     if (split === null) {
       throw new Error(NO_SELECTED_SPLIT_MESSAGE);
+    }
+    // A local split that names several known candidates asks the referee to
+    // choose before it is queued; the server still resolves the real set (AD-9).
+    if (
+      split.localSplitId !== undefined &&
+      (split.candidates?.length ?? 0) > 1
+    ) {
+      setSplitChoice({
+        splitId: split.splitId,
+        startNumber,
+        attempts: (split.candidates ?? []).map((candidate) => ({
+          attemptId: candidate.attemptId,
+          label: candidate.attemptLabel,
+          passCount: 0,
+          requiredLaps: 0,
+        })),
+      });
+      throw new Error('Выберите попытку: номер подходит нескольким забегам.');
     }
     try {
       const outcome = await capture.assignAnonymousSplit(
@@ -871,7 +906,7 @@ export function TimingPage() {
     // global controls above own take, transfer and force-release otherwise
     // (AD-5).
     const onTakeCapture =
-      surface.captureWorkstationInstanceId === null
+      surfaceView.captureWorkstationInstanceId === null
         ? () => {
             void capture.takeCapture();
           }
@@ -885,14 +920,22 @@ export function TimingPage() {
     // The record is readable without the capture lock: reading never writes. A
     // block without an attempt has nothing to open (U-29).
     const onOpenRecord =
-      block.attemptId === null ? undefined : () => openRecord(block);
+      block.attemptId === null || block.local === true
+        ? undefined
+        : () => openRecord(block);
     // A heat names itself from its own stage and heat fields; only a category
     // block reads the event starts and participation formats.
     const view = block.kind === 'HEAT' ? null : describeBlock(block, event);
     // Both figures come from the page's outbox view, never from the block: the
     // tiles and the header read one derivation (FR-10, FR-37, U-08).
     const blockKey = timingOfflineBlockKey(block);
-    const pendingMarks = pendingMarksByBlock.get(blockKey);
+    // A local block already carries the device's accepted passes in its own
+    // participant counts, so the tiles do not add the same entries again; the
+    // header still states the block's unsent total (AD-8, AD-10).
+    const pendingMarks =
+      block.local === true
+        ? assignmentMarksByBlock.get(blockKey)
+        : pendingMarksByBlock.get(blockKey);
     const pendingMarkCount = pendingMarkTotalsByBlock.get(blockKey) ?? 0;
 
     return (
@@ -951,7 +994,7 @@ export function TimingPage() {
     string,
     { blocks: TimingCategoryBlockView[]; index: number; priority: number }
   >();
-  surface.categories.forEach((block, index) => {
+  surfaceView.categories.forEach((block, index) => {
     const key = blockCategoryKey(block);
     const existing = groupOrder.get(key);
     if (existing === undefined) {
@@ -1089,7 +1132,7 @@ export function TimingPage() {
             type="info"
             showIcon
             message={
-              surface.captureWorkstationInstanceId === null
+              surfaceView.captureWorkstationInstanceId === null
                 ? 'Захват хронометража свободен. Возьмите его на этом устройстве, чтобы вести хронометраж.'
                 : 'Только для чтения: хронометраж ведётся на другом устройстве.'
             }
@@ -1252,6 +1295,10 @@ export function TimingPage() {
                 canCancel={canOperate}
                 onUndo={undoAnonymousSplit}
                 canUndo={canOperate && isCaptureHolder}
+                onDelete={async (splitId) => {
+                  await capture.deleteLocalSplit?.(splitId);
+                }}
+                canDelete={canOperate}
                 selectionDisabled={!isCaptureHolder}
               />
             </Col>
@@ -1266,7 +1313,7 @@ export function TimingPage() {
           </Row>
         </Card>
 
-        {surface.categories.length === 0 && stageGroups.length === 0 ? (
+        {surfaceView.categories.length === 0 && stageGroups.length === 0 ? (
           <Card>
             <Empty description="У мероприятия нет стартов и категорий для хронометража" />
           </Card>
@@ -1297,7 +1344,9 @@ export function TimingPage() {
                   void chooseSplitAttempt(attempt.attemptId);
                 }}
               >
-                {attempt.label} · {attempt.passCount}/{attempt.requiredLaps}
+                {attempt.requiredLaps > 0
+                  ? `${attempt.label} · ${attempt.passCount}/${attempt.requiredLaps}`
+                  : attempt.label}
               </Button>
             ))}
           </Space>
@@ -1306,7 +1355,7 @@ export function TimingPage() {
         <AttemptRecordDrawer
           open={recordAttemptId !== null}
           title={recordTitle}
-          eventId={surface.eventId}
+          eventId={surfaceView.eventId}
           attemptId={recordAttemptId}
           participantNames={recordParticipantNames}
           canAdminister={canAdminister}

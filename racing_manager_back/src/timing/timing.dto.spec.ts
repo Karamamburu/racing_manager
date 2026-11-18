@@ -1,6 +1,8 @@
+import 'reflect-metadata';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import {
+  AssignAnonymousSplitByCaptureDto,
   AssignAnonymousSplitDto,
   BindPendingFinishDto,
   CancelAnonymousSplitDto,
@@ -14,11 +16,11 @@ import {
   ForceReleaseCaptureDto,
   OpenClockEpochDto,
   QuickUndoTimingPassDto,
-  QuickUndoTimingSplitDto,
   RebindTimingPassDto,
   SetRefereeRoleDto,
   StartHeatAttemptDto,
   StartTimingAttemptDto,
+  StartOfflineTimingAttemptDto,
   TakeCaptureDto,
   TransferCaptureDto,
 } from './timing.dto';
@@ -641,5 +643,108 @@ describe('SetRefereeRoleDto', () => {
 
   it('refuses a missing enabled flag', async () => {
     await expect(refused(SetRefereeRoleDto, {})).resolves.toContain('enabled');
+  });
+});
+
+function offlineStart(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    startId: 'b0f4f7f0-7d2c-4c6b-9f0d-0a1b2c3d4e5f',
+    formatId: 1,
+    gender: 'M',
+    workstationInstanceId: WORKSTATION,
+    officialStartedAt: ISO,
+    roster: [
+      {
+        enrollmentId: ATTEMPT_ID,
+        registrationId: CLASS_COMPETITION_ID,
+        startNumber: 10,
+        sectionId: 'CATEGORY',
+        requiredLaps: 3,
+        excludedReason: null,
+        initialOutcome: null,
+      },
+    ],
+    localAttemptId: 'local-attempt',
+    localClockEpochId: 'local-epoch',
+    deviceSequence: 1,
+    ...overrides,
+  };
+}
+
+function assignByCapture(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    captureDeviceSequence: 1,
+    startNumber: 42,
+    workstationInstanceId: WORKSTATION,
+    deviceSequence: 1,
+    ...overrides,
+  };
+}
+
+describe('StartOfflineTimingAttemptDto', () => {
+  it('accepts a well-formed offline snapshot', async () => {
+    await expect(
+      refused(StartOfflineTimingAttemptDto, offlineStart()),
+    ).resolves.toEqual([]);
+  });
+
+  it('refuses an empty or malformed roster', async () => {
+    await expect(
+      refused(StartOfflineTimingAttemptDto, offlineStart({ roster: [] })),
+    ).resolves.toContain('roster');
+    await expect(
+      refused(
+        StartOfflineTimingAttemptDto,
+        offlineStart({
+          roster: [
+            { ...(offlineStart().roster as object[])[0], requiredLaps: 0 },
+          ],
+        }),
+      ),
+    ).resolves.toContain('roster');
+  });
+
+  it('refuses a missing press instant and a missing local identity', async () => {
+    await expect(
+      refused(
+        StartOfflineTimingAttemptDto,
+        offlineStart({ officialStartedAt: 'yesterday' }),
+      ),
+    ).resolves.toContain('officialStartedAt');
+    await expect(
+      refused(
+        StartOfflineTimingAttemptDto,
+        offlineStart({ localAttemptId: '' }),
+      ),
+    ).resolves.toContain('localAttemptId');
+    await expect(
+      refused(
+        StartOfflineTimingAttemptDto,
+        offlineStart({ localClockEpochId: undefined }),
+      ),
+    ).resolves.toContain('localClockEpochId');
+  });
+});
+
+describe('AssignAnonymousSplitByCaptureDto', () => {
+  it('accepts a capture-sequence assignment', async () => {
+    await expect(
+      refused(AssignAnonymousSplitByCaptureDto, assignByCapture()),
+    ).resolves.toEqual([]);
+  });
+
+  it('requires a positive capture sequence', async () => {
+    for (const value of [undefined, 0, -1, 1.5]) {
+      await expect(
+        refused(
+          AssignAnonymousSplitByCaptureDto,
+          assignByCapture({ captureDeviceSequence: value }),
+        ),
+      ).resolves.toContain('captureDeviceSequence');
+    }
   });
 });

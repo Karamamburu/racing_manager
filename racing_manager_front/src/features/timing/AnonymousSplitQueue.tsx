@@ -1,5 +1,5 @@
-import { CloseOutlined, UndoOutlined } from '@ant-design/icons';
-import { Button, Card, Input, Modal, Space, Tag, Typography } from 'antd';
+import { CloseOutlined, DeleteOutlined, UndoOutlined } from '@ant-design/icons';
+import { Button, Card, Input, Modal, Popconfirm, Space, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import { formatTimingClock } from './ParticipantTile';
@@ -27,6 +27,16 @@ const EMPTY_LABEL =
   'Очередь пуста: Enter или Space на пустом поле номера добавят отсечку';
 const REASON_REQUIRED = 'Укажите причину отмены отсечки';
 const CANCEL_TITLE = 'Отмена неприсвоенной отсечки';
+const LOCAL_UNSENT_LABEL = 'не отправлена';
+const LOCAL_SENDING_LABEL = 'отправляется';
+const ASSIGNMENT_UNSENT_LABEL = 'назначение не отправлено';
+const LOCAL_TAG_STYLE: CSSProperties = {
+  backgroundColor: '#f9f0ff',
+  borderColor: '#722ed1',
+  borderStyle: 'dashed',
+  color: '#391085',
+  marginInlineEnd: 0,
+};
 
 export interface AnonymousSplitQueueProps {
   /** Queued entries in the capture order of the surface, oldest first. */
@@ -39,6 +49,10 @@ export interface AnonymousSplitQueueProps {
   onCancel: (splitId: string, reason: string) => Promise<void>;
   /** Withdraws the workstation's newest capture; absent hides the control. */
   onUndo?: (splitId: string, deviceSequence: number) => Promise<void>;
+  /** Removes an unapplied local split and its dependent assignment. */
+  onDelete?: (splitId: string) => Promise<void>;
+  /** Local deletion is offered to a timing operator while the split is local. */
+  canDelete?: boolean;
   /** Cancellation is a REFEREE/ADMINISTRATOR correction (E-08, F-07). */
   canCancel?: boolean;
   /** True while the workstation may withdraw its own newest capture. */
@@ -98,6 +112,8 @@ export function AnonymousSplitQueue({
   selectedSplitId,
   onSelect,
   onCancel,
+  onDelete,
+  canDelete = false,
   canCancel = false,
   onUndo,
   canUndo = false,
@@ -224,7 +240,7 @@ export function AnonymousSplitQueue({
                     type="button"
                     aria-pressed={selected}
                     aria-label={entryLabel(entry, ordinal)}
-                    disabled={selectionDisabled}
+                    disabled={selectionDisabled || entry.assigned === true}
                     onClick={() => onSelect(entry.splitId)}
                     style={{
                       ...entryStyle(selected),
@@ -234,6 +250,25 @@ export function AnonymousSplitQueue({
                     <Typography.Text strong style={{ fontSize: 12 }}>
                       Отсечка {ordinal} · Отметка: {formatTimingClock(entry.capturedAt)}
                     </Typography.Text>
+                    {entry.localSplitId !== undefined ? (
+                      <Tag style={LOCAL_TAG_STYLE}>
+                        {entry.assignedNumber !== undefined
+                          ? `назначена № ${entry.assignedNumber} · ${
+                              entry.sending
+                                ? LOCAL_SENDING_LABEL
+                                : LOCAL_UNSENT_LABEL
+                            }`
+                          : entry.sending
+                            ? LOCAL_SENDING_LABEL
+                            : LOCAL_UNSENT_LABEL}
+                      </Tag>
+                    ) : null}
+                    {entry.localSplitId === undefined &&
+                    entry.assigned === true ? (
+                      <Tag style={LOCAL_TAG_STYLE}>
+                        {ASSIGNMENT_UNSENT_LABEL}
+                      </Tag>
+                    ) : null}
                     {entry.bound ? (
                       <Tag color="default">Привязан</Tag>
                     ) : null}
@@ -257,6 +292,7 @@ export function AnonymousSplitQueue({
                   </button>
                   {canUndo &&
                   onUndo !== undefined &&
+                  entry.localSplitId === undefined &&
                   !entry.bound &&
                   entry.captureDeviceSequence !== null &&
                   entry.captureDeviceSequence !== undefined ? (
@@ -274,7 +310,30 @@ export function AnonymousSplitQueue({
                       }}
                     />
                   ) : null}
-                  {canCancel ? (
+                  {canDelete &&
+                  entry.localSplitId !== undefined &&
+                  entry.sending !== true &&
+                  onDelete !== undefined ? (
+                    <Popconfirm
+                      title="Удалить отсечку?"
+                      description="Отсечка и записанное назначение будут удалены с устройства. На сервер ничего не отправится."
+                      okText="Удалить"
+                      cancelText="Отмена"
+                      onConfirm={() => {
+                        void onDelete(entry.splitId);
+                      }}
+                    >
+                      <Button
+                        size="small"
+                        type="text"
+                        danger
+                        icon={<DeleteOutlined />}
+                        aria-label={`Удалить отсечку ${ordinal}`}
+                        disabled={busy}
+                      />
+                    </Popconfirm>
+                  ) : null}
+                  {canCancel && entry.localSplitId === undefined ? (
                     <Button
                       size="small"
                       type="text"

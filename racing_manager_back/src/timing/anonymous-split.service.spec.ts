@@ -21,6 +21,7 @@ import {
   type TimingEventSplitRow,
   type TimingCaptureLockRow,
   type TimingClassCompetitionRow,
+  type TimingEventReceiptRow,
   type TimingMarkRow,
   type TimingParticipantRow,
   type TimingReceiptRow,
@@ -77,6 +78,9 @@ function createRepositoryFake() {
     ),
     getCaptureLock: jest.fn(
       (): Promise<TimingCaptureLockRow | null> => Promise.resolve(lockRow()),
+    ),
+    findEventReceiptForDevice: jest.fn(
+      (): Promise<TimingEventReceiptRow | null> => Promise.resolve(null),
     ),
     findReceipt: jest.fn(
       (
@@ -205,7 +209,9 @@ function createRepositoryFake() {
     listQueuedEventSplits: jest.fn(
       (): Promise<TimingEventSplitRow[]> => Promise.resolve([]),
     ),
-    findEventSplit: jest.fn((): Promise<TimingEventSplitRow | null> => Promise.resolve(null)),
+    findEventSplit: jest.fn(
+      (): Promise<TimingEventSplitRow | null> => Promise.resolve(null),
+    ),
     listBlockingEventSplitsForAttempt: jest.fn(
       (): Promise<TimingEventSplitRow[]> => Promise.resolve([]),
     ),
@@ -563,6 +569,69 @@ describe('AnonymousSplitService', () => {
   });
 
   describe('assign', () => {
+    it('resolves a local split from its applied capture receipt and assigns it', async () => {
+      arrangePendingSplit();
+      repository.findParticipantByStartNumber.mockResolvedValue(
+        participantRow(),
+      );
+      repository.findEventReceiptForDevice.mockResolvedValue({
+        eventId: EVENT_ID,
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 7,
+        status: 'APPLIED',
+        reason: null,
+        splitId: SPLIT_ID,
+        resolvedAttemptId: null,
+        createdAt: NOW,
+      });
+
+      const pass = await service.assignByCapture(
+        USER_ID,
+        EVENT_ID,
+        { ...assignDto(), captureDeviceSequence: 7 },
+        'idempotency-1',
+      );
+
+      expect(repository.findEventReceiptForDevice).toHaveBeenCalledWith(
+        EVENT_ID,
+        WORKSTATION,
+        7,
+      );
+      expect(pass.passId).toBe(SPLIT_ID);
+      expect(repository.assignAnonymousSplit).toHaveBeenCalledWith(
+        TX,
+        SPLIT_ID,
+        {
+          enrollmentId: 'enrollment-a',
+          registrationId: 'registration-a',
+          startNumber: 10,
+          deviceSequence: 5,
+        },
+      );
+    });
+
+    it('refuses a local split with no applied capture receipt and applies nothing', async () => {
+      repository.findEventReceiptForDevice.mockResolvedValue({
+        eventId: EVENT_ID,
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 7,
+        status: 'REJECTED',
+        reason: 'capture refused',
+        splitId: null,
+        resolvedAttemptId: null,
+        createdAt: NOW,
+      });
+
+      await expect(
+        service.assignByCapture(USER_ID, EVENT_ID, {
+          ...assignDto(),
+          captureDeviceSequence: 7,
+        }),
+      ).rejects.toMatchObject({ code: TimingErrorCode.NOT_FOUND });
+      expect(repository.assignAnonymousSplit).not.toHaveBeenCalled();
+      expect(repository.withTransaction).not.toHaveBeenCalled();
+    });
+
     it('assigns by start number and returns the bound pass at the split instant', async () => {
       arrangePendingSplit();
       repository.findParticipantByStartNumber.mockResolvedValue(
@@ -1156,7 +1225,11 @@ describe('event-scoped number-only assignment', () => {
       ),
       findRegistrationsByStartNumber: jest.fn(() =>
         Promise.resolve([
-          { registrationId: 'registration-a', firstName: 'Иван', lastName: 'Петров' },
+          {
+            registrationId: 'registration-a',
+            firstName: 'Иван',
+            lastName: 'Петров',
+          },
         ]),
       ),
       listEnrollmentsForRegistration: jest.fn(() =>
@@ -1189,7 +1262,13 @@ describe('event-scoped number-only assignment', () => {
       insertAudit: jest.fn(() => Promise.resolve({})),
       findEventReceipt: jest.fn(() => Promise.resolve(null)),
     } as unknown as TimingRepository;
-    return { repository, updateMark, createMark, assignEventSplit, createReceipt };
+    return {
+      repository,
+      updateMark,
+      createMark,
+      assignEventSplit,
+      createReceipt,
+    };
   }
 
   it('assigns exactly one qualifying candidate at the captured instant', async () => {
@@ -1207,7 +1286,7 @@ describe('event-scoped number-only assignment', () => {
         startNumber: 31,
         workstationInstanceId: WORKSTATION,
         deviceSequence: 9,
-      } as AssignAnonymousSplitDto,
+      },
       'key-assign',
     );
 

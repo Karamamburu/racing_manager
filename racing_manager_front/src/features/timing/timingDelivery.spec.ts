@@ -653,3 +653,277 @@ describe('decideDeliveries: the participant gate reads stored payloads', () => {
     ]);
   });
 });
+
+describe('offline Start ordering', () => {
+  const LOCAL = 'local-attempt';
+  const EVENT = 'event-1';
+
+  function startItem(overrides: Partial<TimingQueueItem> = {}): TimingQueueItem {
+    return queueItem('start-1', {
+      id: 'start-1',
+      attemptId: LOCAL,
+      operation: 'START',
+      deviceSequence: 1,
+      createdAt: pressTime(1),
+      eventId: EVENT,
+      payload: {
+        localAttemptId: LOCAL,
+        localClockEpochId: 'local-epoch',
+        officialStartedAt: pressTime(1),
+      },
+      ...overrides,
+    });
+  }
+
+  function localPass(id = 'pass-1', sequence = 2): TimingQueueItem {
+    return queueItem(id, {
+      attemptId: LOCAL,
+      deviceSequence: sequence,
+      createdAt: pressTime(sequence),
+      eventId: EVENT,
+      payload: {
+        attemptId: LOCAL,
+        kind: 'NUMBER',
+        startNumber: 10,
+        clientCapturedAt: pressTime(sequence),
+        clientElapsedMs: sequence * 1_000,
+        clockEpochId: 'local-epoch',
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: sequence,
+      },
+    });
+  }
+
+  function splitItem(
+    id: string,
+    createdAt: string,
+    overrides: Partial<TimingQueueItem> = {},
+  ): TimingQueueItem {
+    return queueItem(id, {
+      attemptId: EVENT_SCOPE,
+      deviceSequence: 1,
+      createdAt,
+      eventId: EVENT,
+      payload: {
+        kind: 'ANONYMOUS_SPLIT',
+        clientCapturedAt: createdAt,
+        clientElapsedMs: 1_000,
+        clockEpochId: 'local-epoch',
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 1,
+      },
+      ...overrides,
+    });
+  }
+
+  it('starts the Start alone and holds its pass and a later event split', () => {
+    const decision = decide([
+      startItem(),
+      localPass(),
+      splitItem('split-after', pressTime(3), {
+        localAnchorAttemptId: LOCAL,
+      }),
+    ]);
+
+    expect(startedIds(decision)).toEqual(['start-1']);
+    expect(blockedReasons(decision)).toMatchObject({
+      'pass-1': 'start',
+      'split-after': 'start',
+    });
+  });
+
+  it('releases the pass and the split once the Start has a final answer', () => {
+    const decision = decide([
+      withStatus(startItem(), 'APPLIED'),
+      localPass(),
+      splitItem('split-after', pressTime(3), {
+        localAnchorAttemptId: LOCAL,
+      }),
+    ]);
+
+    expect(startedIds(decision)).toEqual(['pass-1', 'split-after']);
+  });
+
+  it('lets a split captured before the Start go ahead', () => {
+    const decision = decide([
+      startItem(),
+      splitItem('split-before', pressTime(0)),
+    ]);
+
+    expect(startedIds(decision)).toEqual(['start-1', 'split-before']);
+  });
+
+  it('holds a later split by its event even without an anchor, and not another event', () => {
+    const decision = decide([
+      startItem(),
+      splitItem('split-after', pressTime(3)),
+      splitItem('split-other-event', pressTime(3), { eventId: 'event-2' }),
+    ]);
+
+    expect(blockedReasons(decision)).toMatchObject({
+      'split-after': 'start',
+    });
+    expect(startedIds(decision)).toEqual(['start-1', 'split-other-event']);
+  });
+});
+
+describe('refused offline Start', () => {
+  const LOCAL = 'local-attempt';
+  const EVENT = 'event-1';
+
+  function refusedStart(): TimingQueueItem {
+    return queueItem('start-1', {
+      attemptId: LOCAL,
+      operation: 'START',
+      deviceSequence: 1,
+      createdAt: pressTime(1),
+      eventId: EVENT,
+      status: 'REJECTED',
+      payload: {
+        localAttemptId: LOCAL,
+        localClockEpochId: 'local-epoch',
+        officialStartedAt: pressTime(1),
+      },
+    });
+  }
+
+  function splitItem(epochId: string): TimingQueueItem {
+    return queueItem('split-1', {
+      attemptId: EVENT_SCOPE,
+      deviceSequence: 1,
+      createdAt: pressTime(2),
+      eventId: EVENT,
+      payload: {
+        kind: 'ANONYMOUS_SPLIT',
+        clientCapturedAt: pressTime(2),
+        clientElapsedMs: 1_000,
+        clockEpochId: epochId,
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 1,
+      },
+    });
+  }
+
+  function localPass(): TimingQueueItem {
+    return queueItem('pass-1', {
+      attemptId: LOCAL,
+      deviceSequence: 2,
+      createdAt: pressTime(2),
+      eventId: EVENT,
+      payload: {
+        attemptId: LOCAL,
+        kind: 'NUMBER',
+        startNumber: 10,
+        clientCapturedAt: pressTime(2),
+        clientElapsedMs: 1_000,
+        clockEpochId: 'local-epoch',
+        workstationInstanceId: WORKSTATION,
+        deviceSequence: 2,
+      },
+    });
+  }
+
+  it('never sends the passes or splits of a refused local attempt', () => {
+    const anchored = {
+      ...splitItem('local-epoch'),
+      localAnchorAttemptId: LOCAL,
+    };
+    const decision = decide([refusedStart(), localPass(), anchored]);
+
+    expect(startedIds(decision)).toEqual([]);
+    expect(blockedReasons(decision)).toMatchObject({
+      'pass-1': 'start',
+      'split-1': 'start',
+    });
+  });
+
+  it('blocks a split by its local epoch even without the anchor field', () => {
+    const decision = decide([refusedStart(), splitItem('local-epoch')]);
+
+    expect(startedIds(decision)).toEqual([]);
+    expect(blockedReasons(decision)).toMatchObject({ 'split-1': 'start' });
+  });
+
+  it('leaves a split of another clock alone once the Start is refused', () => {
+    const decision = decide([refusedStart(), splitItem('other-epoch')]);
+
+    expect(startedIds(decision)).toEqual(['split-1']);
+    expect(blockedReasons(decision)['split-1']).toBeUndefined();
+  });
+});
+
+describe('offline Start and assignments', () => {
+  const LOCAL = 'local-attempt';
+  const EVENT = 'event-1';
+
+  function startItem(status: TimingQueueItem['status'] = 'PENDING'): TimingQueueItem {
+    return queueItem('start-1', {
+      attemptId: LOCAL,
+      operation: 'START',
+      deviceSequence: 1,
+      createdAt: pressTime(1),
+      eventId: EVENT,
+      status,
+      payload: {
+        localAttemptId: LOCAL,
+        localClockEpochId: 'local-epoch',
+        officialStartedAt: pressTime(1),
+      },
+    });
+  }
+
+  function assignment(
+    id: string,
+    createdAt: string,
+    chosenAttemptId?: string,
+  ): TimingQueueItem {
+    return queueItem(id, {
+      attemptId: EVENT_SCOPE,
+      operation: 'ANONYMOUS_ASSIGN',
+      deviceSequence: 2,
+      createdAt,
+      eventId: EVENT,
+      payload: {
+        captureDeviceSequence: 5,
+        request: {
+          startNumber: 10,
+          workstationInstanceId: WORKSTATION,
+          deviceSequence: 2,
+          ...(chosenAttemptId === undefined ? {} : { chosenAttemptId }),
+        },
+      },
+    });
+  }
+
+  it('holds a later assignment behind the local Start', () => {
+    const decision = decide([
+      startItem(),
+      assignment('assign-after', pressTime(3)),
+    ]);
+
+    expect(startedIds(decision)).toEqual(['start-1']);
+    expect(blockedReasons(decision)).toMatchObject({
+      'assign-after': 'start',
+    });
+  });
+
+  it('holds an assignment that names the local attempt even before the Start row', () => {
+    const decision = decide([
+      startItem(),
+      assignment('assign-chosen', pressTime(2), LOCAL),
+    ]);
+
+    expect(blockedReasons(decision)).toMatchObject({
+      'assign-chosen': 'start',
+    });
+  });
+
+  it('lets an assignment captured before the Start go ahead', () => {
+    const decision = decide([
+      startItem(),
+      assignment('assign-before', pressTime(0)),
+    ]);
+
+    expect(startedIds(decision)).toEqual(['start-1', 'assign-before']);
+  });
+});

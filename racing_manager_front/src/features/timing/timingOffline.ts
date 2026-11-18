@@ -63,6 +63,7 @@ export const TIMING_OFFLINE_ENTRY_KINDS = [
   'BIND',
   'UNDO',
   'ANONYMOUS_ASSIGN',
+  'START',
 ] as const;
 
 export type TimingOfflineEntryKind = (typeof TIMING_OFFLINE_ENTRY_KINDS)[number];
@@ -80,6 +81,7 @@ export const TIMING_OFFLINE_ENTRY_KIND_LABELS: Record<
   BIND: 'Привязка финиша',
   UNDO: 'Отмена отметки',
   ANONYMOUS_ASSIGN: 'Присвоение отсечки',
+  START: 'Старт категории',
 };
 
 /**
@@ -145,6 +147,14 @@ export interface TimingOfflineEntryView {
   pairRole: TimingOfflinePairRole | null;
   /** The server's refusal message, verbatim, or `null`. */
   reason: string | null;
+  /** The outbox sequence of the capture, when the entry has one. */
+  deviceSequence: number;
+  /** The attempt that anchored a local split's clock, when recorded. */
+  localAnchorAttemptId: string | null;
+  /** The raw elapsed value carried by the capture payload, when present. */
+  elapsedMs: number | null;
+  /** The split capture sequence an assignment names, when present. */
+  captureDeviceSequence: number | null;
 }
 
 /** The pending marks of one participant tile. */
@@ -158,6 +168,8 @@ export interface TimingOfflineParticipantMarksView {
   confirmedPassCount: number;
   /** Unsent marks this tile shows. */
   pendingMarks: number;
+  /** Of those, the marks an unsent split assignment adds (FR-31). */
+  assignmentMarks: number;
   /** Confirmed laps an unsent withdrawal will retire from this tile. */
   confirmedLapsRetiring: number;
 }
@@ -167,6 +179,8 @@ export interface TimingOfflineBlockMarksView {
   blockKey: string;
   attemptId: string | null;
   pendingMarks: number;
+  /** Of those, the marks unsent split assignments add (FR-31). */
+  assignmentMarks: number;
   confirmedLapsRetiring: number;
 }
 
@@ -260,6 +274,7 @@ interface ListedRow {
 interface TileTotal {
   location: SurfaceParticipantRow;
   pendingMarks: number;
+  assignmentMarks: number;
   confirmedLapsRetiring: number;
 }
 
@@ -268,6 +283,7 @@ interface BlockTotal {
   attemptId: string | null;
   index: number;
   pendingMarks: number;
+  assignmentMarks: number;
   confirmedLapsRetiring: number;
 }
 
@@ -304,6 +320,9 @@ export function deriveTimingOfflineView(
   // Capture order: the order the outbox replays in, derived from the same key
   // the queue sorts by.
   const records = [...items]
+    // A refused Start is kept only as the tombstone of its invalid clock epoch;
+    // its refusal was reported once and it is not a queue row (AD-11).
+    .filter((item) => !(item.operation === 'START' && item.status === 'REJECTED'))
     .sort(compareQueueItems)
     .map((item) => describeEntry(item, splitPressTimes));
 
@@ -418,6 +437,8 @@ export function deriveTimingOfflineView(
     }
 
     const { pendingMarks: marks, confirmedLapsRetired } = row.effect;
+    const assignmentMarks =
+      row.record.kind === 'ANONYMOUS_ASSIGN' ? marks : 0;
     confirmedLapsRetiring += confirmedLapsRetired;
     if (marks === 0 && confirmedLapsRetired === 0) continue;
 
@@ -428,12 +449,19 @@ export function deriveTimingOfflineView(
     }
 
     pendingMarks += marks;
-    accumulateTile(tiles, location, marks, confirmedLapsRetired);
+    accumulateTile(
+      tiles,
+      location,
+      marks,
+      assignmentMarks,
+      confirmedLapsRetired,
+    );
     accumulateBlock(
       blockTotals,
       location,
       blocks,
       marks,
+      assignmentMarks,
       confirmedLapsRetired,
     );
   }
@@ -448,6 +476,7 @@ export function deriveTimingOfflineView(
       fullName: total.location.participant.fullName,
       confirmedPassCount: total.location.participant.passCount,
       pendingMarks: total.pendingMarks,
+      assignmentMarks: total.assignmentMarks,
       confirmedLapsRetiring: total.confirmedLapsRetiring,
     }));
 
@@ -457,6 +486,7 @@ export function deriveTimingOfflineView(
       blockKey: total.blockKey,
       attemptId: total.attemptId,
       pendingMarks: total.pendingMarks,
+      assignmentMarks: total.assignmentMarks,
       confirmedLapsRetiring: total.confirmedLapsRetiring,
     }));
 
@@ -511,6 +541,7 @@ function emptyKindCounts(): Record<TimingOfflineEntryKind, number> {
     BIND: 0,
     UNDO: 0,
     ANONYMOUS_ASSIGN: 0,
+    START: 0,
   };
 }
 
@@ -737,6 +768,18 @@ function describeEntry(
         pressTime: item.createdAt,
         location: undefined,
       };
+    case 'START':
+      return {
+        item,
+        kind: 'START',
+        attemptId: item.attemptId,
+        blockKey: null,
+        enrollmentId: null,
+        startNumber: null,
+        addsMark: false,
+        pressTime: readString(payload, 'officialStartedAt') ?? item.createdAt,
+        location: undefined,
+      };
   }
 }
 
@@ -857,6 +900,13 @@ function toEntryView(
     pairId,
     pairRole,
     reason: row.status === 'REJECTED' ? (record.item.error ?? null) : null,
+    deviceSequence: record.item.deviceSequence,
+    localAnchorAttemptId: record.item.localAnchorAttemptId ?? null,
+    elapsedMs: readNumber(asRecord(record.item.payload), 'clientElapsedMs'),
+    captureDeviceSequence: readNumber(
+      asRecord(record.item.payload),
+      'captureDeviceSequence',
+    ),
   };
 }
 
@@ -864,15 +914,18 @@ function accumulateTile(
   tiles: Map<string, TileTotal>,
   location: SurfaceParticipantRow,
   marks: number,
+  assignmentMarks: number,
   confirmedLapsRetired: number,
 ): void {
   const key = `${location.blockKey}:${location.participant.enrollmentId}`;
   const total = tiles.get(key) ?? {
     location,
     pendingMarks: 0,
+    assignmentMarks: 0,
     confirmedLapsRetiring: 0,
   };
   total.pendingMarks += marks;
+  total.assignmentMarks += assignmentMarks;
   total.confirmedLapsRetiring += confirmedLapsRetired;
   tiles.set(key, total);
 }
@@ -882,6 +935,7 @@ function accumulateBlock(
   location: SurfaceParticipantRow,
   blocks: readonly SurfaceBlockRow[],
   marks: number,
+  assignmentMarks: number,
   confirmedLapsRetired: number,
 ): void {
   const total = totals.get(location.blockKey) ?? {
@@ -891,9 +945,11 @@ function accumulateBlock(
       blocks.find((entry) => entry.blockKey === location.blockKey)?.index ??
       blocks.length,
     pendingMarks: 0,
+    assignmentMarks: 0,
     confirmedLapsRetiring: 0,
   };
   total.pendingMarks += marks;
+  total.assignmentMarks += assignmentMarks;
   total.confirmedLapsRetiring += confirmedLapsRetired;
   totals.set(location.blockKey, total);
 }

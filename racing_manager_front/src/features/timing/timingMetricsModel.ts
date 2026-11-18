@@ -87,17 +87,22 @@ export function computeTimingMetrics(
   }
 
   const participants = new Map<string, TimingParticipantTileView>();
+  const localEnrollments = new Set<string>();
   for (const block of surface.categories) {
     for (const participant of block.participants) {
       if (participant.excludedReason !== null) continue;
       participants.set(participant.enrollmentId, participant);
+      if (block.local === true) localEnrollments.add(participant.enrollmentId);
     }
   }
 
   let participantsFinished = 0;
   let onCourse = 0;
   for (const participant of participants.values()) {
-    if (participant.passCount === participant.requiredLaps) {
+    if (
+      participant.passCount === participant.requiredLaps &&
+      !localEnrollments.has(participant.enrollmentId)
+    ) {
       participantsFinished += 1;
     }
     if (participant.state === 'RACING') {
