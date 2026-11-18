@@ -237,6 +237,8 @@ export interface TimingAnonymousSplitView {
   localSplitId?: string;
   /** Device-local derivation only: a queued assignment already names this split. */
   assigned?: boolean;
+  /** The number a queued assignment targets, for the queue's own label. */
+  assignedNumber?: number;
 }
 
 /** The whole surface of one event: every protocol category plus the lock holder. */

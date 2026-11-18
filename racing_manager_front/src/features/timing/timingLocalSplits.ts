@@ -133,23 +133,23 @@ function candidatesAt(
     }));
 }
 
-function assignedCaptureSequences(
+function assignedAssignments(
   entries: readonly TimingOfflineEntryView[],
-): Set<number> {
-  const sequences = new Set<number>();
+): Map<number, number | null> {
+  const assignments = new Map<number, number | null>();
   for (const entry of entries) {
     if (entry.operation !== 'ANONYMOUS_ASSIGN') continue;
     if (!entry.unsent || entry.rejected) continue;
     if (entry.captureDeviceSequence === null) continue;
-    sequences.add(entry.captureDeviceSequence);
+    assignments.set(entry.captureDeviceSequence, entry.startNumber);
   }
-  return sequences;
+  return assignments;
 }
 
 function localSplits(
   input: TimingLocalSplitsInput,
   attempts: readonly AttemptCandidate[],
-  assigned: ReadonlySet<number>,
+  assigned: ReadonlyMap<number, number | null>,
 ): TimingAnonymousSplitView[] {
   return input.offline.entries
     .filter(
@@ -161,6 +161,7 @@ function localSplits(
     )
     .map((entry) => {
       const captureAt = officialCaptureAt(entry, attempts);
+      const assignment = assigned.get(entry.deviceSequence);
       return {
         splitId: entry.id,
         localSplitId: entry.id,
@@ -172,23 +173,34 @@ function localSplits(
         // A local split is not on the server yet, in flight or not.
         unsent: true,
         sending: entry.isSending,
-        assigned: assigned.has(entry.deviceSequence),
+        assigned: assignment !== undefined,
+        ...(assignment === undefined || assignment === null
+          ? {}
+          : { assignedNumber: assignment }),
       };
     });
 }
 
 function serverSplits(
   surface: TimingSurfaceView,
-  assigned: ReadonlySet<number>,
+  assigned: ReadonlyMap<number, number | null>,
 ): TimingAnonymousSplitView[] {
-  return (surface.anonymousSplits ?? []).map((split) => ({
-    ...split,
-    ...(split.captureDeviceSequence !== null &&
-    split.captureDeviceSequence !== undefined &&
-    assigned.has(split.captureDeviceSequence)
-      ? { assigned: true }
-      : {}),
-  }));
+  return (surface.anonymousSplits ?? []).map((split) => {
+    const assignment =
+      split.captureDeviceSequence === null ||
+      split.captureDeviceSequence === undefined
+        ? undefined
+        : assigned.get(split.captureDeviceSequence);
+    return {
+      ...split,
+      ...(assignment === undefined
+        ? {}
+        : {
+            assigned: true,
+            ...(assignment === null ? {} : { assignedNumber: assignment }),
+          }),
+    };
+  });
 }
 
 export function deriveLocalSplits(
@@ -198,7 +210,7 @@ export function deriveLocalSplits(
     ...serverAttempts(input.surface, input.labelFor),
     ...localAttemptCandidates(input.surface, input.localAttempts, input.labelFor),
   ];
-  const assigned = assignedCaptureSequences(input.offline.entries);
+  const assigned = assignedAssignments(input.offline.entries);
   const local = localSplits(input, attempts, assigned);
   const splits = [...serverSplits(input.surface, assigned), ...local].sort(
     (left, right) =>

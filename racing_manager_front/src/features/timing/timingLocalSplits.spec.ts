@@ -177,6 +177,7 @@ describe('deriveLocalSplits', () => {
       kindLabel: 'Присвоение отсечки',
       operation: 'ANONYMOUS_ASSIGN',
       captureDeviceSequence: 3,
+      startNumber: 17,
       localAnchorAttemptId: null,
       elapsedMs: null,
     });
@@ -188,10 +189,12 @@ describe('deriveLocalSplits', () => {
 
     const local = result.splits.find((split) => split.localSplitId === 'entry-1');
     expect(local?.assigned).toBe(true);
+    expect(local?.assignedNumber).toBe(17);
     expect(result.localUnassignedCount).toBe(0);
     // The same capture sequence marks a server row whose split already arrived.
     const server = result.splits.find((split) => split.splitId === 'server-split');
     expect(server?.assigned).toBe(true);
+    expect(server?.assignedNumber).toBe(17);
   });
 
   it('keeps a sending split and excludes it from the unassigned count only when assigned', () => {
