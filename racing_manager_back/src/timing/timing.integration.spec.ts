@@ -4,6 +4,7 @@ import {
   UnauthorizedException,
   type INestApplication,
 } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import type { Server } from 'http';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -16,6 +17,9 @@ import {
   ClassCompetitionsService,
   type ClassCompetitionView,
 } from '../class-competitions/class-competitions.service';
+import { IdempotencyInterceptor } from '../idempotency/idempotency.interceptor';
+import { IdempotencyService } from '../idempotency/idempotency.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { AnonymousSplitService } from './anonymous-split.service';
 import { TimingController } from './timing.controller';
 import { TimingErrorCode } from './timing.errors';
@@ -1139,6 +1143,125 @@ class InMemoryTimingRepository {
 }
 
 /* -------------------------------------------------------------------------- */
+/* In-memory idempotency store                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** The `responseStatus` `IdempotencyService` writes on claim, before any answer. */
+const IDEMPOTENCY_IN_PROGRESS_SENTINEL = 0;
+
+/** One `idempotency_records` row as the idempotency layer reads it. */
+type IdempotencyRow = {
+  actorKey: string;
+  httpMethod: string;
+  routeTemplate: string;
+  idempotencyKey: string;
+  payloadHash: string;
+  responseStatus: number;
+  responseBody: unknown;
+  createdAt: Date;
+  expiresAt: Date;
+};
+
+type IdempotencyWhere = {
+  actorKey: string;
+  httpMethod: string;
+  routeTemplate: string;
+  idempotencyKey: string;
+};
+
+type IdempotencyUniqueWhere = {
+  actorKey_httpMethod_routeTemplate_idempotencyKey: IdempotencyWhere;
+};
+
+function idempotencyRowKey(where: IdempotencyWhere): string {
+  return [
+    where.actorKey,
+    where.httpMethod,
+    where.routeTemplate,
+    where.idempotencyKey,
+  ].join('|');
+}
+
+/**
+ * The only Prisma stand-in of the keyed-capture tests: the real
+ * `IdempotencyService` claims, completes and replays against this map, so a test
+ * can leave a record in the state an unanswered first request leaves behind.
+ */
+class InMemoryIdempotencyPrisma {
+  readonly rows = new Map<string, IdempotencyRow>();
+
+  readonly idempotencyRecord = {
+    create: ({ data }: { data: Omit<IdempotencyRow, 'createdAt'> }) => {
+      const key = idempotencyRowKey(data);
+      if (this.rows.has(key)) {
+        throw Object.assign(new Error('unique'), { code: 'P2002' });
+      }
+      const row: IdempotencyRow = {
+        ...data,
+        responseBody: data.responseBody ?? null,
+        createdAt: new Date(),
+      };
+      this.rows.set(key, row);
+      return Promise.resolve(row);
+    },
+    findUnique: ({ where }: { where: IdempotencyUniqueWhere }) =>
+      Promise.resolve(
+        this.rows.get(
+          idempotencyRowKey(
+            where.actorKey_httpMethod_routeTemplate_idempotencyKey,
+          ),
+        ) ?? null,
+      ),
+    update: ({
+      where,
+      data,
+    }: {
+      where: IdempotencyUniqueWhere;
+      data: Partial<IdempotencyRow>;
+    }) => {
+      const row = this.rows.get(
+        idempotencyRowKey(
+          where.actorKey_httpMethod_routeTemplate_idempotencyKey,
+        ),
+      );
+      if (row === undefined) {
+        throw new Error('Missing idempotency row');
+      }
+      Object.assign(row, data);
+      return Promise.resolve(row);
+    },
+    deleteMany: ({ where }: { where: IdempotencyWhere }) => {
+      const removed = this.rows.delete(idempotencyRowKey(where));
+      return Promise.resolve({ count: removed ? 1 : 0 });
+    },
+  };
+
+  findRow(idempotencyKey: string): IdempotencyRow {
+    const row = [...this.rows.values()].find(
+      (candidate) => candidate.idempotencyKey === idempotencyKey,
+    );
+    if (row === undefined) {
+      throw new Error(`No idempotency record for ${idempotencyKey}.`);
+    }
+    return row;
+  }
+
+  /**
+   * Turns the record of a finished capture back into an open claim: the
+   * in-progress status, no stored body and a fresh `createdAt`, so the claim is
+   * neither stale nor replayable. This is exactly what a first request that is
+   * still being processed has written when its repeat arrives.
+   */
+  reopenClaim(idempotencyKey: string): IdempotencyRow {
+    const row = this.findRow(idempotencyKey);
+    row.responseStatus = IDEMPOTENCY_IN_PROGRESS_SENTINEL;
+    row.responseBody = null;
+    row.createdAt = new Date();
+    return row;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Roles and harness                                                           */
 /* -------------------------------------------------------------------------- */
 
@@ -1170,6 +1293,7 @@ class TestRolesService {
 type Harness = {
   server: Server;
   repository: InMemoryTimingRepository;
+  idempotency: InMemoryIdempotencyPrisma;
 };
 
 type SessionRequest = {
@@ -1234,6 +1358,7 @@ function applySession(
 async function createHarness(): Promise<Harness> {
   const repository = new InMemoryTimingRepository();
   seedRepository(repository);
+  const idempotency = new InMemoryIdempotencyPrisma();
   const raceViews = [raceView()];
   const moduleRef = await Test.createTestingModule({
     controllers: [TimingController],
@@ -1243,6 +1368,12 @@ async function createHarness(): Promise<Harness> {
       TimingExceptionFilter,
       SessionAuthGuard,
       RolesGuard,
+      IdempotencyService,
+      IdempotencyInterceptor,
+      // The production module registers the same interceptor globally, so a
+      // keyed capture reaches this harness through the real replay path.
+      { provide: APP_INTERCEPTOR, useExisting: IdempotencyInterceptor },
+      { provide: PrismaService, useValue: idempotency },
       { provide: TimingRepository, useValue: repository },
       { provide: RolesService, useValue: new TestRolesService(ROLES_BY_USER) },
       {
@@ -1255,7 +1386,7 @@ async function createHarness(): Promise<Harness> {
   app.use(applySession);
   await app.init();
   openApps.push(app);
-  return { server: app.getHttpServer() as Server, repository };
+  return { server: app.getHttpServer() as Server, repository, idempotency };
 }
 
 afterEach(async () => {
@@ -1336,14 +1467,17 @@ async function captureAnonymousSplit(
   return response.body as TimingPassView;
 }
 
-async function captureTilePass(
-  server: Server,
+/**
+ * The exact body of one tile capture. The whole object is the idempotent
+ * payload, so a repeat must send this same value, not a rebuilt look-alike.
+ */
+function tilePassRequest(
   attempt: StartTimingAttemptResult,
   enrollmentId: string,
   deviceSequence: number,
   elapsedMs: number,
-): Promise<SupertestResponse> {
-  return post(server, `${BASE_PATH}/passes`).send({
+) {
+  return {
     attemptId: attempt.attempt.attemptId,
     kind: 'TILE',
     enrollmentId,
@@ -1352,7 +1486,19 @@ async function captureTilePass(
     deviceSequence,
     clientCapturedAt: isoAt(elapsedMs),
     clientElapsedMs: elapsedMs,
-  });
+  };
+}
+
+async function captureTilePass(
+  server: Server,
+  attempt: StartTimingAttemptResult,
+  enrollmentId: string,
+  deviceSequence: number,
+  elapsedMs: number,
+): Promise<SupertestResponse> {
+  return post(server, `${BASE_PATH}/passes`).send(
+    tilePassRequest(attempt, enrollmentId, deviceSequence, elapsedMs),
+  );
 }
 
 /** Captures every participant N times and answers the last used sequence. */
@@ -2139,5 +2285,112 @@ describe('timing API integration: concurrency and authorization', () => {
     repository.takeLock(WORKSTATION, ADMIN_USER_ID);
     const adminHeat = await startSeededHeat(server, 2, ADMIN);
     expect(adminHeat.attempt.heatNumber).toBe(2);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Keyed capture repeat                                                       */
+/* -------------------------------------------------------------------------- */
+
+/** A conflict body of the idempotency layer: coded only for an open claim. */
+type KeyedConflictBody = {
+  statusCode: number;
+  code?: string;
+  message: string;
+  error?: string;
+};
+
+describe('timing API integration: keyed capture repeat', () => {
+  const CAPTURE_KEY = 'capture-key-open-claim';
+
+  /**
+   * One successful keyed capture, then the same key put back into the state a
+   * first request leaves behind while it is still being processed (AD-4). The
+   * stored pass and the record stay, so the repeat meets a real capture.
+   */
+  async function seedOpenClaim() {
+    const harness = await createHarness();
+    const heat = await startSeededHeat(harness.server, 1);
+    const body = tilePassRequest(heat, ENROLLMENT_1, 1, 10_000);
+
+    const first = await post(harness.server, `${BASE_PATH}/passes`)
+      .set('Idempotency-Key', CAPTURE_KEY)
+      .send(body);
+    expect(first.status).toBe(201);
+    expect(first.body as TimingPassView).toMatchObject({
+      attemptId: heat.attempt.attemptId,
+      enrollmentId: ENROLLMENT_1,
+      lapNumber: 1,
+      status: 'BOUND',
+    });
+    expect(harness.repository.marks).toHaveLength(1);
+
+    const record = harness.idempotency.findRow(CAPTURE_KEY);
+    expect(record).toMatchObject({ httpMethod: 'POST', responseStatus: 201 });
+    expect(record.routeTemplate.endsWith('/timing/passes')).toBe(true);
+
+    harness.idempotency.reopenClaim(CAPTURE_KEY);
+
+    return { ...harness, heat, body };
+  }
+
+  it('answers a repeat of an open claim with the coded 409 and no second pass', async () => {
+    const { server, repository, heat, body } = await seedOpenClaim();
+
+    const repeat = await post(server, `${BASE_PATH}/passes`)
+      .set('Idempotency-Key', CAPTURE_KEY)
+      .send(body);
+
+    expect(repeat.status).toBe(409);
+    const coded = repeat.body as KeyedConflictBody;
+    expect(coded).toEqual({
+      statusCode: 409,
+      code: 'IDEMPOTENCY_IN_PROGRESS',
+      message: 'A request with this Idempotency-Key is still in progress.',
+    });
+    // Exact body: the client reads this one `code` and nothing else, so no
+    // generic `error` field and no extra key may ride along (AD-4, F-04).
+    expect(Object.keys(coded).sort()).toEqual([
+      'code',
+      'message',
+      'statusCode',
+    ]);
+
+    // F-04, E-10: the repeat is not a capture — no mark, no receipt for it and
+    // no second pass on the tile.
+    expect(repository.marks).toHaveLength(1);
+    expect(repository.receipts).toHaveLength(1);
+    const surface = await getSurface(server);
+    const tile = surface.categories
+      .find((block) => block.attemptId === heat.attempt.attemptId)
+      ?.participants.find(
+        (participant) => participant.startNumber === START_NUMBER_1,
+      );
+    expect(tile?.passCount).toBe(1);
+  });
+
+  it('keeps the generic conflict for the same key with a different body', async () => {
+    const { server, repository, body } = await seedOpenClaim();
+
+    const mismatch = await post(server, `${BASE_PATH}/passes`)
+      .set('Idempotency-Key', CAPTURE_KEY)
+      .send({
+        ...body,
+        deviceSequence: 2,
+        clientCapturedAt: isoAt(20_000),
+        clientElapsedMs: 20_000,
+      });
+
+    expect(mismatch.status).toBe(409);
+    const generic = mismatch.body as KeyedConflictBody;
+    expect(generic).toEqual({
+      statusCode: 409,
+      message: 'Idempotency-Key was already used with a different payload.',
+      error: 'Conflict',
+    });
+    // The payload mismatch keeps its prose answer: a real conflict must stay a
+    // definitive refusal, never the unresolved in-progress code (AD-4).
+    expect('code' in generic).toBe(false);
+    expect(repository.marks).toHaveLength(1);
   });
 });

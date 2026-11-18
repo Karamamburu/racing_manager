@@ -63,6 +63,66 @@ export const TIMING_CAPTURE_KINDS = [
 
 export type TimingCaptureKind = (typeof TIMING_CAPTURE_KINDS)[number];
 
+/**
+ * What the capture hook answered about one capture-side action.
+ *
+ * `ACCEPTED` is the new contract of the parallel pump: the press is recorded on
+ * the device and the referee may continue. The answer itself arrives later as a
+ * `TimingCaptureOutcomeEvent`, so `CONFIRMED`, `UNSENT` and `REJECTED` stay for
+ * callers that still observe an answered action directly.
+ */
+export const TIMING_CAPTURE_OUTCOME_STATUSES = [
+  'ACCEPTED',
+  'CONFIRMED',
+  'UNSENT',
+  'REJECTED',
+] as const;
+
+export type TimingCaptureOutcomeStatus =
+  (typeof TIMING_CAPTURE_OUTCOME_STATUSES)[number];
+
+/** The outcome of one capture-side action. */
+export interface TimingCaptureOutcome {
+  status: TimingCaptureOutcomeStatus;
+  /** The server's refusal message, verbatim; present only on `REJECTED`. */
+  reason?: string;
+}
+
+/** How an answered capture reads to the referee. */
+export const TIMING_CAPTURE_OUTCOME_TONES = [
+  'confirmed',
+  'refused',
+  'unsent',
+] as const;
+
+export type TimingCaptureOutcomeTone =
+  (typeof TIMING_CAPTURE_OUTCOME_TONES)[number];
+
+/**
+ * One answer about one recorded capture, in arrival order.
+ *
+ * `id` is the capture record (the idempotency key), and `subject` names the
+ * number or participant the answer concerns from the recorded payload — never
+ * from a display name that may change later.
+ */
+export interface TimingCaptureOutcomeEvent {
+  id: string;
+  subject: string;
+  tone: TimingCaptureOutcomeTone;
+  /** The server's message, verbatim; only on `refused`. */
+  reason?: string;
+  /** ISO-8601 arrival stamp, display only. */
+  at: string;
+}
+
+/** One undismissed refusal the field keeps until the referee closes it. */
+export interface TimingRefusalNotice {
+  id: string;
+  subject: string;
+  reason: string;
+  at: string;
+}
+
 /** Which lifecycle an attempt follows: a protocol category or one heat. */
 export const TIMING_ATTEMPT_KINDS = ['CATEGORY', 'HEAT'] as const;
 

@@ -18,6 +18,7 @@ import {
   switchMap,
   throwError,
 } from 'rxjs';
+import { idempotencyInProgressConflict } from './idempotency.errors';
 import {
   IdempotencyService,
   hashPayload,
@@ -72,10 +73,11 @@ export class IdempotencyInterceptor implements NestInterceptor {
     return from(this.idempotency.claim(scope, payloadHash)).pipe(
       mergeMap((claim) => {
         if (claim.kind === 'conflict') {
+          if (claim.reason === 'in_progress') {
+            throw idempotencyInProgressConflict();
+          }
           throw new ConflictException(
-            claim.reason === 'payload_mismatch'
-              ? 'Idempotency-Key was already used with a different payload.'
-              : 'A request with this Idempotency-Key is still in progress.',
+            'Idempotency-Key was already used with a different payload.',
           );
         }
         if (claim.kind === 'replay') {

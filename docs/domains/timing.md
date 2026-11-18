@@ -1,6 +1,6 @@
 ---
 type: domain
-updated: 2026-11-16
+updated: 2026-11-18
 sources:
   - racing_manager_db/db/migrate_manual_timing_2026_11_13.sql
   - racing_manager_back/prisma/schema.prisma
@@ -65,6 +65,18 @@ Live manual timing of protocol categories: attempt lifecycle, number and tile ca
 - **Withdrawal pair:** quick undo of the newest unsent capture drops its pending mark at once and keeps the capture and withdrawal adjacent in the queue; the pair contributes no tile or block marker. A withdrawal of a confirmed capture is reported separately and never lowers the confirmed count; if its capture is refused, the withdrawal is not sent.
 - **Reload and volatility:** durable storage restores every unsent entry of every kind and resends it after reload. When the device falls back to memory, the page warns «Записи хранятся только в этой вкладке. Перезагрузка или закрытие страницы их потеряет.» while unsent entries exist and asks the browser for leave confirmation; after a loss the page shows only confirmed server values.
 - **No server-contract change:** no new route, response field or database column is introduced by this delta.
+
+## MANUAL-TIMING-5 delta
+
+- **Accept on the press:** a press that passes local validation is accepted and stamped with its press instant before any request leaves; the number field clears and keeps focus at acceptance, not at the server's answer. The only wait a press may still take is the one-time open clock anchor of a page session that does not hold it.
+- **One press, one request, at most one outstanding delivery:** a capture record is delivered by its own request and never combined with another press. A record has at most one delivery in flight; it is sent again only after that answer or its wait expired (the `15 s` transport timeout), with a `1 s` pause before the next attempt. An abandoned request the server is still processing never becomes a second pass (`Idempotency-Key` identity is unchanged).
+- **Independent delivery, press order for one participant:** captures of different participants are delivered at the same time under a fixed bound of `8` in-flight deliveries (invisible to the referee — a capture beyond it waits as recorded). A later press of the same participant stays recorded until the earlier press has a final answer; only that outcome decides whether it applies or is refused. `deviceSequence` follows press order, never confirmation order.
+- **In-progress duplicate is not a refusal:** repeating a key whose first request is still open answers `409` with `{ statusCode: 409, code: 'IDEMPOTENCY_IN_PROGRESS', message }`. The page keeps the capture unresolved and retries; it never shows «Отклонено». A same key with a different body keeps the generic conflict without `code`.
+- **Page figures:** «Не отправлено: N» (every unresolved capture), «Отправляется: K» (outstanding deliveries), «Ожидают отправки: K» (recorded and waiting), which add up, plus the accepted «из них отметок: K». The send queue lists waiting rows only; a capture being sent is a figure, not a row.
+- **Status slot:** two independent regions in the accepted fixed-height slot — the newest press (accepted, not yet confirmed) and the latest answer. A refusal is reported once with its number and reason and stays until dismissed; later presses, later confirmations and time never remove it, and dismissing it changes no capture state.
+- **Closure gate per attempt:** closure of an attempt waits for the captures this device accepted for that attempt, including one accepted a tick before it reached the outbox; unresolved captures of another running attempt neither block it nor appear in its count. Transfer stays device-wide, and a force-release still retracts no applied pass.
+- **Quick undo by press order:** quick undo withdraws the capture with the highest `deviceSequence`, whatever its state and whatever order the answers arrive in; a withdrawal of a capture that is being sent waits behind it, and is not sent when that capture was refused.
+- **Wire:** no new route, response field, column or schema. The only additive wire detail is the `code` field on the in-progress `409`.
 
 ## Code
 

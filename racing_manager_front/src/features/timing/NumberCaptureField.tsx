@@ -1,7 +1,8 @@
-import { Button, Input, Modal, Space, Spin, Typography } from 'antd';
+import { Button, Input, Modal, Space, Typography } from 'antd';
 import type { InputRef } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
+import type { TimingCaptureOutcomeEvent, TimingRefusalNotice } from './types';
 import type { TimingCaptureOutcome } from './useTimingCapture';
 
 /**
@@ -19,12 +20,22 @@ import type { TimingCaptureOutcome } from './useTimingCapture';
  * instead of capturing a pass, and an empty assignment is refused
  * (E-04, S-02, F-04).
  *
- * MANUAL-TIMING-4 (FR-14, FR-15, FR-16, FR-17, FR-18): the page answers every
- * recorded press with a `TimingCaptureOutcome`. A confirmed or unsent press
- * frees the field for the next number and keeps focus; an unsent press is not a
- * failure. A refused press keeps the text the referee has now and states the
- * number, the refusal and the server reason. Local validation failures keep
- * their typed text and their own message.
+ * MANUAL-TIMING-5 (AD-7, E-02, E-12, S-05, S-09, F-01, F-03, F-06): a press is
+ * accepted the moment it passes local validation, whatever number of earlier
+ * captures is still being delivered. There is no submitting guard and no busy
+ * row: the field empties, keeps focus and takes the next number at once. The
+ * accepted fixed-height slot has two independent regions:
+ *
+ * - the press region states the newest press and its acceptance, and never
+ *   claims a confirmation;
+ * - the outcome region states the latest answered capture — a confirmation, an
+ *   unsent capture or the visible refusal — and holds each undismissed refusal
+ *   until the referee dismisses it, with the number of refusals still open.
+ *
+ * A refusal changes nothing about the field: the text the referee typed since
+ * is kept, the refused number is never written back, and dismissing the notice
+ * changes no capture state and no count. Local validation failures keep their
+ * typed text and their own message (F-01).
  */
 
 /** One enrollment the page resolved for a typed start number. */
@@ -61,7 +72,8 @@ export interface NumberCaptureFieldProps {
   resolve: (startNumber: number) => NumberCaptureCandidate[];
   /**
    * Records the press and answers with its outcome; the page computes the epoch
-   * elapsed from `monotonicMs` (FR-01, FR-14).
+   * elapsed from `monotonicMs` (FR-01, FR-14). An `ACCEPTED` answer means the
+   * press is recorded and the answer itself arrives later through `outcomes`.
    */
   onCommit: (input: NumberCaptureCommitInput) => Promise<TimingCaptureOutcome>;
   /**
@@ -82,6 +94,13 @@ export interface NumberCaptureFieldProps {
    * same total as the page figure «Не отправлено: N» (FR-11, FR-15).
    */
   pendingCount?: number;
+  /**
+   * Every answer about a recorded capture, in arrival order (AD-7). The field
+   * consumes each event once: a `refused` event becomes a refusal the referee
+   * dismisses, a `confirmed` or `unsent` event becomes the latest outcome.
+   * Absent keeps the field's own awaited answer as its only source.
+   */
+  outcomes?: readonly TimingCaptureOutcomeEvent[];
   /** Optional notice hook; the field also shows the message next to itself. */
   onError?: (message: string) => void;
 }
@@ -94,28 +113,39 @@ interface AmbiguousChoice {
   candidates: NumberCaptureCandidate[];
 }
 
-/** What the field says about the last recorded press (FR-15). */
-type CaptureStatusTone = 'confirmed' | 'unsent' | 'rejected';
-
-interface CaptureStatus {
-  tone: CaptureStatusTone;
-  /** What the answer is about: «№ 17» or «Отсечка без номера». */
+/** The newest press, stated by the press region (AD-7). */
+interface PressStatement {
+  /** Local press counter, so an answer settles the press it belongs to. */
+  key: number;
+  /** What the press is about: «№ 17» or «Отсечка без номера». */
   subject: string;
-  /** The server's message, verbatim; only on `rejected` (E-05). */
-  reason?: string;
+  /** ISO-8601 press instant, compared with the arrival stamp of an answer. */
+  at: string;
+  /** The press's own awaited answer already arrived. */
+  answered: boolean;
+}
+
+/** The latest answered capture, stated by the outcome region (AD-7). */
+interface AnswerStatement {
+  subject: string;
+  tone: 'confirmed' | 'unsent';
+  /** ISO-8601 arrival stamp, display order only. */
+  at: string;
 }
 
 const EMPTY_NUMBER_MESSAGE = 'Введите номер участника цифрами';
 const NON_POSITIVE_NUMBER_MESSAGE = 'Номер участника должен быть больше нуля';
 const EMPTY_ASSIGNMENT_MESSAGE = 'Введите номер участника для назначения отсечки';
 const NO_ASSIGNMENT_TARGET_MESSAGE = 'Назначение недоступно: отсечка не выбрана';
-const COMMIT_BUSY_MESSAGE = 'Отправляем отметку…';
-const SPLIT_BUSY_MESSAGE = 'Отправляем отсечку…';
-const ASSIGN_BUSY_MESSAGE = 'Назначаем отсечку…';
 /** A split carries no participant, so its status names no number (E-15). */
 const ANONYMOUS_SUBJECT = 'Отсечка без номера';
 /** The status still names a refusal when the server sent no message. */
 const REJECTION_FALLBACK_REASON = 'сервер не указал причину';
+/** The press is accepted and no confirmation has arrived yet (E-02, S-05). */
+const PRESS_AWAITING_ANSWER = ', ожидает подтверждения';
+/** The visible refusal is dismissed; no capture fact changes (S-09). */
+const DISMISS_REFUSAL_LABEL = 'Скрыть отказ';
+const DISMISS_REFUSAL_GLYPH = '×';
 
 /** Digits only: a pasted `12 3` reads as `123`, never as a space or a sign. */
 function digitsOnly(value: string): string {
@@ -134,19 +164,60 @@ function parseStartNumber(value: string): number | null {
 }
 
 /**
- * The status line of one answered press. It names the subject, says whether the
- * entry is confirmed or still on the device, and never reports an unsent press
- * as a failure (FR-15, FR-16). The unsent total is read at render time so it
- * follows the page figure as the queue drains (FR-11).
+ * The identity of one consumed feed event. The capture id is the first part
+ * because one capture can be answered more than once (an unsent delivery that
+ * is confirmed later), so its arrival stamp and tone keep the two apart.
  */
-function describeStatus(status: CaptureStatus, pendingCount: number): string {
-  if (status.tone === 'rejected') {
-    return `Отклонено: ${status.subject} — ${status.reason ?? REJECTION_FALLBACK_REASON}`;
-  }
-  if (status.tone === 'confirmed') {
-    return `${status.subject} — сервер подтвердил отметку`;
-  }
-  return `${status.subject} — отметка сохранена на устройстве, не отправлено: ${pendingCount}`;
+function outcomeEventKey(event: TimingCaptureOutcomeEvent): string {
+  return [
+    event.id,
+    event.tone,
+    event.at,
+    event.reason ?? '',
+  ].join('\u0000');
+}
+
+/** One refusal the outcome region keeps until the referee dismisses it. */
+function refusalFromEvent(event: TimingCaptureOutcomeEvent): TimingRefusalNotice {
+  return {
+    id: outcomeEventKey(event),
+    subject: event.subject,
+    reason: event.reason ?? REJECTION_FALLBACK_REASON,
+    at: event.at,
+  };
+}
+
+/**
+ * The press region: what was pressed and that it is accepted, plus the fact
+ * that no confirmation has arrived while that is still true. It never states a
+ * confirmation; the outcome region owns every answer (AD-7).
+ */
+function describePress(press: PressStatement, settled: boolean): string {
+  return settled
+    ? `${press.subject} — принято`
+    : `${press.subject} — принято${PRESS_AWAITING_ANSWER}`;
+}
+
+/**
+ * The outcome region for an answered capture. A confirmation names the server,
+ * an unsent capture stays on the device and is never a failure (F-03). The
+ * unsent total is read at render time so it follows the page figure as the
+ * queue drains (FR-11).
+ */
+function describeAnswer(answer: AnswerStatement, pendingCount: number): string {
+  return answer.tone === 'confirmed'
+    ? `${answer.subject} — сервер подтвердил отметку`
+    : `${answer.subject} — отметка сохранена на устройстве, не отправлено: ${pendingCount}`;
+}
+
+/** The refusal line: its own number and the server reason, verbatim (E-12). */
+function describeRefusal(notice: TimingRefusalNotice): string {
+  return `Отклонено: ${notice.subject} — ${notice.reason}`;
+}
+
+/** How many refusals still wait for the referee (S-09). */
+function describeUndismissedRefusals(count: number): string {
+  return `Не закрыто отказов: ${count}`;
 }
 
 export function NumberCaptureField({
@@ -157,27 +228,69 @@ export function NumberCaptureField({
   onAssign,
   onAnonymousSplit,
   pendingCount = 0,
+  outcomes,
   onError,
 }: NumberCaptureFieldProps) {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [busyLabel, setBusyLabel] = useState<string | null>(null);
-  const [status, setStatus] = useState<CaptureStatus | null>(null);
+  const [press, setPress] = useState<PressStatement | null>(null);
+  const [answer, setAnswer] = useState<AnswerStatement | null>(null);
+  const [notices, setNotices] = useState<TimingRefusalNotice[]>([]);
   const [choice, setChoice] = useState<AmbiguousChoice | null>(null);
-  const submitting = useRef(false);
+  const pressCounter = useRef(0);
+  const consumedOutcomes = useRef<Set<string>>(new Set());
   const inputRef = useRef<InputRef>(null);
   const assignmentId = assignment?.splitId ?? null;
 
   // Entering, leaving or changing assignment mode starts from an empty field:
   // a number typed for one entry must never reach the next one (E-06, E-09).
+  // An undismissed refusal stays: only the referee closes it (S-09).
   useEffect(() => {
     setText('');
     setError(null);
-    setStatus(null);
+    setPress(null);
+    setAnswer(null);
     if (assignmentId !== null) {
       inputRef.current?.focus();
     }
   }, [assignmentId]);
+
+  /**
+   * Turns the page's answer feed into outcomes (AD-7). Each event is consumed
+   * once, so a feed that only grows never re-announces a refusal or rewrites the
+   * latest answer. A refused event becomes a notice the referee dismisses; every
+   * other event becomes the latest answered outcome.
+   */
+  useEffect(() => {
+    if (outcomes === undefined) return;
+    const fresh: TimingCaptureOutcomeEvent[] = [];
+    for (const event of outcomes) {
+      const key = outcomeEventKey(event);
+      if (consumedOutcomes.current.has(key)) continue;
+      consumedOutcomes.current.add(key);
+      fresh.push(event);
+    }
+    if (fresh.length === 0) return;
+
+    const refused = fresh.filter((event) => event.tone === 'refused');
+    if (refused.length > 0) {
+      setNotices((current) => [
+        ...current,
+        ...refused.map((event) => refusalFromEvent(event)),
+      ]);
+    }
+
+    const answered = [...fresh]
+      .reverse()
+      .find((event) => event.tone !== 'refused');
+    if (answered !== undefined) {
+      setAnswer({
+        subject: answered.subject,
+        tone: answered.tone === 'confirmed' ? 'confirmed' : 'unsent',
+        at: answered.at,
+      });
+    }
+  }, [outcomes]);
 
   const refuse = (message: string) => {
     setError(message);
@@ -187,61 +300,71 @@ export function NumberCaptureField({
   /**
    * Applies what the page answered about one recorded press (FR-15).
    *
-   * A confirmed or unsent press is recorded, so the field is free for the next
-   * number and keeps focus; unsent is not a failed capture (E-02, E-04). A
-   * refused press leaves the text exactly as the referee has it now and never
-   * writes the refused number back (E-05).
-   *
-   * `clearsField` is false for an anonymous split: it consumed no typed number,
-   * so it must not wipe what the referee typed while it was in flight.
+   * The field was already cleared and focused at the press, so no answer ever
+   * touches the text: a refusal in particular keeps whatever the referee typed
+   * since and never writes the refused number back (E-12). An `ACCEPTED` answer
+   * adds nothing — the press region already states the acceptance.
    */
-  const settle = (
+  const applyOutcome = (
     subject: string,
+    pressKey: number,
     outcome: TimingCaptureOutcome,
-    clearsField: boolean,
   ) => {
+    if (outcome.status === 'ACCEPTED') return;
+    setPress((current) =>
+      current !== null && current.key === pressKey
+        ? { ...current, answered: true }
+        : current,
+    );
+    const at = new Date().toISOString();
     if (outcome.status === 'REJECTED') {
-      setStatus({ tone: 'rejected', subject, reason: outcome.reason });
+      setNotices((current) => [
+        ...current,
+        {
+          id: `press-refusal-${pressKey}`,
+          subject,
+          reason: outcome.reason ?? REJECTION_FALLBACK_REASON,
+          at,
+        },
+      ]);
       return;
     }
-    if (clearsField) {
-      setText('');
-      setError(null);
-    }
-    inputRef.current?.focus();
-    setStatus({
-      tone: outcome.status === 'CONFIRMED' ? 'confirmed' : 'unsent',
+    setAnswer({
       subject,
+      tone: outcome.status === 'CONFIRMED' ? 'confirmed' : 'unsent',
+      at,
     });
   };
 
   /**
-   * One press, one mutation. The guard is set before the first await so a burst
-   * of keys keeps its order, and a refusal leaves the field as the page left it.
+   * One press, one mutation, no wait. The field clears and keeps focus before
+   * the page's promise settles, so any number of earlier captures may still be
+   * unresolved (E-02, S-05, F-13). Nothing here refuses a second press.
    */
   const start = (
-    label: string,
     subject: string,
+    pressAt: string,
     clearsField: boolean,
     work: () => Promise<TimingCaptureOutcome>,
   ) => {
-    if (disabled || submitting.current) return;
-    submitting.current = true;
-    setBusyLabel(label);
+    if (disabled) return;
+    pressCounter.current += 1;
+    const pressKey = pressCounter.current;
+    setError(null);
+    if (clearsField) setText('');
+    setPress({ key: pressKey, subject, at: pressAt, answered: false });
+    inputRef.current?.focus();
     void (async () => {
       try {
         const outcome = await work();
-        settle(subject, outcome, clearsField);
+        applyOutcome(subject, pressKey, outcome);
       } catch (failure) {
-        // The page owns HTTP errors: keep the typed number so the referee can
-        // retry, and leave the message to the surface that sent the mutation.
+        // The page owns HTTP errors: keep the newest press statement and the
+        // typed text, and leave the message to the surface that sent it.
         console.warn(
           'timing: the field commit was refused; the page reports the API message',
           failure,
         );
-      } finally {
-        submitting.current = false;
-        setBusyLabel(null);
       }
     })();
   };
@@ -271,9 +394,8 @@ export function NumberCaptureField({
       return;
     }
 
-    setError(null);
     if (candidates.length === 1) {
-      start(COMMIT_BUSY_MESSAGE, `№ ${startNumber}`, true, () =>
+      start(`№ ${startNumber}`, capturedAt, true, () =>
         onCommit({
           startNumber,
           enrollmentId: candidates[0].enrollmentId,
@@ -284,6 +406,7 @@ export function NumberCaptureField({
       return;
     }
 
+    setError(null);
     setChoice({ startNumber, capturedAt, monotonicMs, candidates });
   };
 
@@ -305,8 +428,7 @@ export function NumberCaptureField({
       return;
     }
 
-    setError(null);
-    start(ASSIGN_BUSY_MESSAGE, `№ ${startNumber}`, true, () =>
+    start(`№ ${startNumber}`, new Date().toISOString(), true, () =>
       onAssign(startNumber),
     );
   };
@@ -318,9 +440,8 @@ export function NumberCaptureField({
       refuse(EMPTY_NUMBER_MESSAGE);
       return;
     }
-    setError(null);
-    // The split consumed no number, so its answer never clears typed text.
-    start(SPLIT_BUSY_MESSAGE, ANONYMOUS_SUBJECT, false, () =>
+    // The split consumed no number, so its press never clears typed text.
+    start(ANONYMOUS_SUBJECT, new Date().toISOString(), false, () =>
       onAnonymousSplit(),
     );
   };
@@ -335,7 +456,7 @@ export function NumberCaptureField({
     }
     // Enter and Space are commit keys, never text: keep them out of the input.
     event.preventDefault();
-    if (disabled || submitting.current) return;
+    if (disabled) return;
 
     if (assignment !== null) {
       commitAssignment();
@@ -349,7 +470,7 @@ export function NumberCaptureField({
   };
 
   const choose = (candidate: NumberCaptureCandidate) => {
-    if (choice === null || submitting.current) return;
+    if (choice === null) return;
     const picked: NumberCaptureCommitInput = {
       startNumber: choice.startNumber,
       enrollmentId: candidate.enrollmentId,
@@ -357,9 +478,34 @@ export function NumberCaptureField({
       monotonicMs: choice.monotonicMs,
     };
     setChoice(null);
-    start(COMMIT_BUSY_MESSAGE, `№ ${picked.startNumber}`, true, () =>
+    start(`№ ${picked.startNumber}`, picked.capturedAt, true, () =>
       onCommit(picked),
     );
+  };
+
+  /** The visible refusal; the rest wait behind it, oldest first (S-09). */
+  const visibleNotice: TimingRefusalNotice | null = notices[0] ?? null;
+
+  /**
+   * Whether the newest press already has its answer, from its own commit or
+   * from a feed event about the same subject at or after the press. Only a
+   * confirmation or a refusal settles the press; an unsent capture stays
+   * unconfirmed (E-09).
+   */
+  const pressSettled =
+    press !== null &&
+    (press.answered ||
+      (outcomes?.some(
+        (event) =>
+          event.tone !== 'unsent' &&
+          event.subject === press.subject &&
+          Date.parse(event.at) >= Date.parse(press.at),
+      ) ??
+        false));
+
+  /** Dismissing the visible refusal changes no capture state and no count. */
+  const dismissVisibleNotice = () => {
+    setNotices((current) => current.slice(1));
   };
 
   return (
@@ -401,10 +547,10 @@ export function NumberCaptureField({
         }}
       />
       {/*
-       * One fixed-height feedback slot. The busy row, a validation refusal and
-       * the last outcome used to add and remove lines under the input, which
-       * changed the whole card height on every Enter. Reserving the slot keeps
-       * the field and every block below it still while the answer arrives.
+       * One fixed-height slot with two independent regions (AD-7). The press
+       * region names the newest press, the outcome region the latest answer or
+       * the visible refusal. Both rows always exist, so a press, an answer or a
+       * dismissal never moves the field or the blocks below it.
        */}
       <div
         data-testid="timing-field-feedback"
@@ -412,46 +558,96 @@ export function NumberCaptureField({
           width: '100%',
           height: 44,
           display: 'flex',
+          flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
+          gap: 2,
           textAlign: 'center',
           overflowY: 'auto',
         }}
       >
-        {busyLabel !== null ? (
-          <Space size={6}>
-            <Spin size="small" />
-            <Typography.Text type="secondary">{busyLabel}</Typography.Text>
-          </Space>
-        ) : error ? (
-          <Typography.Text
-            type="danger"
-            role="alert"
-            style={{ textAlign: 'center' }}
-          >
-            {error}
-          </Typography.Text>
-        ) : status === null ? null : (
-          <Typography.Text
-            role="status"
-            type={status.tone === 'rejected' ? 'danger' : 'secondary'}
-            style={{ textAlign: 'center' }}
-          >
-            {describeStatus(status, pendingCount)}
-          </Typography.Text>
-        )}
+        <div
+          data-testid="timing-field-press"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: 16,
+            width: '100%',
+          }}
+        >
+          {error !== null ? (
+            <Typography.Text
+              type="danger"
+              role="alert"
+              style={{ fontSize: 12, lineHeight: '16px' }}
+            >
+              {error}
+            </Typography.Text>
+          ) : press === null ? null : (
+            <Typography.Text
+              type="secondary"
+              style={{ fontSize: 12, lineHeight: '16px' }}
+            >
+              {describePress(press, pressSettled)}
+            </Typography.Text>
+          )}
+        </div>
+        <div
+          data-testid="timing-field-outcome"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            minHeight: 16,
+            width: '100%',
+          }}
+        >
+          {visibleNotice !== null ? (
+            <>
+              <Typography.Text
+                role="status"
+                type="danger"
+                style={{ fontSize: 12, lineHeight: '16px' }}
+              >
+                {describeRefusal(visibleNotice)}
+              </Typography.Text>
+              <Typography.Text
+                type="secondary"
+                style={{ fontSize: 11, lineHeight: '16px' }}
+              >
+                {describeUndismissedRefusals(notices.length)}
+              </Typography.Text>
+              <Button
+                type="text"
+                size="small"
+                aria-label={DISMISS_REFUSAL_LABEL}
+                onClick={dismissVisibleNotice}
+                style={{ height: 16, padding: '0 4px', fontSize: 12 }}
+              >
+                {DISMISS_REFUSAL_GLYPH}
+              </Button>
+            </>
+          ) : answer === null ? null : (
+            <Typography.Text
+              role="status"
+              type="secondary"
+              style={{ fontSize: 12, lineHeight: '16px' }}
+            >
+              {describeAnswer(answer, pendingCount)}
+            </Typography.Text>
+          )}
+        </div>
       </div>
 
       <Modal
         open={choice !== null}
         title="Выберите участника"
         footer={null}
-        closable={busyLabel === null}
-        maskClosable={busyLabel === null}
-        keyboard={busyLabel === null}
         onCancel={() => {
           // Abandoning the picker changes nothing: no pass, text untouched.
-          if (busyLabel === null) setChoice(null);
+          setChoice(null);
         }}
       >
         {choice === null ? null : (
@@ -463,7 +659,6 @@ export function NumberCaptureField({
               <Button
                 key={candidate.enrollmentId}
                 block
-                disabled={busyLabel !== null}
                 onClick={() => choose(candidate)}
               >
                 {candidate.label}

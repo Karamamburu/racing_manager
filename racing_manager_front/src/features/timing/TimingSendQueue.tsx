@@ -8,9 +8,16 @@ import type { TimingOfflineEntryView } from './timingOffline';
  * The send queue of one device (FR-11, FR-12, FR-13).
  *
  * A refusal is not a queue row: the hook reports the refusal once and removes
- * the entry. This component therefore lists only entries the server has not
- * answered yet, with a fixed area whose rows scroll inside it so a capture or
- * an empty queue never moves the number field or a block (S-04, S-06).
+ * the entry. A capture already on its way is not a row either: the page states
+ * it as a sending figure, so this component lists the waiting entries only, in
+ * the capture order the derived view gives them, with a fixed area whose rows
+ * scroll inside it so a capture or an empty queue never moves the number field
+ * or a block (S-01, S-02, S-04, S-06).
+ *
+ * While every unsent entry is sending there is nothing to manage, so the queue
+ * is absent instead of an empty card that would flash on an ordinary press
+ * (S-02). With nothing unsent at all it keeps its quiet «Всё отправлено» state
+ * (MANUAL-TIMING-4, FR-12).
  */
 
 /** Minimum height of the entry area when its column has no spare height. */
@@ -64,7 +71,10 @@ const ROW_CARD_STYLE: CSSProperties = {
 };
 
 export interface TimingSendQueueProps {
-  /** Unsent entries of every kind, in the capture order of the outbox. */
+  /**
+   * Unsent entries of every kind, in the capture order of the outbox. An entry
+   * with `isSending` is a page figure, never a row (S-02).
+   */
   entries: TimingOfflineEntryView[];
   /** Unsent entries of every kind; the page figure «Не отправлено: N». */
   unsentEntries: number;
@@ -172,6 +182,11 @@ export function TimingSendQueue({
   onSendNow,
 }: TimingSendQueueProps) {
   const count = wholeCount(unsentEntries);
+  // The rows the referee can still manage: everything the server has not
+  // answered and the outbox is not already delivering (S-02).
+  const waitingEntries = entries.filter((entry) => !entry.isSending);
+  const hasUnanswered = count > 0 || entries.length > 0;
+  if (hasUnanswered && waitingEntries.length === 0) return null;
   return (
     <Card size="small" type="inner" title={TITLE}>
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -194,19 +209,21 @@ export function TimingSendQueue({
           </Space>
         ) : null}
 
-        {!isOnline && entries.length > 0 ? (
+        {!isOnline && waitingEntries.length > 0 ? (
           <Typography.Text type="secondary">{OFFLINE_LABEL}</Typography.Text>
         ) : null}
 
         <ul aria-label={LIST_LABEL} style={LIST_STYLE}>
-          {entries.length === 0 ? (
+          {waitingEntries.length === 0 ? (
             <li style={EMPTY_ROW_STYLE}>
               <Typography.Text type="secondary">
                 {ALL_SENT_LABEL}
               </Typography.Text>
             </li>
           ) : (
-            entries.map((entry) => <EntryRow key={entry.id} entry={entry} />)
+            waitingEntries.map((entry) => (
+              <EntryRow key={entry.id} entry={entry} />
+            ))
           )}
         </ul>
       </Space>
