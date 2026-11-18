@@ -2631,3 +2631,47 @@ describe('TimingPage local splits', () => {
     );
   });
 });
+
+describe('TimingPage assigned local splits', () => {
+  it('states the assigned number on a local row and the pending assignment on a server row', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({ captureWorkstationInstanceId: 'ws-1' }),
+    );
+    mockCapture({
+      mergedSurface: surface({
+        captureWorkstationInstanceId: 'ws-1',
+        anonymousSplits: [
+          anonymousSplit({
+            splitId: 'local-split-1',
+            localSplitId: 'local-split-1',
+            unsent: true,
+            sending: false,
+            assigned: true,
+            assignedNumber: 17,
+            captureDeviceSequence: 3,
+          }),
+          anonymousSplit({
+            splitId: 'server-split-2',
+            assigned: true,
+            assignedNumber: 21,
+            captureDeviceSequence: 4,
+          }),
+        ],
+      }),
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('назначена № 17 · не отправлена')).toBeTruthy();
+    expect(screen.getByText('назначение не отправлено')).toBeTruthy();
+    // An assigned row is no longer offered for a second assignment.
+    expect(
+      screen
+        .getByRole('button', { name: /^Отсечка 1:/ })
+        .getAttribute('disabled'),
+    ).not.toBeNull();
+  });
+});

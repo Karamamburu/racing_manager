@@ -29,6 +29,7 @@ const REASON_REQUIRED = 'Укажите причину отмены отсечк
 const CANCEL_TITLE = 'Отмена неприсвоенной отсечки';
 const LOCAL_UNSENT_LABEL = 'не отправлена';
 const LOCAL_SENDING_LABEL = 'отправляется';
+const ASSIGNMENT_UNSENT_LABEL = 'назначение не отправлено';
 const LOCAL_TAG_STYLE: CSSProperties = {
   backgroundColor: '#f9f0ff',
   borderColor: '#722ed1',
@@ -251,9 +252,21 @@ export function AnonymousSplitQueue({
                     </Typography.Text>
                     {entry.localSplitId !== undefined ? (
                       <Tag style={LOCAL_TAG_STYLE}>
-                        {entry.sending
-                          ? LOCAL_SENDING_LABEL
-                          : LOCAL_UNSENT_LABEL}
+                        {entry.assignedNumber !== undefined
+                          ? `назначена № ${entry.assignedNumber} · ${
+                              entry.sending
+                                ? LOCAL_SENDING_LABEL
+                                : LOCAL_UNSENT_LABEL
+                            }`
+                          : entry.sending
+                            ? LOCAL_SENDING_LABEL
+                            : LOCAL_UNSENT_LABEL}
+                      </Tag>
+                    ) : null}
+                    {entry.localSplitId === undefined &&
+                    entry.assigned === true ? (
+                      <Tag style={LOCAL_TAG_STYLE}>
+                        {ASSIGNMENT_UNSENT_LABEL}
                       </Tag>
                     ) : null}
                     {entry.bound ? (

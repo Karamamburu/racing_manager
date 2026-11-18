@@ -710,6 +710,18 @@ export function TimingPage() {
       blockMarks.pendingMarks,
     ]),
   );
+  // A local block already carries its unsent passes in the participant counts
+  // (FR-42); only an unsent split assignment adds a separate pending mark
+  // (FR-31), so its tiles read this narrower map.
+  const assignmentMarksByBlock = new Map<string, Map<string, number>>();
+  for (const tile of offlineView.participantMarks) {
+    if (tile.assignmentMarks === 0) continue;
+    const perParticipant =
+      assignmentMarksByBlock.get(tile.blockKey) ?? new Map<string, number>();
+    perParticipant.set(tile.enrollmentId, tile.assignmentMarks);
+    assignmentMarksByBlock.set(tile.blockKey, perParticipant);
+  }
+
 
   const anonymousSplits: TimingAnonymousSplitView[] =
     surfaceView.anonymousSplits ?? [];
@@ -921,7 +933,9 @@ export function TimingPage() {
     // participant counts, so the tiles do not add the same entries again; the
     // header still states the block's unsent total (AD-8, AD-10).
     const pendingMarks =
-      block.local === true ? undefined : pendingMarksByBlock.get(blockKey);
+      block.local === true
+        ? assignmentMarksByBlock.get(blockKey)
+        : pendingMarksByBlock.get(blockKey);
     const pendingMarkCount = pendingMarkTotalsByBlock.get(blockKey) ?? 0;
 
     return (
