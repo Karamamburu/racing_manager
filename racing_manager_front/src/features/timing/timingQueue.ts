@@ -19,9 +19,13 @@
  * actually resolved, so the page never guesses from `typeof indexedDB`.
  */
 
-import type { AssignAnonymousSplitRequest } from './types';
+import type {
+  AssignAnonymousSplitRequest,
+  StartOfflineTimingAttemptRequest,
+} from './types';
 
 export const TIMING_QUEUE_OPERATIONS = [
+  'START',
   'PASS',
   'BIND',
   'UNDO',
@@ -34,12 +38,18 @@ export type TimingMutationOperation = (typeof TIMING_QUEUE_OPERATIONS)[number];
  * The stored payload of an `ANONYMOUS_ASSIGN` item: the split that leaves the
  * queue and the request body that binds it, so a replay needs no surface read.
  * An anonymous capture is a `PASS` item whose payload kind is
- * `ANONYMOUS_SPLIT`.
+ * `ANONYMOUS_SPLIT`. A split that was local when the assignment was recorded is
+ * named by its event capture sequence; a split the server already has keeps the
+ * server split id.
  */
 export interface TimingAnonymousAssignPayload {
-  splitId: string;
+  splitId?: string;
+  captureDeviceSequence?: number;
   request: AssignAnonymousSplitRequest;
 }
+
+/** The stored payload of a `START` item: the offline Start request. */
+export type TimingStartPayload = StartOfflineTimingAttemptRequest;
 
 export const TIMING_QUEUE_STATUSES = [
   'PENDING',
@@ -68,6 +78,32 @@ export interface TimingQueueItem {
   createdAt: string;
   /** Why the API refused the item; present while `status` is `REJECTED`. */
   error?: string;
+  /** Device-local Start identity of a local attempt; absent on server rows. */
+  localAttemptId?: string;
+  localClockEpochId?: string;
+  /** The server attempt and epoch written by the Start mapping. */
+  serverAttemptId?: string | null;
+  serverClockEpochId?: string | null;
+  /** The attempt that anchored a local split's clock. */
+  localAnchorAttemptId?: string | null;
+  /** The event the row belongs to, so cross-scope ordering can compare rows. */
+  eventId?: string;
+  /**
+   * Device-local display facts of an offline Start snapshot: names, sections,
+   * numbers and N. They are never sent to the server; the request's `roster`
+   * carries the validated identity fields.
+   */
+  localRoster?: TimingLocalRosterRow[];
+}
+
+/** One device-local row of an offline Start snapshot. */
+export interface TimingLocalRosterRow {
+  enrollmentId: string;
+  fullName: string;
+  sectionId: string;
+  startNumber: number | null;
+  requiredLaps: number;
+  excludedReason: string | null;
 }
 
 /** The outbox contract the surface codes against. */
