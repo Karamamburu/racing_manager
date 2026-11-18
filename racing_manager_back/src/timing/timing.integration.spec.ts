@@ -33,6 +33,7 @@ import {
   type CreateAnonymousSplitInput,
   type CreateAttemptInput,
   type CreateClockEpochInput,
+  type CreateEventReceiptInput,
   type CreateHeatTimeInput,
   type CreateMarkInput,
   type CreateReceiptInput,
@@ -47,6 +48,7 @@ import {
   type TimingClassCompetitionRow,
   type TimingClockEpochRow,
   type TimingEnrollmentRow,
+  type TimingEventReceiptRow,
   type TimingEventRow,
   type TimingEventSplitRow,
   type TimingFormatRow,
@@ -331,6 +333,7 @@ class InMemoryTimingRepository {
   marks: TimingMarkRow[] = [];
   epochs: TimingClockEpochRow[] = [];
   receipts: TimingReceiptRow[] = [];
+  eventReceipts: TimingEventReceiptRow[] = [];
   audits: StoredAudit[] = [];
   results: TimingPublishedResultRow[] = [];
   heatTimes: TimingHeatTimeRow[] = [];
@@ -389,6 +392,52 @@ class InMemoryTimingRepository {
   listEnrollmentRows(eventId: string): Promise<TimingEnrollmentRow[]> {
     return Promise.resolve(
       this.enrollments.filter((row) => row.eventId === eventId),
+    );
+  }
+
+  listEnrollmentRowsByIds(
+    eventId: string,
+    enrollmentIds: readonly string[],
+  ): Promise<TimingEnrollmentRow[]> {
+    const wanted = new Set(enrollmentIds);
+    return Promise.resolve(
+      this.enrollments.filter(
+        (row) => row.eventId === eventId && wanted.has(row.enrollmentId),
+      ),
+    );
+  }
+
+  createEventReceipt(
+    _tx: TimingTx,
+    input: CreateEventReceiptInput,
+  ): Promise<TimingEventReceiptRow> {
+    const row: TimingEventReceiptRow = {
+      eventId: input.eventId,
+      workstationInstanceId: input.workstationInstanceId,
+      deviceSequence: input.deviceSequence,
+      status: input.status,
+      reason: input.reason,
+      splitId: input.splitId,
+      resolvedAttemptId: input.resolvedAttemptId,
+      createdAt: this.now(),
+    };
+    this.eventReceipts.push(row);
+    return Promise.resolve(row);
+  }
+
+  findEventReceipt(
+    _tx: TimingTx,
+    eventId: string,
+    workstationInstanceId: string,
+    deviceSequence: number,
+  ): Promise<TimingEventReceiptRow | null> {
+    return Promise.resolve(
+      this.eventReceipts.find(
+        (row) =>
+          row.eventId === eventId &&
+          row.workstationInstanceId === workstationInstanceId &&
+          row.deviceSequence === deviceSequence,
+      ) ?? null,
     );
   }
 
@@ -1669,6 +1718,86 @@ describe('timing API integration: surface and heat start', () => {
 /* -------------------------------------------------------------------------- */
 /* Anonymous split queue                                                      */
 /* -------------------------------------------------------------------------- */
+
+describe('timing API integration: offline category start', () => {
+  it('creates the attempt at the press instant from the frozen snapshot', async () => {
+    const { server, repository } = await createHarness();
+    const press = '2026-11-13T10:00:00.000Z';
+    const body = {
+      startId: START_ID,
+      formatId: FORMAT_ID,
+      gender: 'M',
+      workstationInstanceId: WORKSTATION,
+      officialStartedAt: press,
+      roster: [
+        {
+          enrollmentId: ENROLLMENT_1,
+          registrationId: REGISTRATION_1,
+          startNumber: START_NUMBER_1,
+          sectionId: 'RACE',
+          requiredLaps: LAP_COUNT,
+          excludedReason: 'RACE_SECTION',
+        },
+        {
+          enrollmentId: ENROLLMENT_2,
+          registrationId: REGISTRATION_2,
+          startNumber: START_NUMBER_2,
+          sectionId: 'RACE',
+          requiredLaps: LAP_COUNT,
+          excludedReason: 'RACE_SECTION',
+        },
+        {
+          enrollmentId: ENROLLMENT_3,
+          registrationId: REGISTRATION_3,
+          startNumber: START_NUMBER_3,
+          sectionId: 'CATEGORY',
+          requiredLaps: LAP_COUNT,
+          excludedReason: null,
+        },
+      ],
+      localAttemptId: 'local-attempt-1',
+      localClockEpochId: 'local-epoch-1',
+      deviceSequence: 1,
+    };
+
+    const response = await post(server, `${BASE_PATH}/attempts/offline-start`)
+      .set('Idempotency-Key', 'offline-start-key')
+      .send(body);
+
+    expect(response.status).toBe(201);
+    const result = response.body as StartTimingAttemptResult;
+    expect(result.attempt).toMatchObject({
+      state: 'RUNNING',
+      officialStartedAt: press,
+      lapCount: LAP_COUNT,
+    });
+    expect(result.attempt.participants).toHaveLength(3);
+    expect(
+      result.attempt.participants.map((tile) => tile.enrollmentId),
+    ).toEqual([ENROLLMENT_1, ENROLLMENT_2, ENROLLMENT_3]);
+    expect(result.epoch).toMatchObject({
+      attemptId: result.attempt.attemptId,
+      officialElapsedAnchorMs: 0,
+    });
+
+    const stored = repository.attempts[0];
+    expect(stored.officialStartedAt.toISOString()).toBe(press);
+    expect(stored.clientStartedAt.toISOString()).toBe(press);
+    expect(repository.audits.map((audit) => audit.row.action)).toContain(
+      'START_OFFLINE',
+    );
+
+    // A repeated key replays the same attempt instead of creating another one.
+    const repeat = await post(server, `${BASE_PATH}/attempts/offline-start`)
+      .set('Idempotency-Key', 'offline-start-key')
+      .send(body);
+    expect(repeat.status).toBe(201);
+    expect((repeat.body as StartTimingAttemptResult).attempt.attemptId).toBe(
+      result.attempt.attemptId,
+    );
+    expect(repository.attempts).toHaveLength(1);
+  });
+});
 
 describe('timing API integration: anonymous split queue', () => {
   it('queues an Enter split on POST passes and shows it on the surface', async () => {

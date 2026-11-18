@@ -149,10 +149,14 @@ export class StartTimingAttemptDto {
 
 /** One frozen roster row of an offline Start snapshot. */
 export class OfflineRosterEntryDto {
-  @IsUUID()
+  /** Opaque participant identity, like every other capture boundary. */
+  @IsString()
+  @MinLength(1)
   enrollmentId!: string;
 
-  @IsUUID()
+  /** Opaque registration identity; the service checks it against the row. */
+  @IsString()
+  @MinLength(1)
   registrationId!: string;
 
   /** The event-unique number at the press; absent for an excluded row. */
@@ -184,7 +188,9 @@ export class OfflineRosterEntryDto {
  * created on the device while the page has no connection.
  */
 export class StartOfflineTimingAttemptDto {
-  @IsUUID()
+  /** Protocol start id, opaque like the online Start body. */
+  @IsString()
+  @MinLength(1)
   startId!: string;
 
   @IsInt()

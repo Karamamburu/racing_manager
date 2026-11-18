@@ -2196,11 +2196,11 @@ describe('TimingService', () => {
         attemptId: 'attempt-offline',
         action: 'START_OFFLINE',
         targetType: 'ATTEMPT',
-        newValues: expect.objectContaining({
-          localAttemptId: 'local-attempt',
-          localClockEpochId: 'local-epoch',
-          deviceSequence: 1,
-        }),
+      });
+      expect(auditInput.newValues).toMatchObject({
+        localAttemptId: 'local-attempt',
+        localClockEpochId: 'local-epoch',
+        deviceSequence: 1,
       });
       expect(result.attempt).toMatchObject({
         state: 'RUNNING',
@@ -5987,9 +5987,11 @@ describe('TimingService', () => {
       );
 
       expect(record.state).toBe('COMPLETED');
-      const published = repository.publishResult.mock.calls.map(
-        (call) => call[1] as PublishResultInput,
-      );
+      const published = (
+        repository.publishResult.mock.calls as unknown as Array<
+          [unknown, PublishResultInput]
+        >
+      ).map((call) => call[1]);
       expect(published).toEqual([
         expect.objectContaining({
           enrollmentId: 'enrollment-a',
