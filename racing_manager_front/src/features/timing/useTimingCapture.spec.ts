@@ -1983,13 +1983,17 @@ describe('useTimingCapture offline start', () => {
     expect(result.current.localSplits?.localUnassignedCount).toBe(1);
 
     await act(async () => {
-      await result.current.assignAnonymousSplit(
-        splitRow?.splitId ?? '',
-        17,
-        localAttemptId,
-      );
+      await result.current.assignAnonymousSplit(splitRow?.splitId ?? '', 17);
     });
     expect(result.current.localSplits?.localUnassignedCount).toBe(0);
+    const assignmentBefore = (await queue.list()).find(
+      (item) => item.operation === 'ANONYMOUS_ASSIGN',
+    );
+    // The single known candidate is recorded now, so the pending mark lands on
+    // the local block before the server resolves the real candidate set.
+    expect(assignmentBefore?.payload).toMatchObject({
+      request: { chosenAttemptId: localAttemptId, startNumber: 17 },
+    });
 
     const before = await queue.list();
     const splitItem = before.find(
@@ -2149,6 +2153,9 @@ describe('useTimingCapture offline start', () => {
     await waitFor(() => {
       expect(result.current.isFlushing).toBe(false);
     });
+    // A reloaded local attempt reuses its own press anchor: no epoch request
+    // ever names the local attempt.
+    expect(timingService.openClockEpoch).not.toHaveBeenCalled();
 
     vi.mocked(timingService.startOfflineAttempt).mockResolvedValue({
       attempt: runningBlock({ attemptId: 'server-attempt-reload' }),
@@ -2219,11 +2226,7 @@ describe('useTimingCapture offline start', () => {
       (split) => split.localSplitId !== undefined,
     );
     await act(async () => {
-      await result.current.assignAnonymousSplit(
-        splitRow?.splitId ?? '',
-        17,
-        localAttemptId,
-      );
+      await result.current.assignAnonymousSplit(splitRow?.splitId ?? '', 17);
     });
 
     vi.mocked(timingService.startOfflineAttempt).mockRejectedValue(
@@ -2294,5 +2297,45 @@ describe('useTimingCapture offline start', () => {
       afterDelete.some((item) => item.operation === 'START'),
     ).toBe(false);
     expect(result.current.mergedSurface?.anonymousSplits).toEqual([]);
+  });
+});
+
+describe('useTimingCapture offline Start capture lock', () => {
+  it('refuses a local Start when another device holds capture', async () => {
+    navigatorOnline = false;
+    const onError = vi.fn();
+    const block = runningBlock({
+      attemptId: null,
+      state: 'NOT_STARTED',
+      officialStartedAt: null,
+      elapsedMs: null,
+      startControlEnabled: true,
+      blockKey: 'category-block',
+      participants: [participant()],
+    });
+    const { result } = renderCapture({
+      surface: {
+        ...surfaceOf([block]),
+        captureWorkstationInstanceId: 'ws-other',
+      },
+      onError,
+    });
+
+    await waitFor(() => {
+      expect(result.current.isFlushing).toBe(false);
+    });
+
+    await act(async () => {
+      await expect(result.current.startAttempt(block)).rejects.toThrow(
+        'Это устройство не удерживает захват хронометража.',
+      );
+    });
+
+    expect(onError).toHaveBeenCalledWith(
+      'Это устройство не удерживает захват хронометража.',
+    );
+    const queue = await openTimingQueue();
+    await expect(queue.list()).resolves.toEqual([]);
+    expect(result.current.mergedSurface?.categories[0].local).toBeUndefined();
   });
 });
