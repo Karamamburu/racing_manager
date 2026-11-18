@@ -281,3 +281,42 @@ describe('mapLocalAttempt', () => {
     expect(byId(result.changed).has('split-other')).toBe(false);
   });
 });
+
+describe('mapLocalAttempt partial mapping', () => {
+  it('finishes a reload without renumbering the items that already moved', () => {
+    const start = startItem({
+      serverAttemptId: SERVER_ATTEMPT,
+      serverClockEpochId: SERVER_EPOCH,
+    });
+    const mappedPass: TimingQueueItem = {
+      ...passItem('pass-1', 1, '2026-11-18T09:00:01.000Z'),
+      attemptId: SERVER_ATTEMPT,
+      deviceSequence: 1,
+      serverAttemptId: SERVER_ATTEMPT,
+      serverClockEpochId: SERVER_EPOCH,
+    };
+    const localPass = passItem('pass-2', 2, '2026-11-18T09:00:02.000Z');
+    const allocator = vi.fn(() => 5);
+
+    const result = mapLocalAttempt({
+      items: [start, mappedPass, localPass],
+      startItem: start,
+      serverAttemptId: SERVER_ATTEMPT,
+      serverClockEpochId: SERVER_EPOCH,
+      nextSequence: allocator,
+    });
+
+    expect(allocator).toHaveBeenCalledTimes(1);
+    expect(result.changed).toHaveLength(1);
+    expect(result.changed[0]).toMatchObject({
+      id: 'pass-2',
+      attemptId: SERVER_ATTEMPT,
+      deviceSequence: 5,
+      serverAttemptId: SERVER_ATTEMPT,
+      serverClockEpochId: SERVER_EPOCH,
+    });
+    expect(result.changed.some((item) => item.id === 'pass-1')).toBe(false);
+    expect(result.changed.some((item) => item.id === 'start')).toBe(false);
+    expect(result.lastIssuedSequence).toBe(5);
+  });
+});

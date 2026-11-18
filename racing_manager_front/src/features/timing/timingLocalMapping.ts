@@ -94,16 +94,15 @@ export function mapLocalAttempt(
     serverClockEpochId,
   };
 
-  if (startItem.serverAttemptId === serverAttemptId) {
-    return {
-      startItem: mappedStart,
-      changed: [],
-      lastIssuedSequence: mappedLastSequence(input.items, serverAttemptId),
-    };
-  }
-
+  // A Start that already carries this server attempt is a mapping interrupted
+  // before it marked the Start `APPLIED`. Its dependents that already moved are
+  // skipped below; the still-local ones are completed with fresh sequences above
+  // the cursor, so a reload finishes a partial mapping without renumbering.
+  const startMapped = startItem.serverAttemptId === serverAttemptId;
   const changed: TimingQueueItem[] = [];
-  let lastIssuedSequence = 0;
+  let lastIssuedSequence = startMapped
+    ? mappedLastSequence(input.items, serverAttemptId)
+    : 0;
 
   for (const item of [...input.items]
     .filter((candidate) => candidate.id !== startItem.id)
@@ -196,6 +195,6 @@ export function mapLocalAttempt(
     }
   }
 
-  changed.push(mappedStart);
+  if (!startMapped) changed.push(mappedStart);
   return { startItem: mappedStart, changed, lastIssuedSequence };
 }
