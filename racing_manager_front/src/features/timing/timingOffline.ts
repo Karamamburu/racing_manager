@@ -168,6 +168,8 @@ export interface TimingOfflineParticipantMarksView {
   confirmedPassCount: number;
   /** Unsent marks this tile shows. */
   pendingMarks: number;
+  /** Of those, the marks an unsent split assignment adds (FR-31). */
+  assignmentMarks: number;
   /** Confirmed laps an unsent withdrawal will retire from this tile. */
   confirmedLapsRetiring: number;
 }
@@ -177,6 +179,8 @@ export interface TimingOfflineBlockMarksView {
   blockKey: string;
   attemptId: string | null;
   pendingMarks: number;
+  /** Of those, the marks unsent split assignments add (FR-31). */
+  assignmentMarks: number;
   confirmedLapsRetiring: number;
 }
 
@@ -270,6 +274,7 @@ interface ListedRow {
 interface TileTotal {
   location: SurfaceParticipantRow;
   pendingMarks: number;
+  assignmentMarks: number;
   confirmedLapsRetiring: number;
 }
 
@@ -278,6 +283,7 @@ interface BlockTotal {
   attemptId: string | null;
   index: number;
   pendingMarks: number;
+  assignmentMarks: number;
   confirmedLapsRetiring: number;
 }
 
@@ -431,6 +437,8 @@ export function deriveTimingOfflineView(
     }
 
     const { pendingMarks: marks, confirmedLapsRetired } = row.effect;
+    const assignmentMarks =
+      row.record.kind === 'ANONYMOUS_ASSIGN' ? marks : 0;
     confirmedLapsRetiring += confirmedLapsRetired;
     if (marks === 0 && confirmedLapsRetired === 0) continue;
 
@@ -441,12 +449,19 @@ export function deriveTimingOfflineView(
     }
 
     pendingMarks += marks;
-    accumulateTile(tiles, location, marks, confirmedLapsRetired);
+    accumulateTile(
+      tiles,
+      location,
+      marks,
+      assignmentMarks,
+      confirmedLapsRetired,
+    );
     accumulateBlock(
       blockTotals,
       location,
       blocks,
       marks,
+      assignmentMarks,
       confirmedLapsRetired,
     );
   }
@@ -461,6 +476,7 @@ export function deriveTimingOfflineView(
       fullName: total.location.participant.fullName,
       confirmedPassCount: total.location.participant.passCount,
       pendingMarks: total.pendingMarks,
+      assignmentMarks: total.assignmentMarks,
       confirmedLapsRetiring: total.confirmedLapsRetiring,
     }));
 
@@ -470,6 +486,7 @@ export function deriveTimingOfflineView(
       blockKey: total.blockKey,
       attemptId: total.attemptId,
       pendingMarks: total.pendingMarks,
+      assignmentMarks: total.assignmentMarks,
       confirmedLapsRetiring: total.confirmedLapsRetiring,
     }));
 
@@ -897,15 +914,18 @@ function accumulateTile(
   tiles: Map<string, TileTotal>,
   location: SurfaceParticipantRow,
   marks: number,
+  assignmentMarks: number,
   confirmedLapsRetired: number,
 ): void {
   const key = `${location.blockKey}:${location.participant.enrollmentId}`;
   const total = tiles.get(key) ?? {
     location,
     pendingMarks: 0,
+    assignmentMarks: 0,
     confirmedLapsRetiring: 0,
   };
   total.pendingMarks += marks;
+  total.assignmentMarks += assignmentMarks;
   total.confirmedLapsRetiring += confirmedLapsRetired;
   tiles.set(key, total);
 }
@@ -915,6 +935,7 @@ function accumulateBlock(
   location: SurfaceParticipantRow,
   blocks: readonly SurfaceBlockRow[],
   marks: number,
+  assignmentMarks: number,
   confirmedLapsRetired: number,
 ): void {
   const total = totals.get(location.blockKey) ?? {
@@ -924,9 +945,11 @@ function accumulateBlock(
       blocks.find((entry) => entry.blockKey === location.blockKey)?.index ??
       blocks.length,
     pendingMarks: 0,
+    assignmentMarks: 0,
     confirmedLapsRetiring: 0,
   };
   total.pendingMarks += marks;
+  total.assignmentMarks += assignmentMarks;
   total.confirmedLapsRetiring += confirmedLapsRetired;
   totals.set(location.blockKey, total);
 }

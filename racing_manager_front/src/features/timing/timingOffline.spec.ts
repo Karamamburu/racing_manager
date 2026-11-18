@@ -340,6 +340,7 @@ describe('deriveTimingOfflineView: one number press', () => {
         fullName: 'Иванов Иван',
         confirmedPassCount: 1,
         pendingMarks: 1,
+        assignmentMarks: 0,
         confirmedLapsRetiring: 0,
       },
     ]);
@@ -348,6 +349,7 @@ describe('deriveTimingOfflineView: one number press', () => {
         blockKey: 'block-a',
         attemptId: ATTEMPT_A,
         pendingMarks: 1,
+        assignmentMarks: 0,
         confirmedLapsRetiring: 0,
       },
     ]);
@@ -515,6 +517,7 @@ describe('deriveTimingOfflineView: entries that add a mark elsewhere', () => {
         fullName: 'Сидорова Анна',
         confirmedPassCount: 0,
         pendingMarks: 1,
+        assignmentMarks: 1,
         confirmedLapsRetiring: 0,
       },
     ]);
@@ -523,6 +526,7 @@ describe('deriveTimingOfflineView: entries that add a mark elsewhere', () => {
         blockKey: 'block-b',
         attemptId: ATTEMPT_B,
         pendingMarks: 1,
+        assignmentMarks: 1,
         confirmedLapsRetiring: 0,
       },
     ]);
@@ -675,6 +679,7 @@ describe('deriveTimingOfflineView: capture and withdrawal', () => {
         fullName: 'Петров Пётр',
         confirmedPassCount: 1,
         pendingMarks: 1,
+        assignmentMarks: 0,
         confirmedLapsRetiring: 0,
       },
     ]);
@@ -683,6 +688,7 @@ describe('deriveTimingOfflineView: capture and withdrawal', () => {
         blockKey: 'block-a',
         attemptId: ATTEMPT_A,
         pendingMarks: 1,
+        assignmentMarks: 0,
         confirmedLapsRetiring: 0,
       },
     ]);
@@ -745,6 +751,7 @@ describe('deriveTimingOfflineView: capture and withdrawal', () => {
         fullName: 'Иванов Иван',
         confirmedPassCount: 1,
         pendingMarks: 0,
+        assignmentMarks: 0,
         confirmedLapsRetiring: 1,
       },
     ]);
@@ -753,6 +760,7 @@ describe('deriveTimingOfflineView: capture and withdrawal', () => {
         blockKey: 'block-a',
         attemptId: ATTEMPT_A,
         pendingMarks: 0,
+        assignmentMarks: 0,
         confirmedLapsRetiring: 1,
       },
     ]);
