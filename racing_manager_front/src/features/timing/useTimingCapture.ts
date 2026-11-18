@@ -9,19 +9,27 @@ import {
   newTimingMutationKey,
   openTimingQueue,
   type TimingAnonymousAssignPayload,
+  type TimingLocalRosterRow,
   type TimingMutationOperation,
   type TimingQueue,
   type TimingQueueItem,
 } from './timingQueue';
+import { deriveLocalAttempts } from './timingLocalAttempt';
+import { deriveLocalSplits, type TimingLocalSplitsResult } from './timingLocalSplits';
+import { mapLocalAttempt } from './timingLocalMapping';
+import { deriveTimingOfflineView } from './timingOffline';
 import { timingService } from './timingService';
 import type {
   AssignAnonymousSplitRequest,
   BindPendingFinishRequest,
   CaptureTimingPassRequest,
   QuickUndoTimingPassRequest,
+  StartOfflineTimingAttemptRequest,
+  StartTimingAttemptResult,
   TimingCaptureOutcome,
   TimingCaptureOutcomeEvent,
   TimingCategoryBlockView,
+  TimingLocalAttemptView,
   TimingParticipantTileView,
   TimingSurfaceView,
 } from './types';
@@ -127,6 +135,14 @@ export interface UseTimingCaptureResult {
    * The page feeds them to `deriveTimingOfflineView` (FR-11, FR-12).
    */
   queueItems: TimingQueueItem[];
+  /** The server surface merged with the device-local attempt(s) and splits. */
+  mergedSurface?: TimingSurfaceView;
+  /** The device-local attempts created by offline Starts, before the mapping. */
+  localAttempts?: TimingLocalAttemptView[];
+  /** The anonymous-split queue as the page should render it. */
+  localSplits?: TimingLocalSplitsResult;
+  /** Removes an unapplied local split and its dependent assignment. */
+  deleteLocalSplit?: (localSplitId: string) => Promise<void>;
   /**
    * The outbox ids of capture-side entries whose request is still in flight.
    * The page keeps the send-queue card off while the only unsent rows are
@@ -172,7 +188,19 @@ const PENDING_MISSING_MESSAGE = 'Непривязанный финиш не на
 const SPLIT_MISSING_MESSAGE = 'Неприсвоенная отсечка не найдена в очереди';
 const NO_RUNNING_ATTEMPT_MESSAGE =
   'Нет идущей попытки: неприсвоенную отсечку некуда записать';
+const OFFLINE_HEAT_START_MESSAGE =
+  'Старт заезда офлайн недоступен: начните заезд при наличии связи.';
+const OFFLINE_START_UNAVAILABLE_MESSAGE =
+  'Эту категорию нельзя начать офлайн: проверьте захват, состав и номера.';
 const HEAT_INCOMPLETE_MESSAGE = 'Блок заезда не готов к старту';
+
+/** The empty surface a derived view uses before the server read resolves. */
+const EMPTY_SURFACE: TimingSurfaceView = {
+  eventId: '',
+  captureWorkstationInstanceId: null,
+  categories: [],
+  anonymousSplits: [],
+};
 
 /** The surface query key, shared with the page that owns the read. */
 export function timingSurfaceQueryKey(eventId: string | undefined) {
@@ -268,6 +296,7 @@ function captureSubject(
   if (item.operation === 'BIND') return 'Непривязанный финиш';
   if (item.operation === 'ANONYMOUS_ASSIGN') return 'Отсечка без номера';
   if (item.operation === 'UNDO') return 'Отмена последней отметки';
+  if (item.operation === 'START') return 'Старт категории';
   const enrollmentId =
     typeof payload.enrollmentId === 'string' ? payload.enrollmentId : null;
   if (enrollmentId !== null) {
@@ -275,6 +304,44 @@ function captureSubject(
     return resolved === null ? 'Участник' : `№ ${resolved}`;
   }
   return 'Отметка';
+}
+
+/** Whether an answer is the Start result the mapping needs. */
+function isStartResult(value: unknown): value is StartTimingAttemptResult {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'attempt' in value &&
+    'epoch' in value
+  );
+}
+
+/**
+ * Drops the refused-Start tombstones that no queued entry references any more
+ * (AD-11). A tombstone keeps a local epoch's splits from being delivered; once
+ * the last such split is deleted, the tombstone has nothing left to hold.
+ */
+async function removeUnreferencedStartTombstones(
+  queue: TimingQueue,
+): Promise<void> {
+  const items = await queue.list();
+  for (const tombstone of items) {
+    if (tombstone.operation !== 'START' || tombstone.status !== 'REJECTED') {
+      continue;
+    }
+    const payload = tombstone.payload as StartOfflineTimingAttemptRequest;
+    const referenced = items.some((candidate) => {
+      if (candidate.id === tombstone.id) return false;
+      if (candidate.attemptId === payload.localAttemptId) return true;
+      if (candidate.operation !== 'PASS') return false;
+      const pass = candidate.payload as CaptureTimingPassRequest;
+      return (
+        pass.kind === 'ANONYMOUS_SPLIT' &&
+        pass.clockEpochId === payload.localClockEpochId
+      );
+    });
+    if (!referenced) await queue.remove(tombstone.id);
+  }
 }
 
 function describeAttemptLabel(participant: TimingParticipantTileView): string {
@@ -345,6 +412,7 @@ export function useTimingCapture(
   surface: TimingSurfaceView | undefined,
   workstationInstanceId: string,
   onError?: (message: string) => void,
+  labelFor?: (attemptId: string) => string,
 ): UseTimingCaptureResult {
   const queryClient = useQueryClient();
   /** One anchor per running attempt of this workstation (AD-2). */
@@ -391,6 +459,40 @@ export function useTimingCapture(
   /** Single-flight surface refresh with one trailing run (AD-8). */
   const invalidationLoop = useRef<Promise<void> | null>(null);
   const invalidationDirty = useRef(false);
+  /** Device-local epochs of offline Starts; they never call the server. */
+  const localAnchors = useRef<Map<string, TimingEpochAnchor>>(new Map());
+
+  const offlineView = useMemo(
+    () => deriveTimingOfflineView(queueItems, surface ?? EMPTY_SURFACE),
+    [queueItems, surface],
+  );
+  const localView = useMemo(
+    () =>
+      deriveLocalAttempts({
+        surface: surface ?? EMPTY_SURFACE,
+        offline: offlineView,
+        startItems: queueItems,
+        nowMs: Date.now(),
+      }),
+    [queueItems, offlineView, surface],
+  );
+  const localSplitView = useMemo(
+    () =>
+      deriveLocalSplits({
+        surface: localView.mergedSurface,
+        offline: offlineView,
+        localAttempts: localView.attempts,
+        labelFor,
+      }),
+    [localView, offlineView, labelFor],
+  );
+  const surfaceView = useMemo(
+    () => ({
+      ...localView.mergedSurface,
+      anonymousSplits: localSplitView.splits,
+    }),
+    [localView, localSplitView],
+  );
 
   useEffect(() => {
     onErrorRef.current = onError;
@@ -420,7 +522,13 @@ export function useTimingCapture(
     // entry (including leftovers from earlier sessions) before the page
     // derives its view. The refusal is reported once through the outcome feed;
     // the server audit keeps the refusal itself.
-    const rejected = items.filter((item) => item.status === 'REJECTED');
+    //
+    // A refused `START` is the one exception: it is the durable tombstone of an
+    // invalid local epoch. A split captured under that epoch must never be
+    // delivered, and the tombstone is what still says so after a reload (AD-11).
+    const rejected = items.filter(
+      (item) => item.status === 'REJECTED' && item.operation !== 'START',
+    );
     for (const item of rejected) {
       await queue.remove(item.id);
     }
@@ -560,6 +668,8 @@ export function useTimingCapture(
    */
   const openEpoch = useCallback(
     async (attemptId: string): Promise<TimingEpochAnchor> => {
+      const local = localAnchors.current.get(attemptId);
+      if (local) return local;
       const known = anchors.current.get(attemptId);
       if (known) return known;
       const inFlight = opening.current.get(attemptId);
@@ -666,13 +776,18 @@ export function useTimingCapture(
    */
   const captureAnonymous = useCallback((): Promise<TimingCaptureOutcome> => {
     const id = requireEvent();
-    const anchorAttempt = surface?.categories.find(
+    const anchorBlock = surfaceView?.categories.find(
       (block) => block.state === 'RUNNING' && block.attemptId !== null,
-    )?.attemptId;
-    if (anchorAttempt === undefined || anchorAttempt === null) {
+    );
+    const anchorAttempt = anchorBlock?.attemptId ?? null;
+    if (anchorAttempt === null) {
       report(NO_RUNNING_ATTEMPT_MESSAGE);
       throw new Error(NO_RUNNING_ATTEMPT_MESSAGE);
     }
+    // A split of a local attempt keeps that attempt as its anchor, so its
+    // official capture time and the mapping survive a reload (AD-8).
+    const localAnchorAttemptId =
+      anchorBlock?.local === true ? anchorAttempt : undefined;
     // The press instant is read before anything is awaited, then chained.
     const capturedAt = new Date().toISOString();
     const monotonicMs = performance.now();
@@ -694,18 +809,22 @@ export function useTimingCapture(
         deviceSequence,
       };
 
-      return queueItem(
-        key,
-        eventScope,
-        workstationInstanceId,
-        deviceSequence,
-        'PASS',
-        payload,
-      );
+      return {
+        ...queueItem(
+          key,
+          eventScope,
+          workstationInstanceId,
+          deviceSequence,
+          'PASS',
+          payload,
+        ),
+        ...(localAnchorAttemptId === undefined ? {} : { localAnchorAttemptId }),
+        eventId: id,
+      };
     });
   }, [
     requireEvent,
-    surface,
+    surfaceView,
     acceptCapture,
     openEpoch,
     workstationInstanceId,
@@ -718,9 +837,9 @@ export function useTimingCapture(
    */
   const resolveCandidates = useCallback(
     (startNumber: number): TimingCaptureCandidate[] => {
-      if (!surface) return [];
+      if (!surfaceView) return [];
       const candidates: TimingCaptureCandidate[] = [];
-      for (const block of surface.categories) {
+      for (const block of surfaceView.categories) {
         if (block.state !== 'RUNNING' || block.attemptId === null) continue;
         for (const participant of block.participants) {
           if (participant.startNumber !== startNumber) continue;
@@ -735,7 +854,7 @@ export function useTimingCapture(
       }
       return candidates;
     },
-    [surface],
+    [surfaceView],
   );
 
   const commitNumber = useCallback(
@@ -791,7 +910,7 @@ export function useTimingCapture(
       startNumber: number,
     ): Promise<TimingCaptureOutcome> => {
       requireEvent();
-      const pending = surface?.categories
+      const pending = surfaceView?.categories
         .flatMap((block) => block.pendingFinishes)
         .find((finish) => finish.passId === pendingId);
       if (pending === undefined) {
@@ -821,7 +940,7 @@ export function useTimingCapture(
         );
       });
     },
-    [requireEvent, surface, workstationInstanceId, acceptCapture, report],
+    [requireEvent, surfaceView, workstationInstanceId, acceptCapture, report],
   );
 
   const quickUndo = useCallback(
@@ -863,7 +982,7 @@ export function useTimingCapture(
       chosenAttemptId?: string,
     ): Promise<TimingCaptureOutcome> => {
       const id = requireEvent();
-      const split = surface?.anonymousSplits?.find(
+      const split = surfaceView?.anonymousSplits?.find(
         (entry) => entry.splitId === splitId,
       );
       if (split === undefined) {
@@ -884,7 +1003,16 @@ export function useTimingCapture(
           deviceSequence,
           ...(chosenAttemptId === undefined ? {} : { chosenAttemptId }),
         };
-        const payload: TimingAnonymousAssignPayload = { splitId, request };
+        const captureDeviceSequence = split.captureDeviceSequence;
+        const payload: TimingAnonymousAssignPayload =
+          split.localSplitId === undefined
+            ? { splitId, request }
+            : captureDeviceSequence === undefined ||
+                captureDeviceSequence === null
+              ? (() => {
+                  throw new Error(SPLIT_MISSING_MESSAGE);
+                })()
+              : { captureDeviceSequence, request };
         return queueItem(
           key,
           eventScope,
@@ -895,7 +1023,7 @@ export function useTimingCapture(
         );
       });
     },
-    [requireEvent, surface, workstationInstanceId, acceptCapture, report],
+    [requireEvent, surfaceView, workstationInstanceId, acceptCapture, report],
   );
 
   /** One thin service wrapper: invalidate on success, report and rethrow on failure. */
@@ -945,8 +1073,95 @@ export function useTimingCapture(
    * keeps the category route. Both answer with the block and its epoch, so the
    * anchor is stored the same way and later captures route to it (AD-15).
    */
+  /**
+   * The device-local Start of one category (AD-2, AD-3, AD-4). It records the
+   * press instant, the frozen snapshot, the local attempt and epoch identities
+   * and the local display roster, and sends nothing. A heat start stays
+   * online-only; a block the surface cannot start keeps the accepted refusal.
+   */
+  const createLocalStart = useCallback(
+    async (block: TimingCategoryBlockView): Promise<void> => {
+      const id = requireEvent();
+      if (block.kind === 'HEAT') {
+        report(OFFLINE_HEAT_START_MESSAGE);
+        throw new Error(OFFLINE_HEAT_START_MESSAGE);
+      }
+      if (!block.startControlEnabled) {
+        const message = block.blockReason ?? OFFLINE_START_UNAVAILABLE_MESSAGE;
+        report(message);
+        throw new Error(message);
+      }
+      const officialStartedAt = new Date().toISOString();
+      const monotonicMs = performance.now();
+      const localAttemptId = `local-attempt-${newTimingMutationKey()}`;
+      const localClockEpochId = `local-epoch-${newTimingMutationKey()}`;
+      const roster = block.participants.map((participant) => ({
+        enrollmentId: participant.enrollmentId,
+        registrationId: participant.registrationId,
+        startNumber:
+          participant.startNumber > 0 ? participant.startNumber : null,
+        sectionId: participant.sectionId,
+        requiredLaps: participant.requiredLaps,
+        excludedReason: participant.excludedReason ?? null,
+      }));
+      const localRoster: TimingLocalRosterRow[] = block.participants.map(
+        (participant) => ({
+          enrollmentId: participant.enrollmentId,
+          fullName: participant.fullName,
+          sectionId: participant.sectionId,
+          startNumber:
+            participant.startNumber > 0 ? participant.startNumber : null,
+          requiredLaps: participant.requiredLaps,
+          excludedReason: participant.excludedReason ?? null,
+        }),
+      );
+      await acceptCapture(localAttemptId, async () => {
+        const queue = await openTimingQueue();
+        const deviceSequence = await queue.nextSequence(
+          localAttemptId,
+          workstationInstanceId,
+        );
+        const payload: StartOfflineTimingAttemptRequest = {
+          startId: block.startId,
+          formatId: block.formatId,
+          gender: block.gender,
+          workstationInstanceId,
+          officialStartedAt,
+          roster,
+          localAttemptId,
+          localClockEpochId,
+          deviceSequence,
+        };
+        return {
+          ...queueItem(
+            newTimingMutationKey(),
+            localAttemptId,
+            workstationInstanceId,
+            deviceSequence,
+            'START',
+            payload,
+          ),
+          localAttemptId,
+          localClockEpochId,
+          eventId: id,
+          localRoster,
+        };
+      });
+      localAnchors.current.set(localAttemptId, {
+        epochId: localClockEpochId,
+        anchorElapsedMs: 0,
+        anchorMonotonicMs: monotonicMs,
+      });
+    },
+    [acceptCapture, report, requireEvent, workstationInstanceId],
+  );
+
   const startAttempt = useCallback(
     async (block: TimingCategoryBlockView): Promise<void> => {
+      if (!isOnline) {
+        await createLocalStart(block);
+        return;
+      }
       const id = requireEvent();
       await runMutation(async () => {
         const result =
@@ -982,7 +1197,7 @@ export function useTimingCapture(
         });
       });
     },
-    [requireEvent, runMutation, workstationInstanceId],
+    [createLocalStart, isOnline, requireEvent, runMutation, workstationInstanceId],
   );
 
   const complete = useCallback(
@@ -1089,12 +1304,29 @@ export function useTimingCapture(
           );
         case 'ANONYMOUS_ASSIGN': {
           const payload = item.payload as TimingAnonymousAssignPayload;
+          if (payload.captureDeviceSequence !== undefined) {
+            return timingService.assignAnonymousSplitByCapture(
+              id,
+              {
+                ...payload.request,
+                captureDeviceSequence: payload.captureDeviceSequence,
+              },
+              item.id,
+            );
+          }
+          if (payload.splitId === undefined) {
+            throw new Error('Неприсвоенная отсечка не найдена в очереди');
+          }
           return timingService.assignAnonymousSplit(
             id,
             payload.splitId,
             payload.request,
             item.id,
           );
+        }
+        case 'START': {
+          const payload = item.payload as StartOfflineTimingAttemptRequest;
+          return timingService.startOfflineAttempt(id, payload, item.id);
         }
       }
     },
@@ -1104,7 +1336,7 @@ export function useTimingCapture(
   /** Resolves a tile press's number from the surface, so a status names it. */
   const numberForEnrollment = useCallback(
     (enrollmentId: string): number | null => {
-      for (const block of surface?.categories ?? []) {
+      for (const block of surfaceView?.categories ?? []) {
         for (const participant of block.participants) {
           if (participant.enrollmentId === enrollmentId) {
             return participant.startNumber;
@@ -1113,7 +1345,7 @@ export function useTimingCapture(
       }
       return null;
     },
-    [surface],
+    [surfaceView],
   );
 
   /** Appends one answer to the ordered feed (AD-7). */
@@ -1174,11 +1406,95 @@ export function useTimingCapture(
    * without a capture-specific refusal and a transport failure are no answer
    * and stay retryable (AD-4, E-21).
    */
+  /**
+   * Applies the Start answer: persist the local→server mapping, rewrite every
+   * dependent item and allocate the server attempt's capture numbers 1..n
+   * (AD-5, AD-6). The Start item is marked `APPLIED` by `deliverItem` only after
+   * this success, so a crash replays the same key and finishes the mapping.
+   */
+  const applyStartMapping = useCallback(
+    async (item: TimingQueueItem, result: StartTimingAttemptResult) => {
+      const serverAttemptId = result.attempt.attemptId;
+      if (serverAttemptId === null) return;
+      const payload = item.payload as StartOfflineTimingAttemptRequest;
+      const queue = await openTimingQueue();
+      const items = await queue.list();
+      const dependent = items
+        .filter(
+          (candidate) =>
+            (candidate.operation === 'PASS' ||
+              candidate.operation === 'UNDO') &&
+            candidate.attemptId === payload.localAttemptId &&
+            candidate.serverAttemptId !== serverAttemptId,
+        )
+        .sort((left, right) =>
+          left.createdAt === right.createdAt
+            ? left.deviceSequence - right.deviceSequence
+            : left.createdAt < right.createdAt
+              ? -1
+              : 1,
+        );
+      const sequences: number[] = [];
+      for (let index = 0; index < dependent.length; index += 1) {
+        sequences.push(
+          await queue.nextSequence(serverAttemptId, workstationInstanceId),
+        );
+      }
+      let cursor = 0;
+      const mapping = mapLocalAttempt({
+        items,
+        startItem: item,
+        serverAttemptId,
+        serverClockEpochId: result.epoch.epochId,
+        nextSequence: () => sequences[cursor++] ?? 0,
+      });
+      for (const changed of mapping.changed) {
+        await queue.enqueue(changed);
+      }
+      localAnchors.current.delete(payload.localAttemptId);
+      await refreshQueue();
+    },
+    [refreshQueue, workstationInstanceId],
+  );
+
+  /**
+   * A refused Start invalidates the local attempt: its passes and quick undos
+   * are discarded without sending. Event-scoped splits captured under its clock
+   * stay for local deletion; their local epoch keeps the delivery planner from
+   * sending them.
+   */
+  const discardLocalAttempt = useCallback(
+    async (item: TimingQueueItem) => {
+      const payload = item.payload as StartOfflineTimingAttemptRequest;
+      const queue = await openTimingQueue();
+      const items = await queue.list();
+      for (const candidate of items) {
+        if (candidate.id === item.id) continue;
+        if (candidate.attemptId === payload.localAttemptId) {
+          await queue.remove(candidate.id);
+          continue;
+        }
+        // An assignment that chose the invalid attempt can never apply either.
+        if (candidate.operation !== 'ANONYMOUS_ASSIGN') continue;
+        const assignment = candidate.payload as TimingAnonymousAssignPayload;
+        if (assignment.request.chosenAttemptId === payload.localAttemptId) {
+          await queue.remove(candidate.id);
+        }
+      }
+      localAnchors.current.delete(payload.localAttemptId);
+      await refreshQueue();
+    },
+    [refreshQueue],
+  );
+
   const deliverItem = useCallback(
     async (item: TimingQueueItem): Promise<void> => {
       const queue = await openTimingQueue();
       try {
-        await replay(item);
+        const answer = await replay(item);
+        if (item.operation === 'START' && isStartResult(answer)) {
+          await applyStartMapping(item, answer);
+        }
         retryNotBefore.current.delete(item.id);
         await queue.mark(item.id, 'APPLIED');
         await refreshQueue();
@@ -1197,6 +1513,9 @@ export function useTimingCapture(
         if (isDefinitiveRefusal(error)) {
           // The server signed its answer: retrying would only replay it.
           retryNotBefore.current.delete(item.id);
+          if (item.operation === 'START') {
+            await discardLocalAttempt(item);
+          }
           await queue.mark(item.id, 'REJECTED', message);
           await refreshQueue();
           setConnectivity(true);
@@ -1216,6 +1535,8 @@ export function useTimingCapture(
       invalidateCoalesced,
       keepUnresolved,
       report,
+      applyStartMapping,
+      discardLocalAttempt,
     ],
   );
 
@@ -1380,8 +1701,8 @@ export function useTimingCapture(
    * failed open is retried by the next action instead of in a loop.
    */
   useEffect(() => {
-    if (!eventId || !surface) return;
-    for (const block of surface.categories) {
+    if (!eventId || !surfaceView) return;
+    for (const block of surfaceView.categories) {
       if (block.state !== 'RUNNING' || block.attemptId === null) continue;
       const attemptId = block.attemptId;
       if (anchors.current.has(attemptId) || opening.current.has(attemptId)) {
@@ -1395,7 +1716,7 @@ export function useTimingCapture(
         );
       });
     }
-  }, [eventId, surface, openEpoch]);
+  }, [eventId, surfaceView, openEpoch]);
 
   /**
    * The unresolved captures per attempt: recorded outbox entries plus the
@@ -1414,6 +1735,48 @@ export function useTimingCapture(
     }
     return counts;
   }, [queueItems, chainDepth]);
+
+  /** Removes one unapplied local split and every assignment that names it. */
+  const deleteLocalSplit = useCallback(
+    async (localSplitId: string): Promise<void> => {
+      const item = queueItems.find(
+        (candidate) => candidate.id === localSplitId,
+      );
+      if (
+        item === undefined ||
+        item.operation !== 'PASS' ||
+        (item.payload as { kind?: string }).kind !== 'ANONYMOUS_SPLIT'
+      ) {
+        report(SPLIT_MISSING_MESSAGE);
+        throw new Error(SPLIT_MISSING_MESSAGE);
+      }
+      if (item.status === 'SENT') {
+        const message = 'Отсечка отправляется: дождитесь ответа сервера.';
+        report(message);
+        throw new Error(message);
+      }
+      if (item.status !== 'PENDING') {
+        const message = 'Отсечка уже создана на сервере: отмените её с причиной.';
+        report(message);
+        throw new Error(message);
+      }
+      const queue = await openTimingQueue();
+      const items = await queue.list();
+      for (const candidate of items) {
+        if (candidate.operation !== 'ANONYMOUS_ASSIGN') continue;
+        const payload = candidate.payload as TimingAnonymousAssignPayload;
+        if (payload.captureDeviceSequence === item.deviceSequence) {
+          await queue.remove(candidate.id);
+        }
+      }
+      await queue.remove(item.id);
+      // The refused Start tombstone of this split's invalid clock is no longer
+      // needed once nothing references it.
+      await removeUnreferencedStartTombstones(queue);
+      await refreshQueue();
+    },
+    [queueItems, refreshQueue, report],
+  );
 
   return {
     resolveCandidates,
@@ -1435,6 +1798,10 @@ export function useTimingCapture(
     flush,
     sendNow: flush,
     queueItems,
+    mergedSurface: surfaceView,
+    localAttempts: localView.attempts,
+    localSplits: localSplitView,
+    deleteLocalSplit,
     inFlightIds,
     refreshQueue,
     isDurable,
