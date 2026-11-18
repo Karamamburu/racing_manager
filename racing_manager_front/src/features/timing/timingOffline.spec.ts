@@ -321,6 +321,10 @@ describe('deriveTimingOfflineView: one number press', () => {
         withdraws: null,
         pairId: null,
         pairRole: null,
+        deviceSequence: 1,
+        localAnchorAttemptId: null,
+        elapsedMs: 1_000,
+        captureDeviceSequence: null,
         reason: null,
       },
     ]);
@@ -360,6 +364,7 @@ describe('deriveTimingOfflineView: one number press', () => {
         BIND: 0,
         UNDO: 0,
         ANONYMOUS_ASSIGN: 0,
+        START: 0,
       },
       pendingMarks: 1,
       unattributedPendingMarks: 0,
@@ -439,6 +444,10 @@ describe('deriveTimingOfflineView: entries without a participant', () => {
         withdraws: null,
         pairId: null,
         pairRole: null,
+        deviceSequence: 1,
+        localAnchorAttemptId: null,
+        elapsedMs: 1_000,
+        captureDeviceSequence: null,
         reason: null,
       },
     ]);
@@ -574,6 +583,10 @@ describe('deriveTimingOfflineView: refusals', () => {
         withdraws: null,
         pairId: null,
         pairRole: null,
+        deviceSequence: 1,
+        localAnchorAttemptId: null,
+        elapsedMs: 1_000,
+        captureDeviceSequence: null,
         reason: 'Попытка уже закрыта другим рабочим местом',
       },
     ]);
@@ -998,5 +1011,34 @@ describe('timingOfflineBlockKey', () => {
       heatNumber: 2,
     };
     expect(timingOfflineBlockKey(heat)).toBe('heat:race-1:stage-1:2');
+  });
+});
+
+describe('refused Start tombstone', () => {
+  it('is not a queue row, but its refused split still is', () => {
+    const tombstone = queueItem({
+      id: 'start-refused',
+      attemptId: 'local-attempt',
+      operation: 'START',
+      status: 'REJECTED',
+      payload: {
+        localAttemptId: 'local-attempt',
+        localClockEpochId: 'local-epoch',
+        officialStartedAt: '2026-11-16T10:00:00.000Z',
+      },
+    });
+    const keptSplit = anonymousSplitPass(
+      'split-kept',
+      1,
+      '2026-11-16T10:00:10.000Z',
+    );
+
+    const view = derive([tombstone, keptSplit]);
+
+    expect(view.entries.map((entry) => entry.id)).toEqual(['split-kept']);
+    expect(view.rejectedEntries).toEqual([]);
+    expect(view.totals.unsentEntries).toBe(1);
+    expect(view.totals.rejectedEntries).toBe(0);
+    expect(view.totals.unsentByKind.START).toBe(0);
   });
 });

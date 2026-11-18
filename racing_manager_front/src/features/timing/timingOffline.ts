@@ -63,6 +63,7 @@ export const TIMING_OFFLINE_ENTRY_KINDS = [
   'BIND',
   'UNDO',
   'ANONYMOUS_ASSIGN',
+  'START',
 ] as const;
 
 export type TimingOfflineEntryKind = (typeof TIMING_OFFLINE_ENTRY_KINDS)[number];
@@ -80,6 +81,7 @@ export const TIMING_OFFLINE_ENTRY_KIND_LABELS: Record<
   BIND: 'Привязка финиша',
   UNDO: 'Отмена отметки',
   ANONYMOUS_ASSIGN: 'Присвоение отсечки',
+  START: 'Старт категории',
 };
 
 /**
@@ -145,6 +147,14 @@ export interface TimingOfflineEntryView {
   pairRole: TimingOfflinePairRole | null;
   /** The server's refusal message, verbatim, or `null`. */
   reason: string | null;
+  /** The outbox sequence of the capture, when the entry has one. */
+  deviceSequence: number;
+  /** The attempt that anchored a local split's clock, when recorded. */
+  localAnchorAttemptId: string | null;
+  /** The raw elapsed value carried by the capture payload, when present. */
+  elapsedMs: number | null;
+  /** The split capture sequence an assignment names, when present. */
+  captureDeviceSequence: number | null;
 }
 
 /** The pending marks of one participant tile. */
@@ -304,6 +314,9 @@ export function deriveTimingOfflineView(
   // Capture order: the order the outbox replays in, derived from the same key
   // the queue sorts by.
   const records = [...items]
+    // A refused Start is kept only as the tombstone of its invalid clock epoch;
+    // its refusal was reported once and it is not a queue row (AD-11).
+    .filter((item) => !(item.operation === 'START' && item.status === 'REJECTED'))
     .sort(compareQueueItems)
     .map((item) => describeEntry(item, splitPressTimes));
 
@@ -511,6 +524,7 @@ function emptyKindCounts(): Record<TimingOfflineEntryKind, number> {
     BIND: 0,
     UNDO: 0,
     ANONYMOUS_ASSIGN: 0,
+    START: 0,
   };
 }
 
@@ -737,6 +751,18 @@ function describeEntry(
         pressTime: item.createdAt,
         location: undefined,
       };
+    case 'START':
+      return {
+        item,
+        kind: 'START',
+        attemptId: item.attemptId,
+        blockKey: null,
+        enrollmentId: null,
+        startNumber: null,
+        addsMark: false,
+        pressTime: readString(payload, 'officialStartedAt') ?? item.createdAt,
+        location: undefined,
+      };
   }
 }
 
@@ -857,6 +883,13 @@ function toEntryView(
     pairId,
     pairRole,
     reason: row.status === 'REJECTED' ? (record.item.error ?? null) : null,
+    deviceSequence: record.item.deviceSequence,
+    localAnchorAttemptId: record.item.localAnchorAttemptId ?? null,
+    elapsedMs: readNumber(asRecord(record.item.payload), 'clientElapsedMs'),
+    captureDeviceSequence: readNumber(
+      asRecord(record.item.payload),
+      'captureDeviceSequence',
+    ),
   };
 }
 
