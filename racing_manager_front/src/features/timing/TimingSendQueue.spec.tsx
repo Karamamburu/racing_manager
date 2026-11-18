@@ -67,6 +67,7 @@ const KIND_LABELS: Record<TimingOfflineEntryKind, string> = {
   BIND: 'Привязка финиша',
   UNDO: 'Отмена отметки',
   ANONYMOUS_ASSIGN: 'Присвоение отсечки',
+  START: 'Старт категории',
 };
 
 function entry(
@@ -96,6 +97,10 @@ function entry(
     pairId: null,
     pairRole: null,
     reason: status === 'REJECTED' ? 'Попытка уже закрыта сервером' : null,
+    deviceSequence: 1,
+    localAnchorAttemptId: null,
+    elapsedMs: null,
+    captureDeviceSequence: null,
     ...overrides,
   };
 }
