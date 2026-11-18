@@ -16,8 +16,8 @@ import {
   Typography,
   message,
 } from 'antd';
-import { useEffect, useState } from 'react';
-import type { ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
 import { useEventDetailsQuery } from '../../features/events/useEventDetailsQuery';
@@ -124,6 +124,65 @@ const OFFLINE_REQUIRED_MESSAGE = 'Нужна связь с сервером.';
 /** The connection state the page shows beside its unsent figures (S-04). */
 const CONNECTED_LABEL = 'Связь есть';
 const DISCONNECTED_LABEL = 'Нет связи с сервером';
+
+/** The overlay the figures trigger opens (U-07, E-09). */
+const SEND_QUEUE_DIALOG_LABEL = 'Очередь отправки';
+
+/**
+ * The close control of the queue content. It is named here as well, because the
+ * page moves keyboard focus into the overlay through it when the overlay opens
+ * (E-09) and the content component paints it.
+ */
+const SEND_QUEUE_CLOSE_LABEL = 'Закрыть очередь отправки';
+
+/**
+ * The reserved figures row of the top control card (U-12, S-08).
+ *
+ * The row is rendered in every state and keeps its height while the figures
+ * change, so no capture can add, remove or move a control in page flow. It is
+ * the positioning context of the overlay, which floats over the page instead of
+ * taking page flow (U-09, F-10).
+ */
+const FIGURES_ROW_STYLE: CSSProperties = {
+  position: 'relative',
+  display: 'flex',
+  alignItems: 'center',
+  width: '100%',
+  minHeight: 32,
+};
+
+/**
+ * The unsent figures as the single pressable control (U-08, U-09).
+ *
+ * It keeps the accepted wording on one line: a four-digit count scrolls inside
+ * the control instead of wrapping and growing the reserved row (S-10, U-12).
+ */
+const FIGURES_TRIGGER_STYLE: CSSProperties = {
+  whiteSpace: 'nowrap',
+  overflowX: 'auto',
+  background: 'transparent',
+  border: 'none',
+  padding: 0,
+  font: 'inherit',
+  color: 'inherit',
+  cursor: 'pointer',
+  textAlign: 'left',
+  width: '100%',
+  height: 28,
+};
+
+/**
+ * The overlay itself: an absolutely positioned panel inside the reserved row.
+ * It carries no backdrop and traps no focus, so every control behind it stays
+ * operable (U-09, S-06).
+ */
+const SEND_QUEUE_OVERLAY_STYLE: CSSProperties = {
+  position: 'absolute',
+  top: '100%',
+  left: 0,
+  marginTop: 4,
+  zIndex: 1050,
+};
 
 /** The assignment press a cleared selection can no longer route (E-13). */
 const NO_SELECTED_SPLIT_MESSAGE = 'Назначение недоступно: отсечка не выбрана';
@@ -301,6 +360,12 @@ function surfaceHasAttempt(
  * connection rule the page applies itself is the one no component owns
  * (U-07, F-04). A device whose outbox is volatile states that while it holds an
  * unsent entry and asks the browser to confirm a leave (FR-30, O-01).
+ *
+ * MANUAL-TIMING-6: the top control card keeps one reserved figures row, and the
+ * figures are that row's single pressable control (U-08, U-12). The detailed
+ * send queue is reachable only through it and lives in a non-modal overlay
+ * outside page flow (U-07, U-09), so a capture that queues, sends or drains
+ * moves nothing behind the overlay (E-05, F-10).
  */
 export function TimingPage() {
   const { id } = useParams<{ id: string }>();
@@ -337,6 +402,11 @@ export function TimingPage() {
   // The page's own online-only refusal, for the presses no component gates
   // (U-07, F-04). It never stands in for an unsent capture.
   const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
+  // The on-demand unsent overlay and the two elements that own its focus: the
+  // panel itself decides whether focus returns to the trigger (U-07, E-09).
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const overlayTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [splitChoice, setSplitChoice] = useState<{
     splitId: string;
     startNumber: number;
@@ -390,6 +460,20 @@ export function TimingPage() {
     void queryClient.invalidateQueries({ queryKey: surfaceQueryKey });
     void capture.refreshQueue();
   };
+
+  /**
+   * Closes the overlay and returns focus to the trigger only when focus was
+   * inside it (E-08, E-09, F-04). A referee typing in the number field keeps
+   * both the focus and the value already typed there.
+   */
+  const closeOverlay = useCallback(() => {
+    const overlay = overlayRef.current;
+    const active = document.activeElement;
+    const focusWasInside =
+      overlay !== null && active !== null && overlay.contains(active);
+    setOverlayOpen(false);
+    if (focusWasInside) overlayTriggerRef.current?.focus();
+  }, []);
 
   /** A returned connection retires the page's own notice, not a component's reason. */
   useEffect(() => {
@@ -451,13 +535,12 @@ export function TimingPage() {
     surfaceQuery.data ?? EMPTY_TIMING_SURFACE,
   );
 
-  // An entry whose request is still in flight is not a queue row the referee
-  // must manage. Filtering it keeps the send-queue card out of the layout during
-  // an ordinary online press; it appears only when an entry actually stays
-  // unanswered (or a previous entry is waiting).
-  const queueEntries = offlineView.unsentEntries.filter(
-    (entry) => !capture.inFlightIds.has(entry.id),
-  );
+  /**
+   * The one accepted figures line: the text and the accessible name of the
+   * overlay trigger, read from the same snapshot as the overlay itself (U-08,
+   * U-10, U-12).
+   */
+  const figuresLine = `Не отправлено: ${offlineView.totals.unsentEntries} · Отправляется: ${offlineView.totals.sendingEntries} · Ожидают отправки: ${offlineView.totals.waitingEntries} · из них отметок: ${offlineView.totals.pendingMarks}`;
 
   /**
    * The volatile-storage protection (FR-30, O-01). It reads the same unsent
@@ -466,6 +549,29 @@ export function TimingPage() {
    */
   const needsVolatileWarning =
     !capture.isDurable && offlineView.totals.unsentEntries > 0;
+
+  // Escape is the deliberate close of the overlay: unlike a press outside it,
+  // it always closes and restores focus only when focus was inside (E-08, F-03).
+  useEffect(() => {
+    if (!overlayOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeOverlay();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [overlayOpen, closeOverlay]);
+
+  // Opening announces the dialog and takes keyboard focus into it, so a
+  // keyboard user reads the rows and closes it without a pointer (E-09).
+  useEffect(() => {
+    if (!overlayOpen) return;
+    const closeButton = overlayRef.current?.querySelector<HTMLElement>(
+      `[aria-label="${SEND_QUEUE_CLOSE_LABEL}"]`,
+    );
+    closeButton?.focus();
+  }, [overlayOpen]);
 
   useEffect(() => {
     if (!needsVolatileWarning) return;
@@ -991,6 +1097,41 @@ export function TimingPage() {
         )}
 
         <Card size="small">
+          <div style={FIGURES_ROW_STYLE}>
+            <button
+              ref={overlayTriggerRef}
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={overlayOpen}
+              title={figuresLine}
+              onClick={() => setOverlayOpen(true)}
+              style={FIGURES_TRIGGER_STYLE}
+            >
+              {figuresLine}
+            </button>
+
+            {overlayOpen ? (
+              <div
+                ref={overlayRef}
+                role="dialog"
+                aria-label={SEND_QUEUE_DIALOG_LABEL}
+                style={SEND_QUEUE_OVERLAY_STYLE}
+              >
+                <TimingSendQueue
+                  entries={offlineView.unsentEntries}
+                  unsentEntries={offlineView.totals.unsentEntries}
+                  sendingEntries={offlineView.totals.sendingEntries}
+                  waitingEntries={offlineView.totals.waitingEntries}
+                  pendingMarks={offlineView.totals.pendingMarks}
+                  isOnline={capture.isOnline}
+                  isSending={capture.isFlushing}
+                  onSendNow={capture.sendNow}
+                  onClose={closeOverlay}
+                />
+              </div>
+            ) : null}
+          </div>
+
           <Row gutter={[16, 12]}>
             <Col
               xs={24}
@@ -1028,11 +1169,6 @@ export function TimingPage() {
                       </Typography.Text>
                     )}
                   </Space>
-                  <Typography.Text
-                    type={offlineView.totals.hasUnsent ? 'warning' : 'secondary'}
-                  >
-                    {`Не отправлено: ${offlineView.totals.unsentEntries} · Отправляется: ${offlineView.totals.sendingEntries} · Ожидают отправки: ${offlineView.totals.waitingEntries} · из них отметок: ${offlineView.totals.pendingMarks}`}
-                  </Typography.Text>
                   <Typography.Text
                     type={capture.isOnline ? 'secondary' : 'warning'}
                   >
@@ -1129,16 +1265,6 @@ export function TimingPage() {
             </Col>
           </Row>
         </Card>
-
-        {queueEntries.length === 0 ? null : (
-          <TimingSendQueue
-            entries={queueEntries}
-            unsentEntries={queueEntries.length}
-            isOnline={capture.isOnline}
-            isSending={capture.isFlushing}
-            onSendNow={capture.sendNow}
-          />
-        )}
 
         {surface.categories.length === 0 && stageGroups.length === 0 ? (
           <Card>

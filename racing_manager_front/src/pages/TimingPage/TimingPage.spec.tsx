@@ -337,6 +337,18 @@ function mockCapture(
   return result;
 }
 
+/** The one figures trigger of the top control card, by its accepted line (U-08). */
+function figuresTrigger(
+  unsent: number,
+  sending: number,
+  waiting: number,
+  marks: number,
+): HTMLElement {
+  return screen.getByRole('button', {
+    name: `Не отправлено: ${unsent} · Отправляется: ${sending} · Ожидают отправки: ${waiting} · из них отметок: ${marks}`,
+  });
+}
+
 function mockSession(roles: string[]) {
   vi.mocked(useSessionQuery).mockReturnValue({
     data: { authenticated: true, userId: 'user-1', roles },
@@ -1622,7 +1634,18 @@ describe('TimingPage', () => {
     expect(
       (screen.getByLabelText('Номер участника') as HTMLInputElement).disabled,
     ).toBe(false);
+    // No queue occupies page flow, and the trigger keeps its reserved place at
+    // zero (S-08, U-12).
     expect(screen.queryByText('Очередь отправки')).toBeNull();
+    const trigger = figuresTrigger(0, 0, 0, 0);
+    fireEvent.click(trigger);
+
+    const dialog = screen.getByRole('dialog', { name: 'Очередь отправки' });
+    expect(within(dialog).getByText('Всё отправлено')).not.toBeNull();
+    // Nothing is unsent, so the overlay offers no send action (E-11, F-06).
+    expect(
+      within(dialog).queryByRole('button', { name: /Отправить сейчас/ }),
+    ).toBeNull();
   });
 
   it('lists only unsent send-queue rows and wires send-now', async () => {
@@ -1646,6 +1669,12 @@ describe('TimingPage', () => {
     const capture = mockCapture({ queueItems: [queueItem()] });
 
     renderPage();
+
+    await screen.findByText('5 км · Мужчины');
+    // The queue is reachable only through the figures line: page flow holds no
+    // list of unsent entries (U-07, F-10).
+    expect(screen.queryByText('Очередь отправки')).toBeNull();
+    fireEvent.click(figuresTrigger(1, 0, 1, 1));
 
     expect(await screen.findByText('Очередь отправки')).not.toBeNull();
     expect(screen.getByText('Отметка по номеру')).not.toBeNull();
@@ -1675,14 +1704,293 @@ describe('TimingPage', () => {
       }),
     );
     mockCapture({
-      queueItems: [queueItem()],
+      queueItems: [queueItem({ status: 'SENT' })],
       inFlightIds: new Set(['queue-1']),
     });
 
     renderPage();
 
     expect(await screen.findByText('5 км · Мужчины')).not.toBeNull();
+    // Nothing appears in page flow while the only unsent capture is in flight.
     expect(screen.queryByText('Очередь отправки')).toBeNull();
+
+    fireEvent.click(figuresTrigger(1, 1, 0, 1));
+
+    const dialog = screen.getByRole('dialog', { name: 'Очередь отправки' });
+    // A sending capture is a figure, never a row (E-06, F-05, S-05).
+    expect(within(dialog).queryByText('не отправлено')).toBeNull();
+    expect(within(dialog).getByText(/Отправляется: 1$/)).not.toBeNull();
+    expect(within(dialog).queryByText('Всё отправлено')).toBeNull();
+    expect(
+      within(dialog).getByRole('button', { name: /Отправить сейчас/ }),
+    ).not.toBeNull();
+  });
+
+  it('makes the reserved figures line the one trigger of the out-of-flow overlay', async () => {
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(surface());
+    mockCapture();
+
+    const { container } = renderPage();
+
+    const trigger = await screen.findByRole('button', {
+      name: 'Не отправлено: 0 · Отправляется: 0 · Ожидают отправки: 0 · из них отметок: 0',
+    });
+    // The figures line is present at zero and is the only way into the overlay
+    // (U-08, S-08, U-12).
+    expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(trigger.getAttribute('title')).toBe(trigger.textContent);
+
+    fireEvent.click(trigger);
+
+    const dialog = screen.getByRole('dialog', { name: 'Очередь отправки' });
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(
+      within(dialog).getByText('Не отправлено: 0 · Отправляется: 0'),
+    ).not.toBeNull();
+    expect(
+      within(dialog).getByText('Ожидают отправки: 0 · из них отметок: 0'),
+    ).not.toBeNull();
+    // The overlay floats over the page and is never inside the block rows, so
+    // nothing behind it is pushed or re-packed (U-07, F-10).
+    const blockRows = container.querySelector('.timing-block-rows');
+    expect(blockRows).not.toBeNull();
+    expect(blockRows?.contains(dialog)).toBe(false);
+  });
+
+  it('records a tile press behind the open overlay and closes nothing', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    const view = surface({
+      captureWorkstationInstanceId: 'ws-1',
+      categories: [
+        block({
+          state: 'RUNNING',
+          attemptId: 'attempt-1',
+          officialStartedAt: '2026-11-13T09:00:00.000Z',
+          elapsedMs: 1000,
+          startControlEnabled: false,
+        }),
+      ],
+    });
+    getSurface.mockResolvedValue(view);
+    const capture = mockCapture();
+
+    renderPage();
+
+    await screen.findByText('5 км · Мужчины');
+    fireEvent.click(figuresTrigger(0, 0, 0, 0));
+    const dialog = screen.getByRole('dialog', { name: 'Очередь отправки' });
+
+    fireEvent.click(screen.getByRole('button', { name: '17 Иван Петров' }));
+
+    await waitFor(() => {
+      expect(capture.commitTile).toHaveBeenCalledWith(
+        view.categories[0].participants[0],
+        'attempt-1',
+      );
+    });
+    // A press outside the overlay performs its own action and closes nothing
+    // (S-06, F-03).
+    expect(screen.getByRole('dialog', { name: 'Очередь отправки' })).toBe(
+      dialog,
+    );
+  });
+
+  it('records a typed number behind the open overlay and closes nothing', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 1000,
+            startControlEnabled: false,
+          }),
+        ],
+      }),
+    );
+    const capture = mockCapture({
+      resolveCandidates: vi.fn(() => [
+        {
+          enrollmentId: 'enrollment-1',
+          attemptId: 'attempt-1',
+          label: '17 Иван Петров',
+        },
+      ]),
+    });
+
+    renderPage();
+
+    await screen.findByText('5 км · Мужчины');
+    fireEvent.click(figuresTrigger(0, 0, 0, 0));
+    const dialog = screen.getByRole('dialog', { name: 'Очередь отправки' });
+
+    const field = screen.getByLabelText('Номер участника');
+    fireEvent.change(field, { target: { value: '17' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+
+    await waitFor(() =>
+      expect(capture.commitNumber).toHaveBeenCalledWith(
+        expect.objectContaining({ startNumber: 17 }),
+      ),
+    );
+    // The number field stays operable while the overlay is open (S-06).
+    expect(screen.getByRole('dialog', { name: 'Очередь отправки' })).toBe(
+      dialog,
+    );
+  });
+
+  it('closes the overlay on Escape and returns focus to the trigger from inside', async () => {
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(surface());
+    mockCapture();
+
+    renderPage();
+
+    const trigger = await screen.findByRole('button', {
+      name: 'Не отправлено: 0 · Отправляется: 0 · Ожидают отправки: 0 · из них отметок: 0',
+    });
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole('dialog', { name: 'Очередь отправки' });
+    // Opening announces the title and takes keyboard focus (E-09).
+    expect(
+      within(dialog).getByRole('button', { name: 'Закрыть очередь отправки' }),
+    ).toBe(document.activeElement);
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(
+      screen.queryByRole('dialog', { name: 'Очередь отправки' }),
+    ).toBeNull();
+    expect(trigger).toBe(document.activeElement);
+  });
+
+  it('closes the overlay on Escape without moving focus or the typed number', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 1000,
+            startControlEnabled: false,
+          }),
+        ],
+      }),
+    );
+    mockCapture();
+
+    renderPage();
+
+    const trigger = await screen.findByRole('button', {
+      name: 'Не отправлено: 0 · Отправляется: 0 · Ожидают отправки: 0 · из них отметок: 0',
+    });
+    fireEvent.click(trigger);
+    expect(
+      screen.getByRole('dialog', { name: 'Очередь отправки' }),
+    ).not.toBeNull();
+
+    const field = screen.getByLabelText('Номер участника') as HTMLInputElement;
+    fireEvent.change(field, { target: { value: '17' } });
+    field.focus();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(
+      screen.queryByRole('dialog', { name: 'Очередь отправки' }),
+    ).toBeNull();
+    // Closing never steals focus from the field or rewrites a typed value
+    // (E-08, F-04), so the trigger is not focused instead.
+    expect(field).toBe(document.activeElement);
+    expect(field.value).toBe('17');
+    expect(trigger).not.toBe(document.activeElement);
+  });
+
+  it('closes the overlay from its own control and returns focus to the trigger', async () => {
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(surface());
+    mockCapture();
+
+    renderPage();
+
+    const trigger = await screen.findByRole('button', {
+      name: 'Не отправлено: 0 · Отправляется: 0 · Ожидают отправки: 0 · из них отметок: 0',
+    });
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole('dialog', { name: 'Очередь отправки' });
+
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'Закрыть очередь отправки' }),
+    );
+
+    expect(
+      screen.queryByRole('dialog', { name: 'Очередь отправки' }),
+    ).toBeNull();
+    expect(trigger).toBe(document.activeElement);
+  });
+
+  it('reserves one fixed rows-worth of space for the figures trigger', async () => {
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(surface());
+    mockCapture();
+
+    const { container } = renderPage();
+
+    const trigger = await screen.findByRole('button', {
+      name: 'Не отправлено: 0 · Отправляется: 0 · Ожидают отправки: 0 · из них отметок: 0',
+    });
+    const row = trigger.parentElement as HTMLElement;
+    // jsdom has no layout, so the reserved single-line row is asserted
+    // structurally (U-12, S-08).
+    expect(row.style.minHeight).toBe('32px');
+    expect(row.style.position).toBe('relative');
+    expect(trigger.style.whiteSpace).toBe('nowrap');
+    expect(trigger.style.height).toBe('28px');
+    // The figures appear once: the trigger is the only element stating them.
+    expect((container.textContent ?? '').match(/Не отправлено: 0/g)).toHaveLength(
+      1,
+    );
+  });
+
+  it('leaves no send queue in page flow while the overlay is closed', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({ captureWorkstationInstanceId: 'ws-1' }),
+    );
+    mockCapture({ queueItems: [queueItem()] });
+
+    renderPage();
+
+    expect(await screen.findByText('5 км · Мужчины')).not.toBeNull();
+    expect(screen.queryByText('Очередь отправки')).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /Отправить сейчас/ }),
+    ).toBeNull();
+    // The trigger states the same figures in its reserved row instead.
+    expect(
+      screen.getByText(
+        'Не отправлено: 1 · Отправляется: 0 · Ожидают отправки: 1 · из них отметок: 1',
+      ),
+    ).not.toBeNull();
   });
 
   it('shows the pending marks of each block from the derived outbox view', async () => {
@@ -2037,6 +2345,9 @@ describe('TimingPage', () => {
     // The accepted mark figure stays where it was, so the page and the tiles
     // still agree about every pending mark (S-04).
     expect(figures.textContent ?? '').toContain('из них отметок: 6');
+
+    fireEvent.click(figures);
+
     // A sending capture is a figure, not a queue row: the send queue lists the
     // four waiting captures only (S-02).
     expect(screen.getAllByText('не отправлено')).toHaveLength(4);
