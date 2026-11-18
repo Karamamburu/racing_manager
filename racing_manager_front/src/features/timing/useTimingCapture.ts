@@ -1739,9 +1739,9 @@ export function useTimingCapture(
   /** Removes one unapplied local split and every assignment that names it. */
   const deleteLocalSplit = useCallback(
     async (localSplitId: string): Promise<void> => {
-      const item = queueItems.find(
-        (candidate) => candidate.id === localSplitId,
-      );
+      const queue = await openTimingQueue();
+      const items = await queue.list();
+      const item = items.find((candidate) => candidate.id === localSplitId);
       if (
         item === undefined ||
         item.operation !== 'PASS' ||
@@ -1760,8 +1760,6 @@ export function useTimingCapture(
         report(message);
         throw new Error(message);
       }
-      const queue = await openTimingQueue();
-      const items = await queue.list();
       for (const candidate of items) {
         if (candidate.operation !== 'ANONYMOUS_ASSIGN') continue;
         const payload = candidate.payload as TimingAnonymousAssignPayload;
@@ -1775,7 +1773,7 @@ export function useTimingCapture(
       await removeUnreferencedStartTombstones(queue);
       await refreshQueue();
     },
-    [queueItems, refreshQueue, report],
+    [refreshQueue, report],
   );
 
   return {

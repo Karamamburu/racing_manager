@@ -2082,6 +2082,107 @@ describe('useTimingCapture offline start', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it('finishes a mapping interrupted before the Start was applied', async () => {
+    navigatorOnline = false;
+    const queue = await openTimingQueue();
+    const startedAt = '2026-11-18T09:00:00.000Z';
+    const localAttemptId = 'local-attempt-reload';
+    const localEpochId = 'local-epoch-reload';
+    const startPayload: StartOfflineTimingAttemptRequest = {
+      startId: 'start-a',
+      formatId: 1,
+      gender: 'M',
+      workstationInstanceId: 'ws-1',
+      officialStartedAt: startedAt,
+      roster: [
+        {
+          enrollmentId: 'enrollment-1',
+          registrationId: 'registration-1',
+          startNumber: 17,
+          sectionId: 'Мужчины 24–40',
+          requiredLaps: 3,
+          excludedReason: null,
+        },
+      ],
+      localAttemptId,
+      localClockEpochId: localEpochId,
+      deviceSequence: 1,
+    };
+    await queue.enqueue({
+      id: 'start-reload',
+      attemptId: localAttemptId,
+      workstationInstanceId: 'ws-1',
+      deviceSequence: 1,
+      operation: 'START',
+      payload: startPayload,
+      status: 'PENDING',
+      createdAt: startedAt,
+      serverAttemptId: 'server-attempt-reload',
+      serverClockEpochId: 'epoch-server-attempt-reload',
+      eventId: 'event-1',
+    });
+    const passPayload: CaptureTimingPassRequest = {
+      attemptId: localAttemptId,
+      kind: 'NUMBER',
+      startNumber: 17,
+      clientCapturedAt: '2026-11-18T09:00:03.000Z',
+      clientElapsedMs: 3000,
+      clockEpochId: localEpochId,
+      workstationInstanceId: 'ws-1',
+      deviceSequence: 2,
+    };
+    await queue.enqueue({
+      id: 'pass-reload',
+      attemptId: localAttemptId,
+      workstationInstanceId: 'ws-1',
+      deviceSequence: 2,
+      operation: 'PASS',
+      payload: passPayload,
+      status: 'PENDING',
+      createdAt: '2026-11-18T09:00:03.000Z',
+      eventId: 'event-1',
+    });
+
+    const { result } = renderCapture({
+      surface: surfaceOf([notStartedBlock()]),
+    });
+    await waitFor(() => {
+      expect(result.current.isFlushing).toBe(false);
+    });
+
+    vi.mocked(timingService.startOfflineAttempt).mockResolvedValue({
+      attempt: runningBlock({ attemptId: 'server-attempt-reload' }),
+      epoch: epochView('server-attempt-reload'),
+    });
+    await act(async () => {
+      navigatorOnline = true;
+      window.dispatchEvent(new Event('online'));
+    });
+    await act(async () => {
+      await result.current.sendNow();
+    });
+
+    expect(timingService.startOfflineAttempt).toHaveBeenCalledTimes(1);
+    const items = await queue.list();
+    expect(items.find((item) => item.id === 'start-reload')).toMatchObject({
+      status: 'APPLIED',
+      serverAttemptId: 'server-attempt-reload',
+    });
+    const mappedPass = items.find((item) => item.id === 'pass-reload');
+    expect(mappedPass).toMatchObject({
+      status: 'APPLIED',
+      attemptId: 'server-attempt-reload',
+      deviceSequence: 1,
+      serverAttemptId: 'server-attempt-reload',
+      serverClockEpochId: 'epoch-server-attempt-reload',
+    });
+    expect(mappedPass?.payload).toMatchObject({
+      attemptId: 'server-attempt-reload',
+      clockEpochId: 'epoch-server-attempt-reload',
+      deviceSequence: 1,
+    });
+  });
+
   it('discards a refused local attempt, keeps its split for deletion and sends neither', async () => {
     navigatorOnline = false;
     const onError = vi.fn();
