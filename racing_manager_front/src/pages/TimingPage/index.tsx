@@ -295,8 +295,8 @@ function surfaceHasAttempt(
  *
  * MANUAL-TIMING-4: the page derives the whole offline report once from the
  * outbox the hook owns and the surface the server confirms (FR-11, FR-12), then
- * hands the same figures to the send queue, to both figures beside the capture
- * controls, to every block header and tile, to the number field and to the
+ * hands the same figures to the send queue, to the three capture figures beside
+ * the controls, to every block header and tile, to the number field and to the
  * record drawer. Nothing here counts an unsent entry as a pass, and the only
  * connection rule the page applies itself is the one no component owns
  * (U-07, F-04). A device whose outbox is volatile states that while it holds an
@@ -438,13 +438,13 @@ export function TimingPage() {
   };
 
   /**
-   * The device outbox as the page reports it. One derivation feeds the two
-   * figures, the send queue, both pending-mark maps and the volatile-storage
-   * guard, so the page total, the send queue and the tiles can never disagree
-   * (FR-11, FR-12, FR-30, FR-37, FR-46, U-08). It is derived here, before the
-   * early returns, because the leave guard below is a hook; the empty surface
-   * stands in only while the real read is absent, and every early return
-   * renders no surface at all.
+   * The device outbox as the page reports it. One derivation feeds the three
+   * capture figures, the send queue, both pending-mark maps and the
+   * volatile-storage guard, so the page total, the send queue and the tiles can
+   * never disagree (S-01, S-04, FR-11, FR-12, FR-30, FR-37, FR-46, U-08). It is
+   * derived here, before the early returns, because the leave guard below is a
+   * hook; the empty surface stands in only while the real read is absent, and
+   * every early return renders no surface at all.
    */
   const offlineView = deriveTimingOfflineView(
     capture.queueItems,
@@ -1031,7 +1031,7 @@ export function TimingPage() {
                   <Typography.Text
                     type={offlineView.totals.hasUnsent ? 'warning' : 'secondary'}
                   >
-                    {`Не отправлено: ${offlineView.totals.unsentEntries} · из них отметок: ${offlineView.totals.pendingMarks}`}
+                    {`Не отправлено: ${offlineView.totals.unsentEntries} · Отправляется: ${offlineView.totals.sendingEntries} · Ожидают отправки: ${offlineView.totals.waitingEntries} · из них отметок: ${offlineView.totals.pendingMarks}`}
                   </Typography.Text>
                   <Typography.Text
                     type={capture.isOnline ? 'secondary' : 'warning'}
@@ -1099,6 +1099,7 @@ export function TimingPage() {
                 onAssign={assignSelectedSplit}
                 onAnonymousSplit={captureAnonymousSplit}
                 pendingCount={offlineView.totals.unsentEntries}
+                outcomes={capture.captureOutcomes}
               />
             </Col>
             <Col
@@ -1186,7 +1187,11 @@ export function TimingPage() {
           canOperate={canOperate}
           workstationInstanceId={workstationInstanceId}
           isOnline={capture.isOnline}
-          unsentEntries={offlineView.totals.unsentEntries}
+          unresolvedEntries={
+            recordAttemptId === null
+              ? 0
+              : (capture.unresolvedByAttempt?.[recordAttemptId] ?? 0)
+          }
           onClose={() => {
             setRecordAttemptId(null);
           }}

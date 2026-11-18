@@ -40,10 +40,13 @@ import type {
  * The closure, forced closure, cancellation and the correction entry points
  * are online-only (U-07, F-04, FR-43, FR-48): while the page has no connection
  * they are not offered and «Нужна связь с сервером.» is stated in words. A
- * closure also waits for this device's own unsent entries, so the closure
- * family is disabled with a sentence naming the count while any remain (S-08,
- * FR-24, FR-47). The record, its tables and both reasons stay readable either
- * way, and both reasons can hold at once (E-21, E-22).
+ * closure also waits for the captures of THIS attempt that still have no final
+ * answer, so the closure family is disabled with a sentence naming that count
+ * while any remain (S-08, E-13, F-10, FR-27). The count is this attempt's own:
+ * an unresolved capture of another running attempt of the same event is
+ * counted by the page, never by this gate (E-24, F-15, FR-43). The record, its
+ * tables and both reasons stay readable either way, and both reasons can hold
+ * at once (E-21, E-22).
  */
 
 const STATE_LABELS: Record<TimingAttemptState, string> = {
@@ -83,10 +86,12 @@ interface CorrectionState {
 const OFFLINE_REASON = 'Нужна связь с сервером.';
 
 /**
- * A closure waits while this device still owes the server entries (S-08,
- * FR-24, FR-47). The count is named so the referee knows what to send first.
+ * A closure waits while this attempt still has captures with no final answer
+ * (S-08, E-13, F-10, FR-27). The count is named so the referee knows what must
+ * settle first, and it never includes another attempt's captures (E-24, F-15,
+ * FR-43).
  */
-function closureUnsentReason(count: number): string {
+function closureUnresolvedReason(count: number): string {
   return `Завершение ждёт отправки: неотправленных записей — ${count}. Сначала отправьте их на сервер.`;
 }
 
@@ -112,8 +117,14 @@ export interface AttemptRecordDrawerProps {
   workstationInstanceId: string;
   /** False while the page has no server answer path; defaults to online (FR-43). */
   isOnline?: boolean;
-  /** Unsent entries of this device; a closure waits for them (FR-24). */
-  unsentEntries?: number;
+  /**
+   * Captures accepted by this device for THIS attempt that have no final
+   * answer; a closure waits for them (S-08, E-13, F-10, FR-27). Unresolved
+   * captures of another running attempt of the same event belong to the page
+   * totals and to the transfer gate only — they never block this closure and
+   * never appear in its count (E-24, F-15, FR-43). Defaults to 0.
+   */
+  unresolvedEntries?: number;
   onClose: () => void;
   /** Called after every successful mutation so the surface refreshes its reads. */
   onChanged: () => void;
@@ -159,7 +170,7 @@ export function AttemptRecordDrawer({
   canOperate,
   workstationInstanceId,
   isOnline = true,
-  unsentEntries = 0,
+  unresolvedEntries = 0,
   onClose,
   onChanged,
 }: AttemptRecordDrawerProps) {
@@ -180,12 +191,14 @@ export function AttemptRecordDrawer({
   const [actionError, setActionError] = useState<string | null>(null);
   const [correction, setCorrection] = useState<CorrectionState | null>(null);
 
-  const unsentCount = wholeCount(unsentEntries);
+  const unresolvedCount = wholeCount(unresolvedEntries);
   // Closure, forced closure, cancellation and every correction are online-only
-  // (U-07, F-04, FR-43, FR-48); a closure additionally waits for the entries
-  // this device still owes the server (S-08, FR-24, FR-47).
+  // (U-07, F-04, FR-43, FR-48); a closure additionally waits for the captures
+  // of this attempt that have no final answer (S-08, E-13, F-10, FR-27).
+  // Another attempt's unresolved captures are not this gate's input (E-24,
+  // F-15, FR-43).
   const onlineOnlyWithheld = !isOnline;
-  const closureWaitsForUnsent = unsentCount > 0;
+  const closureWaitsForUnresolved = unresolvedCount > 0;
 
   const describeParticipant = (
     enrollmentId: string | null,
@@ -210,8 +223,8 @@ export function AttemptRecordDrawer({
       setActionError(OFFLINE_REASON);
       return;
     }
-    if (action === 'COMPLETE' && closureWaitsForUnsent) {
-      setActionError(closureUnsentReason(unsentCount));
+    if (action === 'COMPLETE' && closureWaitsForUnresolved) {
+      setActionError(closureUnresolvedReason(unresolvedCount));
       return;
     }
     setBusyAction(action);
@@ -255,14 +268,14 @@ export function AttemptRecordDrawer({
   // the closure family for an operator or administrator (S-08, F-04).
   const showsOfflineReason =
     onlineOnlyWithheld && (canOperate || canAdminister);
-  const showsUnsentClosureReason =
-    closureWaitsForUnsent &&
+  const showsUnresolvedClosureReason =
+    closureWaitsForUnresolved &&
     record !== undefined &&
     record.state === 'RUNNING' &&
     (canOperate || canAdminister);
 
   // The action row is offered online only, and the closure family additionally
-  // waits for the entries this device still owes the server (S-08, F-04).
+  // waits for this attempt's unresolved captures (S-08, E-13, F-10, FR-27).
   const offersCaptureActions =
     canOperate && record?.state === 'RUNNING' && !onlineOnlyWithheld;
   const offersStartCorrection =
@@ -545,11 +558,11 @@ export function AttemptRecordDrawer({
             />
           ) : null}
 
-          {showsOfflineReason || showsUnsentClosureReason ? (
+          {showsOfflineReason || showsUnresolvedClosureReason ? (
             <Space direction="vertical" size={2}>
-              {showsUnsentClosureReason ? (
+              {showsUnresolvedClosureReason ? (
                 <Typography.Text type="warning" style={{ fontSize: 12 }}>
-                  {closureUnsentReason(unsentCount)}
+                  {closureUnresolvedReason(unresolvedCount)}
                 </Typography.Text>
               ) : null}
               {showsOfflineReason ? (
@@ -566,7 +579,7 @@ export function AttemptRecordDrawer({
                 <Button
                   type="primary"
                   loading={busyAction === 'COMPLETE'}
-                  disabled={busyAction !== null || closureWaitsForUnsent}
+                  disabled={busyAction !== null || closureWaitsForUnresolved}
                   onClick={() => {
                     void runAttemptAction('COMPLETE');
                   }}
@@ -598,14 +611,14 @@ export function AttemptRecordDrawer({
               <>
                 <Button
                   danger
-                  disabled={busyAction !== null || closureWaitsForUnsent}
+                  disabled={busyAction !== null || closureWaitsForUnresolved}
                   onClick={() => setCorrection({ mode: 'FORCE_COMPLETE' })}
                 >
                   Завершить принудительно
                 </Button>
                 <Button
                   danger
-                  disabled={busyAction !== null || closureWaitsForUnsent}
+                  disabled={busyAction !== null || closureWaitsForUnresolved}
                   onClick={() => setCorrection({ mode: 'CANCEL_ATTEMPT' })}
                 >
                   Отменить хронометраж

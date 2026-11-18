@@ -377,13 +377,16 @@ describe('AttemptRecordDrawer gating', () => {
 
 const OFFLINE_REASON = 'Нужна связь с сервером.';
 
-/** The statement the drawer must make before a closure that waits (S-08, FR-24). */
-function closureUnsentReason(count: number): string {
+/**
+ * The statement the drawer must make before a closure that waits for this
+ * attempt's captures (S-08, E-13, F-10, FR-27).
+ */
+function closureUnresolvedReason(count: number): string {
   return `Завершение ждёт отправки: неотправленных записей — ${count}. Сначала отправьте их на сервер.`;
 }
 
 describe('AttemptRecordDrawer online-only gates', () => {
-  it('keeps closure, forced closure and cancellation offered while online with no unsent entry', async () => {
+  it('keeps closure, forced closure and cancellation offered while online with no unresolved capture', async () => {
     renderDrawer({ canAdminister: true, canOperate: true });
 
     const complete = (await screen.findByRole('button', {
@@ -407,9 +410,13 @@ describe('AttemptRecordDrawer online-only gates', () => {
     expect(screen.queryByText(/Завершение ждёт отправки/)).toBeNull();
   });
 
-  it('withholds a closure while this device has unsent entries and names the count', async () => {
+  it('withholds a closure while this attempt has unresolved captures and names the count', async () => {
     const clock = formatTimingClock('2026-11-13T09:01:00.000Z');
-    renderDrawer({ canAdminister: true, canOperate: true, unsentEntries: 3 });
+    renderDrawer({
+      canAdminister: true,
+      canOperate: true,
+      unresolvedEntries: 3,
+    });
 
     const complete = (await screen.findByRole('button', {
       name: 'Завершить хронометраж',
@@ -426,9 +433,9 @@ describe('AttemptRecordDrawer online-only gates', () => {
     expect(cancelAttempt.disabled).toBe(true);
 
     // The reason is stated in words with the count, before the closure control.
-    expect(screen.getByText(closureUnsentReason(3))).not.toBeNull();
+    expect(screen.getByText(closureUnresolvedReason(3))).not.toBeNull();
     const text = document.body.textContent ?? '';
-    expect(text.indexOf(closureUnsentReason(3))).toBeLessThan(
+    expect(text.indexOf(closureUnresolvedReason(3))).toBeLessThan(
       text.indexOf('Завершить хронометраж'),
     );
 
@@ -486,16 +493,16 @@ describe('AttemptRecordDrawer online-only gates', () => {
     expect(screen.queryByText(/Завершение ждёт отправки/)).toBeNull();
   });
 
-  it('states both reasons while offline with unsent entries', async () => {
+  it('states both reasons while offline with unresolved captures', async () => {
     renderDrawer({
       canAdminister: true,
       canOperate: true,
       isOnline: false,
-      unsentEntries: 2,
+      unresolvedEntries: 2,
     });
 
     expect(await screen.findByText(OFFLINE_REASON)).not.toBeNull();
-    expect(screen.getByText(closureUnsentReason(2))).not.toBeNull();
+    expect(screen.getByText(closureUnresolvedReason(2))).not.toBeNull();
     expect(
       screen.queryByRole('button', { name: 'Завершить хронометраж' }),
     ).toBeNull();
@@ -518,14 +525,14 @@ describe('AttemptRecordDrawer online-only gates', () => {
             canAdminister: true,
             canOperate: true,
             isOnline: false,
-            unsentEntries: 2,
+            unresolvedEntries: 2,
           })}
         />
       </QueryClientProvider>,
     );
 
     expect(await screen.findByText(OFFLINE_REASON)).not.toBeNull();
-    expect(screen.getByText(closureUnsentReason(2))).not.toBeNull();
+    expect(screen.getByText(closureUnresolvedReason(2))).not.toBeNull();
     expect(
       screen.queryByRole('button', { name: 'Завершить хронометраж' }),
     ).toBeNull();
@@ -537,7 +544,7 @@ describe('AttemptRecordDrawer online-only gates', () => {
             canAdminister: true,
             canOperate: true,
             isOnline: true,
-            unsentEntries: 1,
+            unresolvedEntries: 1,
           })}
         />
       </QueryClientProvider>,
@@ -548,7 +555,7 @@ describe('AttemptRecordDrawer online-only gates', () => {
     }) as HTMLButtonElement;
     expect(stillWaiting.disabled).toBe(true);
     expect(screen.queryByText(OFFLINE_REASON)).toBeNull();
-    expect(screen.getByText(closureUnsentReason(1))).not.toBeNull();
+    expect(screen.getByText(closureUnresolvedReason(1))).not.toBeNull();
 
     view.rerender(
       <QueryClientProvider client={client}>
@@ -557,7 +564,7 @@ describe('AttemptRecordDrawer online-only gates', () => {
             canAdminister: true,
             canOperate: true,
             isOnline: true,
-            unsentEntries: 0,
+            unresolvedEntries: 0,
           })}
         />
       </QueryClientProvider>,
@@ -576,6 +583,110 @@ describe('AttemptRecordDrawer online-only gates', () => {
     ).toBe(false);
     expect(screen.queryByText(OFFLINE_REASON)).toBeNull();
     expect(screen.queryByText(/Завершение ждёт отправки/)).toBeNull();
+  });
+});
+
+describe('AttemptRecordDrawer per-attempt closure gate', () => {
+  it('disables closure, forced closure and cancellation and names the attempt count', async () => {
+    renderDrawer({
+      canAdminister: true,
+      canOperate: true,
+      unresolvedEntries: 2,
+    });
+
+    const complete = (await screen.findByRole('button', {
+      name: 'Завершить хронометраж',
+    })) as HTMLButtonElement;
+    const force = screen.getByRole('button', {
+      name: 'Завершить принудительно',
+    }) as HTMLButtonElement;
+    const cancelAttempt = screen.getByRole('button', {
+      name: 'Отменить хронометраж',
+    }) as HTMLButtonElement;
+
+    expect(complete.disabled).toBe(true);
+    expect(force.disabled).toBe(true);
+    expect(cancelAttempt.disabled).toBe(true);
+
+    // The sentence names this attempt's count and no other attempt's captures.
+    expect(screen.getByText(closureUnresolvedReason(2))).not.toBeNull();
+    expect(screen.queryByText(closureUnresolvedReason(3))).toBeNull();
+
+    fireEvent.click(force);
+    fireEvent.click(cancelAttempt);
+
+    expect(
+      screen.queryByText('Принудительное завершение хронометража'),
+    ).toBeNull();
+    expect(screen.queryByText('Отмена хронометража')).toBeNull();
+    expect(timingService.forceCompleteAttempt).not.toHaveBeenCalled();
+    expect(timingService.cancelAttempt).not.toHaveBeenCalled();
+  });
+
+  it('enables the closure family at zero, because the page decides what zero means for another attempt', async () => {
+    renderDrawer({
+      canAdminister: true,
+      canOperate: true,
+      unresolvedEntries: 0,
+    });
+
+    const complete = (await screen.findByRole('button', {
+      name: 'Завершить хронометраж',
+    })) as HTMLButtonElement;
+    const force = screen.getByRole('button', {
+      name: 'Завершить принудительно',
+    }) as HTMLButtonElement;
+    const cancelAttempt = screen.getByRole('button', {
+      name: 'Отменить хронометраж',
+    }) as HTMLButtonElement;
+
+    expect(complete.disabled).toBe(false);
+    expect(force.disabled).toBe(false);
+    expect(cancelAttempt.disabled).toBe(false);
+    expect(screen.queryByText(/Завершение ждёт отправки/)).toBeNull();
+  });
+
+  it('renders and gates as zero when the count is omitted', async () => {
+    const { props } = renderDrawer({ canAdminister: true, canOperate: true });
+
+    expect(props.unresolvedEntries).toBeUndefined();
+    expect(await screen.findByText('Иван Петров')).not.toBeNull();
+
+    const complete = screen.getByRole('button', {
+      name: 'Завершить хронометраж',
+    }) as HTMLButtonElement;
+    const force = screen.getByRole('button', {
+      name: 'Завершить принудительно',
+    }) as HTMLButtonElement;
+    const cancelAttempt = screen.getByRole('button', {
+      name: 'Отменить хронометраж',
+    }) as HTMLButtonElement;
+
+    expect(complete.disabled).toBe(false);
+    expect(force.disabled).toBe(false);
+    expect(cancelAttempt.disabled).toBe(false);
+    expect(screen.queryByText(/Завершение ждёт отправки/)).toBeNull();
+  });
+
+  it('shows the server refusal message with the count the server sees', async () => {
+    vi.mocked(timingService.completeAttempt).mockRejectedValue(
+      new Error('Завершение невозможно: неотправленных записей — 5.'),
+    );
+    const { props } = renderDrawer({
+      canOperate: true,
+      unresolvedEntries: 0,
+    });
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Завершить хронометраж' }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toBe(
+        'Завершение невозможно: неотправленных записей — 5.',
+      );
+    });
+    expect(props.onChanged).not.toHaveBeenCalled();
   });
 });
 

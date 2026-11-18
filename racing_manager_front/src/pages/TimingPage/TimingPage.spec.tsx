@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { useSessionQuery } from '../../features/auth/useSessionQuery';
@@ -9,6 +9,7 @@ import type { TimingQueueItem } from '../../features/timing/timingQueue';
 import { timingService } from '../../features/timing/timingService';
 import type {
   TimingAnonymousSplitView,
+  TimingCaptureOutcomeEvent,
   TimingCategoryBlockView,
   TimingPassView,
   TimingStageGroupView,
@@ -54,9 +55,18 @@ vi.mock('../../features/timing/AttemptRecordDrawer', () => ({
   AttemptRecordDrawer: (props: AttemptRecordDrawerProps) => {
     drawerProps.current.push(props);
     if (!props.open) return null;
+    // The drawer's own closure gate, reduced to the one fact the page feeds it:
+    // this attempt's unresolved captures (S-08, E-13, F-10, FR-27).
+    const unresolved = props.unresolvedEntries ?? 0;
     return (
       <div>
         <p>{props.title} {props.attemptId}</p>
+        {unresolved === 0 ? null : (
+          <p>{`Завершение ждёт отправки: неотправленных записей — ${unresolved}. Сначала отправьте их на сервер.`}</p>
+        )}
+        <button type="button" disabled={unresolved > 0}>
+          Завершить хронометраж
+        </button>
         <button type="button" onClick={props.onClose}>
           Закрыть запись
         </button>
@@ -460,10 +470,12 @@ describe('TimingPage', () => {
     expect(screen.getByText('Захват у этого устройства')).not.toBeNull();
     expect(screen.getByText(/Захват: это устройство/)).not.toBeNull();
     expect(screen.getByText(/Устройство: ws-1/)).not.toBeNull();
-    // The figure is derived from the outbox: two entries are unsent and one of
-    // them is a mark (FR-11, FR-46).
+    // The figures are derived from the outbox: two entries are unsent, none of
+    // them is on its way, and one of them is a mark (S-01, FR-11, FR-46).
     expect(
-      screen.getByText('Не отправлено: 2 · из них отметок: 1'),
+      screen.getByText(
+        'Не отправлено: 2 · Отправляется: 0 · Ожидают отправки: 2 · из них отметок: 1',
+      ),
     ).not.toBeNull();
     expect(screen.getByText('Связь есть')).not.toBeNull();
     expect(screen.getByText('Ход хронометража')).not.toBeNull();
@@ -1751,14 +1763,18 @@ describe('TimingPage', () => {
     ).not.toBeNull();
   });
 
-  it('withholds capture transfer and hands the drawer the outbox figures', async () => {
+  it('withholds capture transfer and gives the drawer no device-wide count', async () => {
     sessionStorage.setItem('timing-workstation-instance', 'ws-1');
     mockSession(['REFEREE']);
     mockEvent();
     getSurface.mockResolvedValue(
       surface({ captureWorkstationInstanceId: 'ws-1' }),
     );
-    mockCapture({ queueItems: [queueItem()], isOnline: false });
+    mockCapture({
+      queueItems: [queueItem()],
+      unresolvedByAttempt: { 'attempt-1': 1 },
+      isOnline: false,
+    });
 
     renderPage();
 
@@ -1768,11 +1784,13 @@ describe('TimingPage', () => {
       ),
     ).not.toBeNull();
     expect(screen.getByText('Нужна связь с сервером.')).not.toBeNull();
-    // The drawer reads the same two facts as the controls, so its online-only
-    // family and its closure wait agree with the page (FR-24, FR-43).
+    // The transfer gate stays device-wide (FR-30), so it reads the page total.
+    // The drawer reads its own attempt only (FR-27, FR-43), and it has no
+    // attempt open here, so the device-wide 1 never reaches it.
     const drawer = drawerProps.current.at(-1);
     expect(drawer?.isOnline).toBe(false);
-    expect(drawer?.unsentEntries).toBe(1);
+    expect(drawer?.attemptId).toBeNull();
+    expect(drawer?.unresolvedEntries).toBe(0);
   });
 
   it('names the page unsent total in the status of an unsent press', async () => {
@@ -1948,7 +1966,9 @@ describe('TimingPage', () => {
     renderPage();
 
     expect(
-      await screen.findByText('Не отправлено: 1 · из них отметок: 1'),
+      await screen.findByText(
+        'Не отправлено: 1 · Отправляется: 0 · Ожидают отправки: 1 · из них отметок: 1',
+      ),
     ).not.toBeNull();
     expect(
       screen.queryByText(
@@ -1956,5 +1976,242 @@ describe('TimingPage', () => {
       ),
     ).toBeNull();
     expect(fireBeforeUnload()).toBe(false);
+  });
+
+  it('states the unsent, sending and waiting figures from one outbox snapshot', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+            participants: roster(6),
+          }),
+        ],
+      }),
+    );
+    // Six captures of this device are unresolved: two have an outstanding
+    // delivery and four still wait as recorded (S-01, FR-32).
+    mockCapture({
+      queueItems: roster(6).map((participant, index) =>
+        queueItem({
+          id: `queue-${index + 1}`,
+          deviceSequence: index + 1,
+          status: index < 2 ? 'SENT' : 'PENDING',
+          payload: {
+            kind: 'NUMBER',
+            attemptId: 'attempt-1',
+            startNumber: participant.startNumber,
+            clientCapturedAt: '2026-11-13T09:00:01.000Z',
+            clientElapsedMs: 1000,
+            clockEpochId: 'epoch-1',
+            workstationInstanceId: 'ws-1',
+            deviceSequence: index + 1,
+          },
+        }),
+      ),
+    });
+
+    renderPage();
+
+    const figures = await screen.findByText(
+      'Не отправлено: 6 · Отправляется: 2 · Ожидают отправки: 4 · из них отметок: 6',
+    );
+    // The three figures read one snapshot, so the unsent total is exactly the
+    // sending and waiting captures together (S-01, S-04).
+    const [, unsent, sending, waiting] =
+      /Не отправлено: (\d+) · Отправляется: (\d+) · Ожидают отправки: (\d+)/.exec(
+        figures.textContent ?? '',
+      ) ?? [];
+    expect(Number(unsent)).toBe(6);
+    expect(Number(sending)).toBe(2);
+    expect(Number(waiting)).toBe(4);
+    expect(Number(unsent)).toBe(Number(sending) + Number(waiting));
+    // The accepted mark figure stays where it was, so the page and the tiles
+    // still agree about every pending mark (S-04).
+    expect(figures.textContent ?? '').toContain('из них отметок: 6');
+    // A sending capture is a figure, not a queue row: the send queue lists the
+    // four waiting captures only (S-02).
+    expect(screen.getAllByText('не отправлено')).toHaveLength(4);
+  });
+
+  it('keeps a refused outcome visible through the field after a later press', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+        ],
+      }),
+    );
+    // The hook's answer feed holds the refusal of an earlier press. The field
+    // never awaited that answer, because the press was accepted before it
+    // arrived, so the feed is the only way the referee can still see it
+    // (AD-7, E-12, FR-33).
+    const refused: TimingCaptureOutcomeEvent = {
+      id: 'queue-earlier',
+      subject: '№ 14',
+      tone: 'refused',
+      reason: 'Участник уже прошёл все круги',
+      at: '2026-11-13T09:00:02.000Z',
+    };
+    mockCapture({
+      captureOutcomes: [refused],
+      resolveCandidates: vi.fn(() => [
+        {
+          enrollmentId: 'enrollment-1',
+          attemptId: 'attempt-1',
+          label: '17 Иван Петров',
+        },
+      ]),
+      commitNumber: vi.fn(
+        (): Promise<TimingCaptureOutcome> =>
+          Promise.resolve({ status: 'ACCEPTED' }),
+      ),
+    });
+
+    renderPage();
+
+    const field = (await screen.findByLabelText(
+      'Номер участника',
+    )) as HTMLInputElement;
+    expect(
+      await screen.findByText('Отклонено: № 14 — Участник уже прошёл все круги'),
+    ).not.toBeNull();
+
+    // A later press is accepted and leaves the refusal where it was: only the
+    // referee dismisses it (S-09, E-12, F-06).
+    fireEvent.change(field, { target: { value: '17' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+
+    expect(
+      await screen.findByText('№ 17 — принято, ожидает подтверждения'),
+    ).not.toBeNull();
+    expect(
+      screen.getByText('Отклонено: № 14 — Участник уже прошёл все круги'),
+    ).not.toBeNull();
+  });
+
+  it('gates each attempt closure on its own unresolved captures only', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+          block({
+            gender: 'F',
+            state: 'RUNNING',
+            attemptId: 'attempt-2',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+        ],
+      }),
+    );
+    // One unresolved capture in each block: the device holds two, but neither
+    // closure may count the neighbour's capture (E-24, F-15, FR-43).
+    mockCapture({ unresolvedByAttempt: { 'attempt-1': 1, 'attempt-2': 1 } });
+
+    renderPage();
+
+    const menCard = (await screen.findByText('5 км · Мужчины')).closest(
+      '.ant-card',
+    ) as HTMLElement;
+    fireEvent.click(within(menCard).getByRole('button', { name: /Запись/ }));
+
+    expect(await screen.findByText('Запись категории attempt-1')).not.toBeNull();
+    expect(
+      screen.getByText(
+        'Завершение ждёт отправки: неотправленных записей — 1. Сначала отправьте их на сервер.',
+      ),
+    ).not.toBeNull();
+    expect(
+      (
+        screen.getByRole('button', {
+          name: 'Завершить хронометраж',
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Закрыть запись' }));
+    await waitFor(() =>
+      expect(screen.queryByText('Запись категории attempt-1')).toBeNull(),
+    );
+
+    const womenCard = (screen.getByText('5 км · Женщины') as HTMLElement).closest(
+      '.ant-card',
+    ) as HTMLElement;
+    fireEvent.click(within(womenCard).getByRole('button', { name: /Запись/ }));
+
+    expect(await screen.findByText('Запись категории attempt-2')).not.toBeNull();
+    expect(
+      screen.getByText(
+        'Завершение ждёт отправки: неотправленных записей — 1. Сначала отправьте их на сервер.',
+      ),
+    ).not.toBeNull();
+    expect(screen.queryByText(/неотправленных записей — 2/)).toBeNull();
+  });
+
+  it('enables the closure of an attempt with every capture settled', async () => {
+    sessionStorage.setItem('timing-workstation-instance', 'ws-1');
+    mockSession(['REFEREE']);
+    mockEvent();
+    getSurface.mockResolvedValue(
+      surface({
+        captureWorkstationInstanceId: 'ws-1',
+        categories: [
+          block({
+            state: 'RUNNING',
+            attemptId: 'attempt-1',
+            officialStartedAt: '2026-11-13T09:00:00.000Z',
+            elapsedMs: 65_000,
+            startControlEnabled: false,
+          }),
+        ],
+      }),
+    );
+    // Every capture of the device has its final answer, so the attempt's
+    // closure has nothing to wait for (S-08, E-13, F-10).
+    mockCapture({ unresolvedByAttempt: {} });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Запись/ }));
+
+    expect(await screen.findByText('Запись категории attempt-1')).not.toBeNull();
+    expect(screen.queryByText(/Завершение ждёт отправки/)).toBeNull();
+    expect(
+      (
+        screen.getByRole('button', {
+          name: 'Завершить хронометраж',
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
   });
 });
