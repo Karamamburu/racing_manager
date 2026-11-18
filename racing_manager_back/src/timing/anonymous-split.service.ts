@@ -9,6 +9,7 @@ import {
   normalizeReason,
 } from './timing.domain';
 import type {
+  AssignAnonymousSplitByCaptureDto,
   AssignAnonymousSplitDto,
   CancelAnonymousSplitDto,
   QuickUndoTimingSplitDto,
@@ -131,6 +132,55 @@ export class AnonymousSplitService {
       );
     }
     return toEventQueueEntry(row, labels);
+  }
+
+  /**
+   * Bind a split that was local when the assignment was recorded. The split
+   * identity is resolved from the applied event capture receipt of the same
+   * event, workstation and capture sequence; the accepted assignment then runs
+   * with the same candidate, N and refusal rules.
+   *
+   * A missing receipt is a definitive refusal: the device should have delivered
+   * the split before the assignment (the delivery order rule). Nothing is
+   * written in that case.
+   */
+  async assignByCapture(
+    authentikId: string | undefined,
+    eventId: string,
+    dto: AssignAnonymousSplitByCaptureDto,
+    idempotencyKey?: string,
+  ): Promise<TimingPassView> {
+    await this.rolesService.assertHasAnyRole(
+      authentikId,
+      TIMING_OPERATE_ROLE_CODES,
+    );
+    const receipt = await this.repository.findEventReceiptForDevice(
+      eventId,
+      dto.workstationInstanceId,
+      dto.captureDeviceSequence,
+    );
+    if (
+      receipt === null ||
+      receipt.status !== 'APPLIED' ||
+      receipt.splitId === null
+    ) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'Созданная отсечка не найдена по квитанции захвата. Повторите после отправки отсечки.',
+        {
+          eventId,
+          captureDeviceSequence: dto.captureDeviceSequence,
+          receiptStatus: receipt?.status ?? null,
+        },
+      );
+    }
+    return this.assign(
+      authentikId,
+      eventId,
+      receipt.splitId,
+      dto,
+      idempotencyKey,
+    );
   }
 
   /**

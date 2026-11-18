@@ -8,6 +8,8 @@
  */
 
 import {
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsISO8601,
@@ -18,10 +20,12 @@ import {
   Min,
   MinLength,
   ValidateIf,
+  ValidateNested,
   registerDecorator,
   type ValidationArguments,
   type ValidationOptions,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import {
   TIMING_CAPTURE_KINDS,
   TIMING_GENDERS,
@@ -141,6 +145,85 @@ export class StartTimingAttemptDto {
   /** Client wall clock of the press, ISO-8601. */
   @IsISO8601()
   clientStartedAt!: string;
+}
+
+/** One frozen roster row of an offline Start snapshot. */
+export class OfflineRosterEntryDto {
+  @IsUUID()
+  enrollmentId!: string;
+
+  @IsUUID()
+  registrationId!: string;
+
+  /** The event-unique number at the press; absent for an excluded row. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  startNumber?: number | null;
+
+  @IsString()
+  sectionId!: string;
+
+  @IsInt()
+  @Min(1)
+  requiredLaps!: number;
+
+  /** The press-time exclusion, for example `EXISTING_OUTCOME`. */
+  @IsOptional()
+  @IsString()
+  excludedReason?: string | null;
+
+  /** The existing result outcome of an excluded row, when the client has it. */
+  @IsOptional()
+  @IsIn(['FINISHED', 'DNS', 'DNF', 'DSQ'])
+  initialOutcome?: 'FINISHED' | 'DNS' | 'DNF' | 'DSQ' | null;
+}
+
+/**
+ * `POST /events/:eventId/timing/attempts/offline-start` — a category Start
+ * created on the device while the page has no connection.
+ */
+export class StartOfflineTimingAttemptDto {
+  @IsUUID()
+  startId!: string;
+
+  @IsInt()
+  @Min(1)
+  formatId!: number;
+
+  @IsIn(TIMING_GENDERS)
+  gender!: TimingGender;
+
+  /** The workstation that pressed Start and must hold the capture lock. */
+  @IsString()
+  @MinLength(1)
+  workstationInstanceId!: string;
+
+  /** The offline press instant, used as the attempt's official start. */
+  @IsISO8601()
+  officialStartedAt!: string;
+
+  /** The frozen roster as the device saw it at the press. */
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => OfflineRosterEntryDto)
+  roster!: OfflineRosterEntryDto[];
+
+  /** The device's local attempt identity, resolved by the client mapping. */
+  @IsString()
+  @MinLength(1)
+  localAttemptId!: string;
+
+  /** The device's local clock epoch identity, resolved by the client mapping. */
+  @IsString()
+  @MinLength(1)
+  localClockEpochId!: string;
+
+  /** The Start's place in the device's press order; audit only. */
+  @IsInt()
+  @Min(1)
+  deviceSequence!: number;
 }
 
 /** `POST /events/:eventId/timing/heat-attempts` — the Start press of one heat. */
@@ -291,6 +374,17 @@ export class CancelAnonymousSplitDto {
   @IsString()
   @MinLength(1)
   reason!: string;
+}
+
+/**
+ * `POST /events/:eventId/timing/splits/assign-by-capture` — bind a split that
+ * was local when the assignment was recorded, resolved from its capture receipt.
+ */
+export class AssignAnonymousSplitByCaptureDto extends AssignAnonymousSplitDto {
+  /** The split's event capture sequence. */
+  @IsInt()
+  @Min(1)
+  captureDeviceSequence!: number;
 }
 
 /** `PATCH /events/:eventId/timing/passes/:passId/official-time`; `targetType` picks the start or the pass. */

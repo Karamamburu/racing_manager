@@ -22,7 +22,8 @@ import {
   type AgeCategory,
 } from '../events/age-groups';
 import { CATEGORY_FINISHED_MESSAGE } from '../events/category-finish';
-import { isPastCompletedEvent } from '../events/event-status';
+import { isPastCompletedEvent, toEventIsoDate } from '../events/event-status';
+import { toMoscowDateOnly } from '../time/moscow-time';
 import type { ResultResponse } from '../results/results.service';
 import {
   AnonymousSplitService,
@@ -58,10 +59,12 @@ import type {
   CorrectOfficialTimeDto,
   ForceCompleteTimingAttemptDto,
   ForceReleaseCaptureDto,
+  OfflineRosterEntryDto,
   OpenClockEpochDto,
   QuickUndoTimingPassDto,
   RebindTimingPassDto,
   StartHeatAttemptDto,
+  StartOfflineTimingAttemptDto,
   StartTimingAttemptDto,
   TakeCaptureDto,
   TransferCaptureDto,
@@ -159,6 +162,9 @@ export const EXCLUDED_HEAT_WITHDRAWN = 'WITHDRAWN';
 
 /** Why a heat slot is out of timing: it already holds a heat time. */
 export const EXCLUDED_EXISTING_HEAT_TIME = 'EXISTING_HEAT_TIME';
+
+/** How far a device wall clock may run ahead of the server on an offline Start. */
+const OFFLINE_START_CLOCK_SKEW_MS = 5 * 60_000;
 
 /** A stage whose heats are not formed yet offers no Start control. */
 const HEAT_STAGE_PENDING_MESSAGE = 'Заезды этапа ещё не сформированы.';
@@ -636,6 +642,256 @@ export class TimingService {
       now,
     );
     return { attempt: block, epoch: toClockEpochView(epoch, now) };
+  }
+
+  /**
+   * `POST /events/:eventId/timing/attempts/offline-start`: create a category
+   * attempt from the snapshot a device recorded while it had no connection.
+   *
+   * The press instant is the attempt's official start and its first epoch is
+   * anchored at zero there, so every pass and split captured offline keeps its
+   * elapsed value. The roster is the snapshot the device froze at the press; the
+   * server validates its membership and N but does not replace it with the
+   * current active set, so a later withdrawal or number change does not rewrite
+   * the timed field. A repeated `Idempotency-Key` is replayed by the interceptor
+   * and never reaches this method.
+   */
+  async startOfflineAttempt(
+    authentikId: string | undefined,
+    eventId: string,
+    dto: StartOfflineTimingAttemptDto,
+  ): Promise<StartTimingAttemptResult> {
+    await this.rolesService.assertHasAnyRole(
+      authentikId,
+      TIMING_OPERATE_ROLE_CODES,
+    );
+    const now = new Date();
+    const context = await this.loadEventContext(eventId, now);
+    const start = context.startsById.get(dto.startId);
+    if (start === undefined || !start.formatIds.includes(dto.formatId)) {
+      throw timingError(
+        TimingErrorCode.NOT_FOUND,
+        'Такой категории нет в мероприятии.',
+        { startId: dto.startId, formatId: dto.formatId, gender: dto.gender },
+      );
+    }
+    const pressInstant = new Date(dto.officialStartedAt);
+    if (!Number.isFinite(pressInstant.getTime())) {
+      throw timingError(
+        TimingErrorCode.INVALID_STATE,
+        'Некорректное время офлайн-старта.',
+        { officialStartedAt: dto.officialStartedAt },
+      );
+    }
+    const firstRecordableDay = toMoscowDateOnly(
+      toEventIsoDate(context.event.eventDate),
+    );
+    if (
+      pressInstant.getTime() < firstRecordableDay.getTime() ||
+      pressInstant.getTime() > now.getTime() + OFFLINE_START_CLOCK_SKEW_MS
+    ) {
+      throw timingError(
+        TimingErrorCode.INVALID_STATE,
+        'Время офлайн-старта вне допустимого окна мероприятия.',
+        {
+          officialStartedAt: pressInstant.toISOString(),
+          firstRecordableDay: firstRecordableDay.toISOString(),
+          serverNow: now.toISOString(),
+        },
+      );
+    }
+
+    const category = await this.loadCategory(context, {
+      startId: dto.startId,
+      formatId: dto.formatId,
+      gender: dto.gender,
+      rows: enrollmentsForCategory(
+        context,
+        dto.startId,
+        dto.formatId,
+        dto.gender,
+      ),
+    });
+    const snapshotRows = await this.repository.listEnrollmentRowsByIds(
+      eventId,
+      dto.roster.map((entry) => entry.enrollmentId),
+    );
+    const roster = this.buildOfflineRoster(category, dto.roster, snapshotRows);
+    const timeable = roster.filter((row) => row.excludedReason === null);
+    const missingNumbers = timeable.filter((row) => row.startNumber === null);
+    const latestAttempt = category.attempts[0] ?? null;
+    const lock = await this.repository.getCaptureLock(eventId);
+    const refusal = canStartAttempt({
+      eventRecordable: context.eventRecordable,
+      categoryFinished: category.categoryFinished,
+      participantCount: timeable.length,
+      participantsWithoutNumber: missingNumbers.length,
+      previousAttemptStatus: latestAttempt?.status ?? null,
+      captureHeldByThisWorkstation:
+        lock?.workstationInstanceId === dto.workstationInstanceId,
+    });
+    if (refusal !== null) {
+      throw this.startRefusal(refusal, {
+        missingNumbers,
+        holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
+        workstationInstanceId: dto.workstationInstanceId,
+      });
+    }
+
+    const participants = roster.map(toParticipantInput);
+    const actorUserId = await this.requireUserId(authentikId);
+    const { attempt, epoch } = await this.repository.withTransaction(
+      async (tx) => {
+        await this.repository.lockCategory(
+          tx,
+          protocolCategoryKey(eventId, dto.startId, dto.formatId, dto.gender),
+        );
+        const current = await this.repository.findAttemptsForCategory(
+          eventId,
+          dto.startId,
+          dto.formatId,
+          dto.gender,
+          tx,
+        );
+        if (current.some((row) => row.status === 'RUNNING')) {
+          throw this.startRefusal(TimingErrorCode.ATTEMPT_RUNNING, {
+            missingNumbers,
+            holderWorkstationInstanceId: lock?.workstationInstanceId ?? null,
+            workstationInstanceId: dto.workstationInstanceId,
+          });
+        }
+        const latestNumber = await this.repository.findLatestAttemptNumber(
+          tx,
+          eventId,
+          dto.startId,
+          dto.formatId,
+          dto.gender,
+        );
+        const created = await this.repository.createAttempt(tx, {
+          eventId,
+          startId: dto.startId,
+          formatId: dto.formatId,
+          gender: dto.gender,
+          attemptNumber: nextAttemptNumber([latestNumber]),
+          officialStartedAt: pressInstant,
+          clientStartedAt: pressInstant,
+          startedByUserId: actorUserId,
+          participants,
+        });
+        const clockEpoch = await this.repository.createClockEpoch(tx, {
+          attemptId: created.id,
+          workstationInstanceId: dto.workstationInstanceId,
+          officialElapsedAnchorMs: 0,
+          openedByUserId: actorUserId,
+          openedAt: pressInstant,
+        });
+        await this.repository.insertAudit(tx, {
+          attemptId: created.id,
+          actorUserId,
+          action: 'START_OFFLINE',
+          targetType: 'ATTEMPT',
+          targetId: created.id,
+          oldValues: null,
+          newValues: {
+            startId: dto.startId,
+            formatId: dto.formatId,
+            gender: dto.gender,
+            attemptNumber: created.attemptNumber,
+            officialStartedAt: created.officialStartedAt.toISOString(),
+            clientStartedAt: dto.officialStartedAt,
+            participantCount: participants.length,
+            workstationInstanceId: dto.workstationInstanceId,
+            localAttemptId: dto.localAttemptId,
+            localClockEpochId: dto.localClockEpochId,
+            deviceSequence: dto.deviceSequence,
+          },
+          reason: null,
+        });
+        return { attempt: created, epoch: clockEpoch };
+      },
+    );
+
+    const block = await this.buildBlock(
+      context,
+      { ...category, attempts: [attempt, ...category.attempts] },
+      now,
+    );
+    return { attempt: block, epoch: toClockEpochView(epoch, now) };
+  }
+
+  /**
+   * The frozen roster of an offline Start: the snapshot supplies the press-time
+   * number, section, N and exclusion; the server checks membership, the
+   * registration and N. The current active set is not used as the roster, so a
+   * later withdrawal or number change does not rewrite the timed field.
+   */
+  private buildOfflineRoster(
+    category: CategoryContext,
+    entries: readonly OfflineRosterEntryDto[],
+    currentRows: readonly TimingEnrollmentRow[],
+  ): TileSource[] {
+    const byEnrollment = new Map(
+      currentRows.map((row) => [row.enrollmentId, row]),
+    );
+    const seen = new Set<string>();
+    return entries.map((entry) => {
+      if (seen.has(entry.enrollmentId)) {
+        throw timingError(
+          TimingErrorCode.INVALID_STATE,
+          'В составе офлайн-старта повторяется участник.',
+          { enrollmentId: entry.enrollmentId },
+        );
+      }
+      seen.add(entry.enrollmentId);
+      const row = byEnrollment.get(entry.enrollmentId);
+      if (
+        row === undefined ||
+        row.startId !== category.startId ||
+        row.formatId !== category.formatId ||
+        row.gender !== category.gender
+      ) {
+        throw timingError(
+          TimingErrorCode.NOT_FOUND,
+          'Участник офлайн-старта не входит в эту категорию.',
+          { enrollmentId: entry.enrollmentId },
+        );
+      }
+      if (row.registrationId !== entry.registrationId) {
+        throw timingError(
+          TimingErrorCode.INVALID_STATE,
+          'Снимок состава не совпадает с заявкой участника.',
+          {
+            enrollmentId: entry.enrollmentId,
+            registrationId: entry.registrationId,
+          },
+        );
+      }
+      if (entry.requiredLaps !== category.lapCount) {
+        throw timingError(
+          TimingErrorCode.INVALID_STATE,
+          'Снимок состава указывает неверное число кругов.',
+          {
+            enrollmentId: entry.enrollmentId,
+            requiredLaps: entry.requiredLaps,
+            lapCount: category.lapCount,
+          },
+        );
+      }
+      const initialOutcome =
+        entry.initialOutcome ?? row.result?.outcome ?? null;
+      return {
+        enrollmentId: row.enrollmentId,
+        registrationId: row.registrationId,
+        startNumber: entry.startNumber ?? null,
+        fullName: formatPersonName(row.firstName, row.lastName),
+        sectionId: entry.sectionId,
+        requiredLaps: entry.requiredLaps,
+        excludedReason:
+          entry.excludedReason ??
+          (initialOutcome === null ? null : EXCLUDED_EXISTING_OUTCOME),
+        initialOutcome,
+      };
+    });
   }
 
   /**
@@ -1437,9 +1693,13 @@ export class TimingService {
     try {
       const event = await this.repository.findEvent(eventId);
       if (event === null) {
-        throw timingError(TimingErrorCode.NOT_FOUND, 'Мероприятие не найдено.', {
-          eventId,
-        });
+        throw timingError(
+          TimingErrorCode.NOT_FOUND,
+          'Мероприятие не найдено.',
+          {
+            eventId,
+          },
+        );
       }
       if (!isEventRecordable(event, now)) {
         throw timingError(
@@ -3909,16 +4169,12 @@ export class TimingService {
   ): void {
     const latest = attempts[0] ?? null;
     if (attempts.some((attempt) => attempt.status === 'RUNNING')) {
-      throw timingError(
-        TimingErrorCode.ATTEMPT_RUNNING,
-        'Заезд уже идёт.',
-        {
-          classCompetitionId: dto.classCompetitionId,
-          stageId: dto.stageId,
-          heatNumber: dto.heatNumber,
-          previousAttemptId: latest?.id ?? null,
-        },
-      );
+      throw timingError(TimingErrorCode.ATTEMPT_RUNNING, 'Заезд уже идёт.', {
+        classCompetitionId: dto.classCompetitionId,
+        stageId: dto.stageId,
+        heatNumber: dto.heatNumber,
+        previousAttemptId: latest?.id ?? null,
+      });
     }
     if (
       latest !== null &&
@@ -4944,7 +5200,8 @@ function missingReceiptSequences(
     // A pass created by a split assignment carries the assignment's event
     // sequence, not a capture sequence of this attempt. It must not expand the
     // attempt's capture ceiling or look like an unconfirmed capture.
-    if (mark.sourceSplitId !== null && mark.sourceSplitId !== undefined) continue;
+    if (mark.sourceSplitId !== null && mark.sourceSplitId !== undefined)
+      continue;
     highestMark = Math.max(highestMark, mark.deviceSequence);
   }
   for (const receipt of receipts) {

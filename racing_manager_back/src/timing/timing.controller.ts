@@ -23,6 +23,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { SessionAuthGuard } from '../auth/session-auth.guard';
 import { AnonymousSplitService } from './anonymous-split.service';
 import {
+  AssignAnonymousSplitByCaptureDto,
   AssignAnonymousSplitDto,
   BindPendingFinishDto,
   CancelAnonymousSplitDto,
@@ -39,6 +40,7 @@ import {
   QuickUndoTimingSplitDto,
   RebindTimingPassDto,
   StartHeatAttemptDto,
+  StartOfflineTimingAttemptDto,
   StartTimingAttemptDto,
   TakeCaptureDto,
   TransferCaptureDto,
@@ -118,6 +120,26 @@ export class TimingController {
     @Body() dto: StartTimingAttemptDto,
   ): Promise<StartTimingAttemptResult> {
     return this.timingService.startAttempt(req.session?.userSub, eventId, dto);
+  }
+
+  /**
+   * `POST /events/:eventId/timing/attempts/offline-start`: create a category
+   * attempt from the snapshot a device recorded while it had no connection. The
+   * press instant is the official start; a repeated `Idempotency-Key` returns
+   * the same attempt and epoch.
+   */
+  @Post('attempts/offline-start')
+  @HttpCode(HttpStatus.CREATED)
+  startOfflineAttempt(
+    @Req() req: Request,
+    @Param('eventId', uuidPipe) eventId: string,
+    @Body() dto: StartOfflineTimingAttemptDto,
+  ): Promise<StartTimingAttemptResult> {
+    return this.timingService.startOfflineAttempt(
+      req.session?.userSub,
+      eventId,
+      dto,
+    );
   }
 
   /**
@@ -221,6 +243,28 @@ export class TimingController {
       eventId,
       pendingFinishId,
       dto,
+    );
+  }
+
+  /**
+   * `POST /events/:eventId/timing/splits/assign-by-capture`: bind a split that
+   * was local when the assignment was recorded. The server resolves it from the
+   * applied event capture receipt, then applies the accepted assignment. The
+   * static path is declared before `splits/:splitId/assign`.
+   */
+  @Post('splits/assign-by-capture')
+  @HttpCode(HttpStatus.OK)
+  assignSplitByCapture(
+    @Req() req: Request,
+    @Param('eventId', uuidPipe) eventId: string,
+    @Body() dto: AssignAnonymousSplitByCaptureDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<TimingPassView> {
+    return this.anonymousSplitService.assignByCapture(
+      req.session?.userSub,
+      eventId,
+      dto,
+      idempotencyKey,
     );
   }
 
